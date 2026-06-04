@@ -8,3 +8,7 @@ data/
 .env
 .cursor/
 checkpoint.json
+vuln_scraper/scrapers/cnvd/crawler_ng/session_cookies.json
+vuln_scraper/scrapers/cnvd/crawler_ng/captcha.png
+vuln_scraper/scrapers/cnvd/crawler_ng/output.md
+vuln_scraper/scrapers/cnvd/crawler_ng/test_waf.md

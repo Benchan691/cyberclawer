@@ -40,8 +40,6 @@ def test_limit_counts_raw_results(tmp_path) -> None:
         output_file=tmp_path / "high_risk_vulns.json",
         checkpoint_file=tmp_path / "checkpoint.json",
         limit=2,
-        include_cve=True,
-        include_non_cve=False,
         request_delay=0,
         retries=0,
         concurrency=2,
@@ -60,33 +58,6 @@ def test_limit_counts_raw_results(tmp_path) -> None:
     assert client.list_pages_seen == [1]
 
 
-def test_deprecated_attribute_filters_do_not_filter_scrape_results(tmp_path) -> None:
-    client = FakeClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "high_risk_vulns.json",
-        checkpoint_file=tmp_path / "checkpoint.json",
-        limit=2,
-        include_cve=True,
-        include_non_cve=True,
-        attribute_filters=(("details.avd.cve_id", "CVE-2026-10003"),),
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(settings, provider=FakeAvdProvider())._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == [
-        "avd:2026-10001",
-        "avd:2026-10002",
-    ]
-    assert "filters" not in output
-    assert client.list_pages_seen == [1]
-
-
 def test_raw_limit_fetches_detail_only_for_limited_rows(tmp_path) -> None:
     client = FakeClient()
     settings = ScraperSettings(
@@ -94,8 +65,6 @@ def test_raw_limit_fetches_detail_only_for_limited_rows(tmp_path) -> None:
         output_file=tmp_path / "high_risk_vulns.json",
         checkpoint_file=tmp_path / "checkpoint.json",
         limit=1,
-        include_cve=True,
-        include_non_cve=True,
         request_delay=0,
         retries=0,
         concurrency=2,

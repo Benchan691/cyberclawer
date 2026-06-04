@@ -155,10 +155,6 @@ class ScraperRunner:
     async def run(self) -> dict[str, Any]:
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.settings.resume:
-            self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
-            self.records_by_id, self.list_order = _load_existing_output(self.settings.output_file)
-
         browser_fetcher = (
             BrowserHTMLFetcher(
                 headless=self.settings.browser_headless,
@@ -268,9 +264,6 @@ class ScraperRunner:
         selected_ids: list[str] = []
 
         while len(selected_ids) < self.settings.limit:
-            if self.settings.max_pages is not None and page > self.settings.max_pages:
-                self.stop_reason = "limit"
-                break
             if total_pages is not None and page > total_pages:
                 self.stop_reason = "limit"
                 break
@@ -508,8 +501,6 @@ class ScraperRunner:
         selected_ids: list[str] = []
 
         while len(selected_ids) < self.settings.limit:
-            if self.settings.max_pages is not None and page > self.settings.max_pages:
-                break
             if total_pages is not None and page > total_pages:
                 break
 
@@ -568,9 +559,6 @@ class ScraperRunner:
         entries: list[ListEntry],
         selected_count: int,
     ) -> None:
-        if self.settings.list_only:
-            return
-
         targets = self._detail_targets_for_page(entries, selected_count)
         if not targets:
             logger.info("No detail pages to fetch for this page.")
@@ -709,8 +697,6 @@ class ScraperRunner:
             if not self._has_detail(entry.key):
                 if self._detail_url_for_entry(entry) is None:
                     continue
-                if self.settings.max_details is not None and self.detail_fetch_count >= self.settings.max_details:
-                    break
                 targets.append(entry)
                 self.detail_fetch_count += 1
             remaining -= 1
@@ -862,29 +848,6 @@ class ScraperRunner:
             **event,
         }
         self.progress_callback(payload)
-
-
-def _load_existing_output(path: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
-    if not path.exists():
-        return {}, []
-
-    data = json.loads(path.read_text(encoding="utf-8"))
-    records: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for record in data.get("vulnerabilities", []):
-        identity = _record_identity(record)
-        if identity:
-            records[identity] = record
-            order.append(identity)
-    return records, order
-
-
-def _record_identity(record: dict[str, Any]) -> str | None:
-    id_type = record.get("type")
-    code = record.get("code")
-    if id_type and code:
-        return f"{str(id_type).lower()}:{code}"
-    return None
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:

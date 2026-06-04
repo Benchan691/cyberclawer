@@ -102,13 +102,7 @@ class ScraperRetryConfig:
 
 @dataclass(slots=True)
 class ScraperSettings:
-    max_pages: int | None = None
-    max_details: int | None = None
     limit: int = MAX_RESULT_LIMIT
-    include_cve: bool = True
-    include_non_cve: bool = True
-    attribute_filters: tuple[tuple[str, str], ...] = ()
-    sync_enabled: bool = False
     mongo_enabled: bool = False
     mongo_uri: str | None = None
     mongo_database: str | None = None
@@ -116,8 +110,6 @@ class ScraperSettings:
     mongo_config_file: Path | None = DEFAULT_MONGO_CONFIG_FILE
     mongo_conflict: str | None = None
     mongo_interactive: bool = False
-    resume: bool = False
-    list_only: bool = False
     request_delay: float = 1.0
     concurrency: int = 3
     retries: int = DEFAULT_RETRIES
@@ -244,8 +236,6 @@ class ScraperSettings:
 
         if not 1 <= self.limit <= MAX_RESULT_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_RESULT_LIMIT}")
-        if not self.include_cve and not self.include_non_cve:
-            raise ValueError("at least one of include_cve/include_non_cve must be true")
         mongo_config = load_mongo_config(self.mongo_config_file)
         mongo_conflict = self.mongo_conflict or _optional_config_str(mongo_config, "conflict") or "prompt"
 
@@ -253,7 +243,6 @@ class ScraperSettings:
             choices = ", ".join(sorted(MONGO_CONFLICT_MODES))
             raise ValueError(f"mongo_conflict must be one of: {choices}")
 
-        attribute_filters = tuple((str(field), str(value)) for field, value in self.attribute_filters)
         mongo_uri = (
             self.mongo_uri
             or _env("MONGO_URI", legacy="AVD_MONGO_URI")
@@ -274,13 +263,7 @@ class ScraperSettings:
         )
 
         return ScraperSettings(
-            max_pages=self.max_pages,
-            max_details=self.max_details,
             limit=self.limit,
-            include_cve=self.include_cve,
-            include_non_cve=self.include_non_cve,
-            attribute_filters=attribute_filters,
-            sync_enabled=self.sync_enabled,
             mongo_enabled=self.mongo_enabled,
             mongo_uri=mongo_uri,
             mongo_database=mongo_database,
@@ -288,8 +271,6 @@ class ScraperSettings:
             mongo_config_file=self.mongo_config_file,
             mongo_conflict=mongo_conflict,
             mongo_interactive=self.mongo_interactive,
-            resume=self.resume,
-            list_only=self.list_only,
             request_delay=self.request_delay,
             concurrency=self.concurrency,
             retries=self.retries,

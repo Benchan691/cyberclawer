@@ -10,16 +10,6 @@ from .config import MAX_RESULT_LIMIT, default_scrape_settings
 from .filters import validate_limit
 
 
-def _hours_arg(value: str) -> float:
-    try:
-        hours = float(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid hours value: {value!r}") from exc
-    if hours < 1:
-        raise argparse.ArgumentTypeError("hours must be at least 1")
-    return hours
-
-
 def _positive_int_arg(value: str) -> int:
     try:
         parsed = int(value)
@@ -36,21 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="Scrape vulnerability catalogs into MongoDB.",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="command")
-
-    sync_parser = subparsers.add_parser(
-        "sync",
-        help="Periodically sync all scrapers to MongoDB.",
-    )
-    sync_parser.add_argument(
-        "hours",
-        type=_hours_arg,
-        help="Hours between sync cycles (minimum 1).",
-    )
-    sync_parser.add_argument(
-        "--include-manual-verification",
-        action="store_true",
-        help="Include scrapers that require headed manual browser verification.",
-    )
 
     run_parser = subparsers.add_parser(
         "run",
@@ -143,20 +118,6 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(2)
 
     _configure_logging()
-
-    if args.command == "sync":
-        from .sync import run_periodic_sync
-
-        try:
-            settings = default_scrape_settings().normalized()
-        except ValueError as exc:
-            parser.error(str(exc))
-        run_periodic_sync(
-            args.hours,
-            settings,
-            include_manual_verification=args.include_manual_verification,
-        )
-        return
 
     if args.command == "run":
         from .providers import get_provider

@@ -20,7 +20,7 @@ pip install -e '.[avd]'
 ```
 
 For scrapers that need a real browser or browser-assisted cookie capture
-(Hikvision, Juniper; AVD as fallback), install the optional browser extra:
+(Hikvision; AVD as fallback), install the optional browser extra:
 
 ```bash
 pip install -e '.[browser,avd]'
@@ -35,8 +35,8 @@ provider also accepts a raw Cookie header through `AVD_COOKIE`,
 `AVD_COOKIES`, or `ALIYUN_AVD_COOKIE`. Browser fallback still applies when the
 redirect response is blocked. Use `--no-browser-fallback` only when HTTP +
 quickjs clearance is sufficient on your network.
-Hikvision and Juniper render through the browser
-path. CVE sync calls the NVD API directly. Cisco PSIRT, CNNVD, and Qianxin sync
+Hikvision renders through the browser path. Juniper uses the Coveo search API
+(JSON). CVE sync calls the NVD API directly. Cisco PSIRT, CNNVD, and Qianxin sync
 call JSON APIs directly. Huawei SA sync calls Huawei's JSON advisory endpoint;
 set `HUAWEI_SA_X_CK` and `HUAWEI_SA_CSRF_TOKEN` if the endpoint requires browser
 session tokens. CNVD uses HTTP with an optional `cnvd` extra
@@ -49,7 +49,7 @@ All scrapers use one MongoDB database, with one collection per scraper.
 | Scraper folder | MongoDB collection | Ingest CLI |
 | --- | --- | --- |
 | `vuln_scraper/scrapers/avd/` | `avd` | `python scrape.py run avd --limit 100` / `python scrape.py tui` |
-| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `python scrape.py tui` / `python scrape.py sync <hours>` |
+| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `python scrape.py tui` / `python scrape.py catch-up` |
 | `vuln_scraper/scrapers/cve/` | `cve` | same |
 | `vuln_scraper/scrapers/cisco/` | `cisco` | same |
 | `vuln_scraper/scrapers/zeroday/` | `zeroday` | same |
@@ -127,12 +127,6 @@ Interactive scrape, choosing scraper and amount:
 
 ```bash
 python scrape.py tui
-```
-
-Periodic sync for every registered scraper, in a foreground loop:
-
-```bash
-python scrape.py sync 3
 ```
 
 Catch up every provider: scrape and sync once per iteration until MongoDB overlap,
@@ -311,10 +305,10 @@ and passes them to httpx—no cookie JSON file is required. List and detail page
 are synced into the `cnvd` MongoDB collection; Mongo sync stops at the first
 stored flaw. To authenticate and scrape in one step, run
 `python vuln_scraper/scrapers/cnvd/crawler_ng/getter.py --data-dir data --limit 100`.
-Juniper advisories are scraped from the browser-rendered
+Juniper advisories are ingested from the Coveo search API behind the
 [Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories).
-The list parser reads the rendered Coveo/Quantic result links and follows those
-article slug URLs for detail pages. Mongo sync stops at the first stored advisory.
+List and detail requests POST to Coveo; HTML parsers remain as a fallback when
+JSON is unavailable. Mongo sync stops at the first stored advisory.
 Ransomware.live victims are ingested from the
 [API PRO](https://api-pro.ransomware.live/) `/victims/recent` endpoint. Set
 `RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY`; the scraper sends it as
@@ -338,4 +332,3 @@ client-credentials token from Cisco. The shorter `CISCO_CLIENT_ID`,
 `CISCO_CLIENT_KEY`, and `CISCO_CLIENT_SECRET` names are also accepted. These can
 be exported in the shell or placed in a project `.env` file (loaded automatically
 when you run `python scrape.py` or `vuln-scrape`).
-# cyberclawer

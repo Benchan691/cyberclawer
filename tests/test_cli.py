@@ -10,30 +10,6 @@ def test_cli_without_subcommand_has_no_command() -> None:
     assert args.command is None
 
 
-def test_cli_parses_sync_hours() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["sync", "3"])
-
-    assert args.command == "sync"
-    assert args.hours == 3.0
-    assert not args.include_manual_verification
-
-
-def test_cli_parses_sync_manual_verification_flag() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["sync", "3", "--include-manual-verification"])
-
-    assert args.command == "sync"
-    assert args.include_manual_verification
-
-
-def test_cli_rejects_sync_hours_below_one() -> None:
-    parser = build_parser()
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["sync", "0.5"])
-
-
 def test_cli_parses_tui_subcommand() -> None:
     parser = build_parser()
     args = parser.parse_args(["tui"])
@@ -95,24 +71,6 @@ def test_main_tui_dispatches(monkeypatch) -> None:
     main(["tui"])
 
     assert called["tui"]
-
-
-def test_main_sync_dispatches(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_periodic(hours: float, settings, *, include_manual_verification: bool = False) -> None:
-        captured["hours"] = hours
-        captured["settings"] = settings
-        captured["include_manual_verification"] = include_manual_verification
-
-    monkeypatch.setattr("vuln_scraper.sync.run_periodic_sync", fake_periodic)
-
-    main(["sync", "3", "--include-manual-verification"])
-
-    assert captured["hours"] == 3.0
-    assert captured["settings"].mongo_enabled is True
-    assert captured["settings"].browser_fallback is False
-    assert captured["include_manual_verification"] is True
 
 
 def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:
