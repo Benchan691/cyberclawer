@@ -43,6 +43,15 @@ class CNVDProvider:
             raise ValueError(f"invalid CNVD flaw identifier: {identity_display!r}")
         return f"{DETAIL_URL}/CNVD-{quote(code, safe='')}"
 
+    def detail_url_for_entry(self, entry: ListEntry) -> str | None:
+        detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
+        links = detail.get("reference_links")
+        if isinstance(links, list):
+            for link in links:
+                if isinstance(link, str) and link.strip():
+                    return link.strip()
+        return None
+
     def parse_list(self, html: str, *, page: int) -> ListPage:
         return parse_flaw_list(html, page=page, provider=self.key, source_url=self.source_url)
 

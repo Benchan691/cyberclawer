@@ -13,16 +13,29 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-For scrapers that need a real browser (Aliyun AVD, Hikvision, Juniper), install the optional
-browser extra:
+For Aliyun AVD HTTP scraping (sigchl redirect bypass via quickjs), install:
 
 ```bash
-pip install -e '.[browser]'
+pip install -e '.[avd]'
+```
+
+For scrapers that need a real browser or browser-assisted cookie capture
+(Hikvision, Juniper; AVD as fallback), install the optional browser extra:
+
+```bash
+pip install -e '.[browser,avd]'
 ```
 
 HKCERT, zero-day.cz, GovCERT.HK,
 InfoSec, Splunk, and Palo Alto Networks advisories are server-rendered HTML and
-do not use browser fallback. Hikvision and Juniper render through the browser
+do not use browser fallback. Aliyun AVD solves the `sigchl` challenge with
+quickjs on each list and detail URL, follows the generated redirect, then parses
+the cleared HTML. List row links from `tbody` are used as detail targets. The
+provider also accepts a raw Cookie header through `AVD_COOKIE`,
+`AVD_COOKIES`, or `ALIYUN_AVD_COOKIE`. Browser fallback still applies when the
+redirect response is blocked. Use `--no-browser-fallback` only when HTTP +
+quickjs clearance is sufficient on your network.
+Hikvision and Juniper render through the browser
 path. CVE sync calls the NVD API directly. Cisco PSIRT, CNNVD, and Qianxin sync
 call JSON APIs directly. Huawei SA sync calls Huawei's JSON advisory endpoint;
 set `HUAWEI_SA_X_CK` and `HUAWEI_SA_CSRF_TOKEN` if the endpoint requires browser
@@ -85,7 +98,7 @@ work), `mongodb.toml`, then built-in defaults. The `[mongodb.collections]` table
 maps each scraper to its collection inside the configured database.
 
 `scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
-the combined error log filename. Precedence is explicit `ScraperSettings` values,
+the combined run log filename. Precedence is explicit `ScraperSettings` values,
 then `[scrapers.<provider>]`, then `[scrapers.defaults]`, then built-in defaults.
 
 ```toml
@@ -103,8 +116,9 @@ session_max_retries = 50
 session_retry_delay = 0.3
 ```
 
-When a scrape records a failure (list/detail errors or an aborted run), a JSON
-line is appended to `{data_dir}/scraper-errors.log` (or the configured name).
+During a scrape, INFO-or-higher logger messages are appended as JSON lines to
+`{data_dir}/scraper-errors.log` (or the configured name). Explicit scrape
+failures also append structured `record_type="failure"` JSON lines.
 Set `error_log = ""` under `[scrapers.defaults]` to disable file logging.
 
 ## Usage
@@ -279,6 +293,13 @@ Hikvision advisories are scraped from [Security Advisory](https://www.hikvision.
 The public page may return a Tencent EdgeOne JavaScript challenge, so this
 provider uses browser rendering by default and stops Mongo sync at the first
 stored advisory.
+Aliyun AVD high-risk advisories are scraped from
+[AVD 高危漏洞](https://avd.aliyun.com/high-risk/list). Install `pip install -e '.[avd]'`.
+Each list and detail fetch runs the sigchl inline script in quickjs, follows the
+redirect URL (`timestamp__1384=...`), and parses that HTML. Detail pages use the
+`tbody` row link href when present. Playwright remains a fallback when redirect
+clearance fails. Optional env cookie: `AVD_COOKIE` / `AVD_COOKIES` /
+`ALIYUN_AVD_COOKIE`.
 CNNVD vulnerability notices are ingested from the JSON endpoints behind
 [漏洞通报](https://www.cnnvd.org.cn/home/warn): `homePage/vulWarnList` for newest-first
 lists and `homePage/vulWarnDetail` for advisory bodies. Mongo sync stops at the
@@ -289,11 +310,11 @@ the scraper refreshes session cookies in memory (Jiasule clearance + captcha OCR
 and passes them to httpx—no cookie JSON file is required. List and detail pages
 are synced into the `cnvd` MongoDB collection; Mongo sync stops at the first
 stored flaw. To authenticate and scrape in one step, run
-`python vuln_scraper/cnvd-crawler-ng/getter.py --data-dir data --limit 100`.
+`python vuln_scraper/scrapers/cnvd/crawler_ng/getter.py --data-dir data --limit 100`.
 Juniper advisories are scraped from the browser-rendered
-[Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#sortCriteria=date%20descending&f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories)
-and detail pages under `/s/article/JSA...`. Mongo sync stops at the first stored
-advisory.
+[Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories).
+The list parser reads the rendered Coveo/Quantic result links and follows those
+article slug URLs for detail pages. Mongo sync stops at the first stored advisory.
 Ransomware.live victims are ingested from the
 [API PRO](https://api-pro.ransomware.live/) `/victims/recent` endpoint. Set
 `RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY`; the scraper sends it as

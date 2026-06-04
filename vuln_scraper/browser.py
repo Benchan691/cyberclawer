@@ -343,7 +343,13 @@ class BrowserHTMLFetcher:
             and "cnvd.org.cn" in url
         )
 
+    @staticmethod
+    def _is_cnvd_page(page) -> bool:
+        return "cnvd.org.cn" in str(getattr(page, "url", ""))
+
     async def _cnvd_captcha_present(self, page) -> bool:
+        if not self._is_cnvd_page(page):
+            return False
         try:
             return bool(await page.evaluate(_CAPTCHA_PRESENT_JS))
         except Exception:
@@ -528,6 +534,8 @@ class BrowserHTMLFetcher:
             return False
 
     async def _detect_captcha(self, page) -> dict[str, Any] | None:
+        if not self._is_cnvd_page(page):
+            return None
         try:
             state = await page.evaluate(_CAPTCHA_DETECT_JS)
         except Exception:

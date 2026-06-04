@@ -123,6 +123,8 @@ def test_cnvd_unknown_captcha_is_written_for_labeling(tmp_path) -> None:
     fetcher = BrowserHTMLFetcher(data_dir=tmp_path)
 
     class Page:
+        url = "https://www.cnvd.org.cn/"
+
         async def evaluate(self, script):
             return {"src": src_url}
 
@@ -133,6 +135,19 @@ def test_cnvd_unknown_captcha_is_written_for_labeling(tmp_path) -> None:
     assert raw[image_hash]["answer"] == ""
     assert raw[image_hash]["src_url"] == src_url
     assert raw[image_hash]["seen_count"] == 1
+
+
+def test_fetcher_skips_cnvd_captcha_detection_on_avd_pages(tmp_path) -> None:
+    fetcher = BrowserHTMLFetcher(data_dir=tmp_path)
+
+    class Page:
+        url = "https://avd.aliyun.com/high-risk/list?page=1"
+
+        async def evaluate(self, script):
+            raise AssertionError("CNVD captcha detector should not run for AVD")
+
+    assert _run_async_value(fetcher._detect_captcha(Page())) is None
+    assert _run_async_value(fetcher._cnvd_captcha_present(Page())) is False
 
 
 def _run_async(coro) -> None:
@@ -149,3 +164,21 @@ def _run_async(coro) -> None:
     thread.join()
     if error:
         raise error[0]
+
+
+def _run_async_value(coro):
+    result = []
+    error: list[BaseException] = []
+
+    def target() -> None:
+        try:
+            result.append(asyncio.run(coro))
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+    return result[0]

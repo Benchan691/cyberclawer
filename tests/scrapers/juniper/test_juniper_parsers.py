@@ -23,6 +23,43 @@ def test_parse_juniper_list_extracts_coveo_results() -> None:
     assert first.embedded_detail["source_name"] == "Knowledge"
 
 
+def test_parse_juniper_live_quantic_search_results() -> None:
+    html = """
+    <main>
+      <div>Results 1-10 of 1,365 in 1.28 seconds</div>
+      <c-quantic-result>
+        <c-quantic-result-template>
+          <div class="lgc-bg slds-p-vertical_medium">
+            <span>Knowledge</span>
+            <a href="/s/article/2026-05-Reference-Advisory-Status-of-Copy-Fail-vulnerability-on-Juniper-Products-CVE-2026-31431">
+              JSA108949 : 2026-05 Reference Advisory: Status of Copy Fail vulnerability on Juniper Products (CVE-2026-31431)
+            </a>
+            <span>Security Advisories</span>
+            <span>2026-06-01</span>
+            <p>Article ID:JSA108949 CVSS Score:CVSS: v3.1: 7.8</p>
+          </div>
+        </c-quantic-result-template>
+      </c-quantic-result>
+    </main>
+    """
+
+    page = parse_advisory_list(html, page=1)
+
+    assert page.total_records == 1365
+    assert page.total_pages == 137
+    assert len(page.entries) == 1
+    first = page.entries[0]
+    assert first.key == "juniper:JSA108949"
+    assert first.title == (
+        "2026-05 Reference Advisory: Status of Copy Fail vulnerability on Juniper Products "
+        "(CVE-2026-31431)"
+    )
+    assert first.disclosure_date == "2026-06-01"
+    assert first.embedded_detail["reference_links"] == [
+        "https://supportportal.juniper.net/s/article/2026-05-Reference-Advisory-Status-of-Copy-Fail-vulnerability-on-Juniper-Products-CVE-2026-31431"
+    ]
+
+
 def test_parse_juniper_detail_extracts_article_fields() -> None:
     detail = parse_detail_page((FIXTURES / "detail.html").read_text(encoding="utf-8")).to_dict()
 

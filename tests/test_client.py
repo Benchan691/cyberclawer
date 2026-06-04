@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from vuln_scraper.browser import BrowserFetchResult
 from vuln_scraper.client import ScraperClient, FetchError
 
 
@@ -57,6 +58,31 @@ def test_backoff_scales_with_attempt() -> None:
     assert asyncio.run(run()) == 2.0
 
 
+def test_browser_fetch_cookies_are_reused_in_memory() -> None:
+    client = ScraperClient(delay=0, retries=0)
+    client.browser_fetcher = FakeBrowserFetcher(
+        cookies=[
+            {
+                "name": "aliyungf_tc",
+                "value": "token",
+                "domain": "avd.aliyun.com",
+                "path": "/",
+                "secure": True,
+            }
+        ]
+    )
+
+    async def run() -> str:
+        try:
+            await client._get_with_browser("https://avd.aliyun.com/high-risk/list?page=1")
+            request = client._client.build_request("GET", "https://avd.aliyun.com/high-risk/list?page=1")
+            return request.headers.get("cookie", "")
+        finally:
+            await client.aclose()
+
+    assert asyncio.run(run()) == "aliyungf_tc=token"
+
+
 class FakeHTTPClient:
     def __init__(self, *, status_code: int) -> None:
         self.status_code = status_code
@@ -72,3 +98,16 @@ class FakeHTTPClient:
 
     async def aclose(self) -> None:
         return None
+
+
+class FakeBrowserFetcher:
+    def __init__(self, *, cookies) -> None:
+        self.cookies = cookies
+
+    async def fetch(self, url: str) -> BrowserFetchResult:
+        return BrowserFetchResult(
+            html="<html><table><tr><td>ok</td></tr></table></html>",
+            url=url,
+            status_code=200,
+            cookies=self.cookies,
+        )

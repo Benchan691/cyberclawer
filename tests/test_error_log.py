@@ -1,6 +1,7 @@
 import json
+import logging
 
-from vuln_scraper.error_log import ScraperErrorLog, log_uncaught_provider_error
+from vuln_scraper.error_log import ScraperErrorLog, install_run_log_handler, log_uncaught_provider_error
 
 
 def test_append_writes_json_line(tmp_path) -> None:
@@ -18,6 +19,7 @@ def test_append_writes_json_line(tmp_path) -> None:
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     payload = json.loads(lines[0])
+    assert payload["record_type"] == "failure"
     assert payload["provider"] == "hkcert"
     assert payload["phase"] == "detail"
     assert payload["error"] == "timeout"
@@ -70,3 +72,17 @@ def test_log_uncaught_provider_error(tmp_path) -> None:
     assert payload["provider"] == "cisco"
     assert payload["phase"] == "run"
     assert "RuntimeError" in payload["error"]
+
+
+def test_install_run_log_handler_writes_info_messages(tmp_path) -> None:
+    log_path = install_run_log_handler(tmp_path, "run.log")
+    logger = logging.getLogger("vuln_scraper.test")
+    logger.setLevel(logging.INFO)
+
+    logger.info("hello %s", "world")
+
+    payload = json.loads(log_path.read_text(encoding="utf-8").strip())
+    assert payload["record_type"] == "log"
+    assert payload["level"] == "INFO"
+    assert payload["logger"] == "vuln_scraper.test"
+    assert payload["message"] == "hello world"

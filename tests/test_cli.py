@@ -50,6 +50,7 @@ def test_cli_parses_run_subcommand() -> None:
             "--limit",
             "25",
             "--browser-headed",
+            "--no-browser-fallback",
             "--manual-verification-timeout-seconds",
             "60",
         ]
@@ -59,6 +60,7 @@ def test_cli_parses_run_subcommand() -> None:
     assert args.provider == "cnvd"
     assert args.limit == 25
     assert args.browser_headed
+    assert args.no_browser_fallback
     assert args.manual_verification_timeout_seconds == 60
 
 
@@ -141,3 +143,31 @@ def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:
     assert captured["settings"].browser_headless is False
     assert captured["settings"].manual_verification_timeout_ms == 7000
     assert "cnvd: fetched 1 records" in capsys.readouterr().out
+
+
+def test_main_run_can_disable_provider_browser_fallback(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeScraper:
+        def __init__(self, settings, *, provider=None) -> None:
+            captured["settings"] = settings
+            captured["provider"] = provider
+
+        async def run(self):
+            return {
+                "vulnerabilities": [],
+                "mongo_sync": {
+                    "inserted": 0,
+                    "overwritten": 0,
+                    "skipped": 0,
+                    "conflicts": 0,
+                },
+            }
+
+    monkeypatch.setattr("vuln_scraper.runner.ScraperRunner", FakeScraper)
+
+    main(["run", "avd", "--limit", "1", "--no-browser-fallback"])
+
+    assert captured["provider"].key == "avd"
+    assert captured["provider"].browser_fallback is False
+    assert "avd: fetched 0 records" in capsys.readouterr().out

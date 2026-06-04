@@ -45,6 +45,8 @@ def _entry_from_row(row: Tag, *, provider: str, source_url: str | None) -> ListE
         return None
 
     link = _detail_link(row)
+    if link is None:
+        return None
     cnvd_id = _cnvd_id_from_node(row, link)
     if not cnvd_id:
         return None
@@ -61,7 +63,7 @@ def _entry_from_row(row: Tag, *, provider: str, source_url: str | None) -> ListE
     published_date = _date_from_values(values)
     numeric_values = [_optional_int(value) for value in values]
     counts = [value for value in numeric_values if value is not None]
-    detail_url = urljoin(BASE_URL, link.get("href")) if link and link.get("href") else f"{BASE_URL}/flaw/show/{cnvd_id}"
+    detail_url = urljoin(BASE_URL, link.get("href")) if link and link.get("href") else None
     code = cnvd_id.removeprefix("CNVD-")
 
     return ListEntry(
@@ -81,7 +83,7 @@ def _entry_from_row(row: Tag, *, provider: str, source_url: str | None) -> ListE
             "click_count": counts[0] if len(counts) > 0 else None,
             "comment_count": counts[1] if len(counts) > 1 else None,
             "follow_count": counts[2] if len(counts) > 2 else None,
-            "reference_links": [detail_url],
+            "reference_links": [detail_url] if detail_url else [],
         },
     )
 

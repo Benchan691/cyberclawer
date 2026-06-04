@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.44.0"]
+avd = ["quickjs>=1.0.0", "requests>=2.31.0"]
 cnvd = ["quickjs>=1.0.0", "ddddocr>=1.5.0", "requests>=2.31.0"]
 dev = ["pytest>=8.0.0"]
 

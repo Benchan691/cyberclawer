@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from .browser import BrowserHTMLFetcher
-from .client import ScraperClient, FetchError, looks_like_captcha_gate, looks_like_waf_challenge
+from .client import FetchResult, ScraperClient, FetchError, looks_like_captcha_gate, looks_like_waf_challenge
 from .config import ScraperSettings, error_log_path_for_settings
-from .error_log import ScraperErrorLog
+from .error_log import ScraperErrorLog, install_run_log_handler
 from .cve_backfill import backfill_missing_cves
 from .models import ListEntry
 from .mongo import (
@@ -27,6 +27,35 @@ from .providers import ScraperProvider
 from .scrapers.cve.config import MAX_DATE_WINDOW_DAYS
 
 logger = logging.getLogger(__name__)
+
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / ".cursor" / "debug-120861.log"
+
+
+def _agent_debug_log(
+    location: str,
+    message: str,
+    data: dict[str, Any],
+    *,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "120861",
+            "timestamp": int(datetime.now(UTC).timestamp() * 1000),
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    # #endregion
+
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -121,6 +150,7 @@ class ScraperRunner:
             self.settings.data_dir,
             self.settings.error_log,
         )
+        install_run_log_handler(self.settings.data_dir, self.settings.error_log)
 
     async def run(self) -> dict[str, Any]:
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -422,9 +452,55 @@ class ScraperRunner:
     async def _fetch_provider_html(self, client: ScraperClient, url: str) -> Any:
         if self._uses_cnvd_session():
             return await self._fetch_cnvd_html(client, url)
+        if self.provider.key == "avd":
+            return await self._fetch_avd_html(client, url)
         if self._always_use_browser():
             return await client.get_html(url, force_browser=True)
         return await client.get_html(url)
+
+    @staticmethod
+    def _client_cookies_snapshot(client: ScraperClient) -> list[dict[str, Any]]:
+        cookies: list[dict[str, Any]] = []
+        for cookie in client._client.cookies.jar:
+            if not cookie.name:
+                continue
+            cookies.append(
+                {
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path or "/",
+                }
+            )
+        return cookies
+
+    async def _fetch_avd_html(self, client: ScraperClient, url: str) -> FetchResult:
+        from vuln_scraper.scrapers.avd.h import AVDSigchlError, fetch_via_redirect
+
+        await client.rate_limiter.wait()
+        headers = None
+        request_headers = getattr(self.provider, "request_headers", None)
+        if request_headers is not None:
+            headers = request_headers()
+
+        try:
+            html, final_url, cookies = await asyncio.to_thread(
+                fetch_via_redirect,
+                url,
+                headers=headers,
+                cookies=self._client_cookies_snapshot(client),
+            )
+            client.inject_cookies(cookies)
+            if looks_like_waf_challenge(html) and "<table" not in html.lower():
+                logger.info("AVD redirect fetch still blocked for %s; using browser fallback", url)
+                return await client.get_html(url)
+            return FetchResult(html=html, status_code=200, url=final_url)
+        except ImportError as exc:
+            logger.warning("AVD sigchl unavailable (%s); using standard fetch for %s", exc, url)
+            return await client.get_html(url)
+        except AVDSigchlError as exc:
+            logger.warning("AVD sigchl solve failed for %s: %s", url, exc)
+            return await client.get_html(url)
 
     async def _scrape_matching_records(self, client: ScraperClient) -> None:
         page = 1
@@ -616,7 +692,23 @@ class ScraperRunner:
             if remaining <= 0:
                 break
 
+            # #region agent log
+            _agent_debug_log(
+                "runner.py:_detail_targets_for_page",
+                "detail target check",
+                {
+                    "entry_key": entry.key,
+                    "has_detail": self._has_detail(entry.key),
+                    "embedded_keys": list((entry.embedded_detail or {}).keys())
+                    if isinstance(entry.embedded_detail, dict)
+                    else [],
+                },
+                hypothesis_id="A",
+            )
+            # #endregion
             if not self._has_detail(entry.key):
+                if self._detail_url_for_entry(entry) is None:
+                    continue
                 if self.settings.max_details is not None and self.detail_fetch_count >= self.settings.max_details:
                     break
                 targets.append(entry)
@@ -626,7 +718,10 @@ class ScraperRunner:
         return targets
 
     async def _scrape_detail(self, client: ScraperClient, entry: ListEntry) -> None:
-        url = self.provider.detail_url(entry.display_id)
+        url = self._detail_url_for_entry(entry)
+        if url is None:
+            self.records_by_id[entry.key] = entry.to_record(entry.embedded_detail, detail_url=None)
+            return
         logger.info("Fetching detail %s", entry.key)
         self._emit(phase="detail", identity=entry.key, type=entry.identity.type, code=entry.identity.code)
         try:
@@ -641,6 +736,19 @@ class ScraperRunner:
             else:
                 result = await self._fetch_provider_html(client, url)
                 detail = self.provider.parse_detail(result.html).to_dict()
+            # #region agent log
+            _agent_debug_log(
+                "runner.py:_scrape_detail",
+                "parsed detail fields",
+                {
+                    "entry_key": entry.key,
+                    "detail_keys": sorted(detail.keys()) if isinstance(detail, dict) else [],
+                    "has_cve_id": bool((detail or {}).get("cve_id")),
+                    "has_description": bool((detail or {}).get("description")),
+                },
+                hypothesis_id="C",
+            )
+            # #endregion
             finalize_detail = getattr(self.provider, "finalize_detail", None)
             if finalize_detail is not None:
                 detail = finalize_detail(detail, entry=entry, detail_url=url)
@@ -660,7 +768,7 @@ class ScraperRunner:
                 self.list_order.append(entry.key)
             existing_detail = self.records_by_id.get(entry.key, {}).get("details", {}).get(entry.provider)
             effective_detail = existing_detail if existing_detail is not None else entry.embedded_detail
-            detail_url = self.provider.detail_url(entry.display_id)
+            detail_url = self._detail_url_for_entry(entry)
             self.records_by_id[entry.key] = entry.to_record(effective_detail, detail_url=detail_url)
 
     def _build_output(self) -> dict[str, Any]:
@@ -692,6 +800,12 @@ class ScraperRunner:
         details = self.records_by_id.get(identity, {}).get("details")
         detail = details.get(self.provider.key) if isinstance(details, dict) else None
         return isinstance(detail, dict) and not detail.get("_list_summary")
+
+    def _detail_url_for_entry(self, entry: ListEntry) -> str | None:
+        detail_url_for_entry = getattr(self.provider, "detail_url_for_entry", None)
+        if detail_url_for_entry is not None:
+            return detail_url_for_entry(entry)
+        return self.provider.detail_url(entry.display_id)
 
     def _record_failure(self, identity: str | ListEntry, url: str, error: object, *, phase: str) -> None:
         if isinstance(identity, ListEntry):

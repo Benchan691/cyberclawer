@@ -22,6 +22,10 @@ def test_parse_avd_list_maps_rows_and_pagination() -> None:
     assert first.vuln_type == "CWE-78"
     assert first.disclosure_date == "2026-01-01"
     assert first.status == "CVE PoC"
+    assert first.embedded_detail["_list_summary"] is True
+    assert first.embedded_detail["reference_links"] == [
+        "https://avd.aliyun.com/detail?id=AVD-2026-10001"
+    ]
 
 
 def test_parse_avd_detail_extracts_title_cve_and_danger_level() -> None:

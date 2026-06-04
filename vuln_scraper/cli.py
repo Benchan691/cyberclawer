@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open a visible browser window for browser-backed scrapers.",
     )
     run_parser.add_argument(
+        "--no-browser-fallback",
+        action="store_true",
+        help="Disable browser fallback for browser-backed scrapers and use HTTP/cookies only.",
+    )
+    run_parser.add_argument(
         "--manual-verification-timeout-seconds",
         type=_positive_int_arg,
         default=None,
@@ -160,6 +165,8 @@ def main(argv: list[str] | None = None) -> None:
         try:
             limit = validate_limit(args.limit)
             provider = get_provider(args.provider)
+            if args.no_browser_fallback:
+                provider = replace(provider, browser_fallback=False)
             settings = default_scrape_settings(limit=limit)
             if args.browser_headed:
                 settings = replace(settings, browser_headless=False)

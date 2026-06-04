@@ -24,7 +24,41 @@ def test_parse_cnvd_list_maps_rows_and_pagination() -> None:
     assert first.embedded_detail["click_count"] == 123
     assert first.embedded_detail["comment_count"] == 4
     assert first.embedded_detail["follow_count"] == 5
+    assert first.embedded_detail["reference_links"] == [
+        "https://www.cnvd.org.cn/flaw/show/CNVD-2026-21550"
+    ]
     assert first.to_record(first.embedded_detail)["cve_code"] is None
+
+
+def test_parse_cnvd_list_rejects_rows_without_detail_links() -> None:
+    html = """
+    <table>
+      <tr>
+        <td>Legacy Product CNVD-2010-00001 漏洞</td>
+        <td>中</td>
+        <td>2010-01-01</td>
+      </tr>
+    </table>
+    """
+
+    page = parse_flaw_list(html, page=1)
+
+    assert page.entries == []
+
+
+def test_parse_cnvd_list_rejects_detail_form_rows() -> None:
+    html = """
+    <table>
+      <tr>
+        <td>CNVD编号：</td>
+        <td>CNVD-2010-00001</td>
+      </tr>
+    </table>
+    """
+
+    page = parse_flaw_list(html, page=1)
+
+    assert page.entries == []
 
 
 def test_parse_cnvd_detail_extracts_labeled_fields_links_and_cves() -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -11,6 +10,7 @@ from vuln_scraper.scrapers.juniper.config import BASE_URL, PAGE_SIZE, SOURCE_URL
 
 
 ARTICLE_ID_RE = re.compile(r"\bJSA\d{5,}\b", re.IGNORECASE)
+RESULT_COUNT_RE = re.compile(r"\bResults\s+[\d,]+\s*-\s*[\d,]+\s+of\s+([\d,]+)", re.IGNORECASE)
 DATE_RE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|[A-Z][a-z]+ \d{1,2}, \d{4}")
 
 
@@ -31,7 +31,7 @@ def parse_advisory_list(
             seen.add(entry.identity.code)
 
     total_records = _total_records(parsed) or len(entries)
-    total_pages = math.ceil(total_records / PAGE_SIZE) if total_records else None
+    total_pages = _total_pages(total_records)
     return ListPage(page=page, entries=entries, total_pages=total_pages, total_records=total_records)
 
 
@@ -91,7 +91,16 @@ def _article_id(url: str, text: str) -> str | None:
 
 
 def _container(link: Tag) -> Tag:
-    for selector in (".CoveoResult", ".quantic-result", ".result", "article", "li"):
+    for selector in (
+        "c-quantic-result",
+        "c-quantic-result-template",
+        ".CoveoResult",
+        ".quantic-result",
+        ".result",
+        ".lgc-bg",
+        "article",
+        "li",
+    ):
         if selector.startswith("."):
             parent = link.find_parent(class_=lambda value: value and selector.strip(".") in str(value).split())
         else:
@@ -121,11 +130,20 @@ def _article_type(text: str) -> str:
 
 def _total_records(parsed: BeautifulSoup) -> int | None:
     text = _clean_text(parsed)
-    for pattern in (r"\bof\s+(\d+)\b", r"\b(\d+)\s+results\b", r"\bResults\s+\d+\s*-\s*\d+\s+of\s+(\d+)"):
+    match = RESULT_COUNT_RE.search(text)
+    if match:
+        return int(match.group(1).replace(",", ""))
+    for pattern in (r"\b([\d,]+)\s+results\b", r"\bof\s+([\d,]+)\b"):
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return int(match.group(1))
+            return int(match.group(1).replace(",", ""))
     return None
+
+
+def _total_pages(total_records: int | None) -> int | None:
+    if not total_records:
+        return None
+    return max(1, (total_records + PAGE_SIZE - 1) // PAGE_SIZE)
 
 
 def _first_match(pattern: re.Pattern[str], text: str) -> str | None:

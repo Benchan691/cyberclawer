@@ -24,8 +24,7 @@ class JuniperProvider:
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         first_result = max(0, (max(1, page) - 1) * PAGE_SIZE)
         fragment = (
-            "sortCriteria=date%20descending"
-            "&f-sf_primarysourcename=Knowledge"
+            "f-sf_primarysourcename=Knowledge"
             "&f-sf_articletype=Security%20Advisories"
             f"&firstResult={first_result}"
         )
@@ -36,6 +35,15 @@ class JuniperProvider:
         if not code:
             raise ValueError(f"invalid Juniper advisory identifier: {identity_display!r}")
         return f"{ARTICLE_URL}/{quote(code, safe='')}"
+
+    def detail_url_for_entry(self, entry: ListEntry) -> str | None:
+        detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
+        links = detail.get("reference_links")
+        if isinstance(links, list):
+            for link in links:
+                if isinstance(link, str) and link.strip():
+                    return link.strip()
+        return self.detail_url(entry.display_id)
 
     def parse_list(self, html: str, *, page: int) -> ListPage:
         return parse_advisory_list(html, page=page, provider=self.key, source_url=self.source_url)

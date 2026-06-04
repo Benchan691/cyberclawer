@@ -29,7 +29,7 @@ def parse_high_risk_list(
         if len(cells) < 5:
             continue
 
-        avd_id = _extract_avd_id(cells[0])
+        avd_id, detail_href = _extract_avd_id_and_link(cells[0])
         if not avd_id:
             continue
 
@@ -42,6 +42,10 @@ def parse_high_risk_list(
                 status=_clean_text(cells[4]) or None,
                 provider=provider,
                 source_url=source_url,
+                embedded_detail={
+                    "_list_summary": True,
+                    "reference_links": [detail_href] if detail_href else [],
+                },
             )
         )
 
@@ -57,22 +61,23 @@ def parse_high_risk_list(
     )
 
 
-def _extract_avd_id(cell: Tag) -> str | None:
+def _extract_avd_id_and_link(cell: Tag) -> tuple[str | None, str | None]:
     link = cell.find("a", href=True)
-    if link:
-        href = urljoin(BASE_URL, link["href"])
-        query_id = parse_qs(urlparse(href).query).get("id", [None])[0]
+    detail_href = None
+    if link and link.get("href"):
+        detail_href = urljoin(BASE_URL, link["href"])
+        query_id = parse_qs(urlparse(detail_href).query).get("id", [None])[0]
         if query_id and AVD_ID_RE.fullmatch(query_id):
-            return query_id.upper()
+            return query_id.upper(), detail_href
 
-        match = AVD_ID_RE.search(href)
+        match = AVD_ID_RE.search(detail_href)
         if match:
-            return match.group(0).upper()
+            return match.group(0).upper(), detail_href
 
     match = AVD_ID_RE.search(_clean_text(cell))
     if match:
-        return match.group(0).upper()
-    return None
+        return match.group(0).upper(), detail_href
+    return None, detail_href
 
 
 def _parse_footer_totals(soup: BeautifulSoup) -> tuple[int | None, int | None]:

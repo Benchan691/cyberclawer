@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 _lock = threading.Lock()
+_handler_lock = threading.Lock()
 
 
 class ScraperErrorLog:
@@ -35,6 +38,7 @@ class ScraperErrorLog:
             return
 
         payload = {
+            "record_type": "failure",
             "timestamp": datetime.now(UTC).isoformat(),
             "provider": provider,
             "phase": phase,
@@ -78,3 +82,42 @@ def log_uncaught_provider_error(
         provider=provider,
         error=error,
     )
+
+
+def install_run_log_handler(data_dir: Path, error_log_name: str | None) -> Path | None:
+    if not error_log_name:
+        return None
+    name = Path(error_log_name.strip()).name
+    if not name:
+        return None
+
+    path = Path(data_dir) / name
+    resolved = path.resolve()
+    root = logging.getLogger()
+    with _handler_lock:
+        for handler in root.handlers:
+            if getattr(handler, "_vuln_scraper_log_path", None) == resolved:
+                return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(_JSONLineLogFormatter())
+        handler._vuln_scraper_log_path = resolved  # type: ignore[attr-defined]
+        root.addHandler(handler)
+        if root.getEffectiveLevel() > logging.INFO:
+            root.setLevel(logging.INFO)
+    return path
+
+
+class _JSONLineLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "record_type": "log",
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
