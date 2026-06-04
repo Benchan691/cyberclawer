@@ -1,0 +1,22 @@
+{
+  "advisories": [
+    {
+      "advisoryId": "cisco-sa-foo-123",
+      "advisoryTitle": "Cisco Product Remote Code Execution Vulnerability",
+      "bugIDs": "CSCwa12345,CSCwa99999",
+      "cves": "CVE-2026-12345",
+      "cwe": "CWE-787",
+      "cvssBaseScore": 9.8,
+      "firstPublished": "2026-05-20T15:00:00",
+      "lastUpdated": "2026-05-21T12:30:00",
+      "status": "Final",
+      "version": 1.1,
+      "productNames": "Cisco IOS XE Software,Cisco Catalyst 9000",
+      "publicationUrl": "https://tools.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-foo-123",
+      "cvrfUrl": "https://tools.cisco.com/security/center/contentxml/CiscoSecurityAdvisory/cisco-sa-foo-123/cvrf.xml",
+      "csafUrl": "https://tools.cisco.com/security/center/contentjson/CiscoSecurityAdvisory/cisco-sa-foo-123/csaf.json",
+      "sir": "Critical",
+      "summary": "A vulnerability could allow an unauthenticated remote attacker to execute arbitrary code."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="twitter:data1" content="HIGH">
+  </head>
+  <body>
+    <div id="content">
+      <a href="/">Palo Alto Networks Security Advisories</a> /
+      <a href="">CVE-2026-0265</a>
+      <h2>CVE-2026-0265 PAN-OS: Authentication Bypass with Cloud Authentication Service (CAS) enabled</h2>
+      <div class="sa_summary">
+        <div class="pad rnd bg-blu sa_cvss">
+          <div class="rnd tag CVSS CRITICAL"><span>Urgency HIGHEST</span></div>
+          <a class="rnd tag CVSS HIGH" href="https://www.first.org/cvss/calculator/4.0#CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:U/AU:N/R:U/V:D/RE:M/U:Red" title="CVSS-BT: CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:U/AU:N/R:U/V:D/RE:M/U:Red">Severity 7.2 · HIGH</a>
+        </div>
+        <div class="sa_links pull_right">
+          <span><a class="tag blue" href="https://www.cve.org/CVERecord?id=CVE-2026-0265">CVE</a><a class="tag orange" href="/json/CVE-2026-0265">JSON</a><a class="tag csaf" href="/csaf/CVE-2026-0265">CSAF</a></span>
+          <div><small>Published</small><b><span class="date-tt" data-date="2026-05-13T16:00:00.000Z">2026-05-13</span></b></div>
+          <div><small>Updated</small><b><span class="date-tt" data-date="2026-05-28T21:00:00.000Z">2026-05-28</span></b></div>
+          <div><small>Discovered</small><b>externally</b></div>
+        </div>
+      </div>
+      <h3>Description</h3>
+      <p>An authentication bypass vulnerability in Palo Alto Networks PAN-OS software enables an unauthenticated attacker to bypass authentication controls.</p>
+      <h3>Product Status</h3>
+      <table class="neat card"><tr><th>Versions</th><th>Affected</th><th>Unaffected</th></tr><tr><td>PAN-OS 12.1</td><td>&lt; 12.1.4-h5<br>&lt; 12.1.7</td><td>&gt;= 12.1.4-h5<br>&gt;= 12.1.7</td></tr><tr><td>Prisma Access</td><td>None</td><td>All</td></tr></table>
+      <h3>Required Configuration for Exposure</h3>
+      <p>Customers are impacted if CAS is enabled and attached to a login interface.</p>
+      <h3>Severity: HIGH, Suggested Urgency: HIGHEST</h3>
+      <p>CVSS-BT: 7.2 (CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:U/AU:N/R:U/V:D/RE:M/U:Red)</p>
+      <h3>Exploitation Status</h3>
+      <p>Palo Alto Networks is not aware of any malicious exploitation of this issue.</p>
+      <h3>Weakness Type and Impact</h3>
+      <p><a href="https://cwe.mitre.org/data/definitions/347">CWE-347 Improper Verification of Cryptographic Signature</a></p>
+      <p><a href="https://capec.mitre.org/data/definitions/115">CAPEC-115 Authentication Bypass</a></p>
+      <h3>Solution</h3>
+      <p>Upgrade to a fixed PAN-OS release.</p>
+      <h3>Workarounds and Mitigations</h3>
+      <p>Restrict access to the management interface.</p>
+      <h3>Timeline</h3>
+      <div class="timeline"><div><label><span data-date="2026-05-28T21:00:00.000Z">2026-05-28</span></label><span class="t">Updated fix release timeline.</span></div><div><label><span data-date="2026-05-13T16:00:00.000Z">2026-05-13</span></label><span class="t">Initial Publication.</span></div></div>
+    </div>
+  </body>
+</html>

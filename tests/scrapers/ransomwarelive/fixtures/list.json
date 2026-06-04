@@ -1,0 +1,18 @@
+[
+  {
+    "id": "QWNtZSBIb3NwaXRhbEBsb2NrYml0Mw",
+    "victim": "Acme Hospital",
+    "group": "lockbit3",
+    "attackdate": "2026-05-30",
+    "discovered": "2026-06-02T10:15:00Z",
+    "country": "US",
+    "activity": "Healthcare",
+    "website": "acme.example",
+    "screenshot": "https://images.ransomware.live/screenshots/acme.png",
+    "infostealer": {
+      "employees": 4
+    },
+    "press": "https://news.example/acme-ransomware",
+    "permalink": "https://www.ransomware.live/id/QWNtZSBIb3NwaXRhbEBsb2NrYml0Mw"
+  }
+]

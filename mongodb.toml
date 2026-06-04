@@ -1,0 +1,28 @@
+# MongoDB settings used by scrape and filter terminal workflows.
+# Precedence is: CLI flags > environment variables > this file > built-in defaults.
+
+[mongodb]
+uri = "mongodb://localhost:27017"
+database = "vulnerabilities"
+
+# Conflict handling for existing type/code records in terminal scrape runs:
+# skip, or overwrite.
+conflict = "skip"
+
+[mongodb.collections]
+avd = "avd"
+hkcert = "hkcert"
+cve = "cve"
+cisco = "cisco"
+zeroday = "zeroday"
+govcert = "govcert"
+huawei_sa = "huawei_sa"
+paloalto = "paloalto"
+qianxin = "qianxin"
+ransomwarelive = "ransomwarelive"
+infosec = "infosec"
+splunk = "splunk"
+hikvision = "hikvision"
+cnnvd = "cnnvd"
+cnvd = "cnvd"
+juniper = "juniper"

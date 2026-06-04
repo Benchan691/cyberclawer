@@ -1,0 +1,19 @@
+# Per-scraper HTTP retry/backoff and error-log settings.
+# Precedence: explicit ScraperSettings / CLI > [scrapers.<provider>] > [scrapers.defaults].
+
+[scrapers.defaults]
+retries = 3
+backoff_base = 1.0
+backoff_max = 30.0
+backoff_jitter = 0.4
+error_log = "scraper-errors.log"
+
+[scrapers.cnvd]
+retries = 5
+backoff_base = 2.0
+session_max_retries = 50
+session_retry_delay = 0.3
+
+[scrapers.cve]
+retries = 5
+backoff_base = 2.0

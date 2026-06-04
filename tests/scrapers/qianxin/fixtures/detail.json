@@ -1,0 +1,17 @@
+{
+  "status": 10000,
+  "data": {
+    "id": 1868,
+    "title": "【已复现】Redis Lua 脚本远程代码执行漏洞(CVE-2026-23631)安全风险通告",
+    "author": "QAX CERT",
+    "cover": "https://oss-yg-zzbm.yun.qianxin.com/webportal-image/9044",
+    "category": "风险通告",
+    "digest": "Redis Lua advisory summary.",
+    "read_num": 24,
+    "publish_time": "2026-06-03 15:29:46",
+    "update_time": "2026-06-03 15:30:59",
+    "content": "<div><h1>第一章 安全通告</h1><p>Redis Lua 脚本远程代码执行漏洞(CVE-2026-23631)已公开。</p><h2>二、漏洞概述</h2><p>攻击者可能实现远程代码执行。</p><p>参考链接：https://redis.io/security</p></div>",
+    "next": {"id": 0, "title": ""},
+    "prev": {"id": 1864, "title": "Previous advisory"}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "code": 200,
+  "success": true,
+  "message": "ok",
+  "data": {
+    "total": 3,
+    "records": [
+      {
+        "createUname": "zhangdan",
+        "publishTime": "2026-05-20 14:27:51",
+        "warnName": "【漏洞通报】人工智能重要安全漏洞通报-OpenClaw多个安全漏洞",
+        "warnId": "0f9ea9d7144547dcaf6374acae1c7b97",
+        "contentStr": "OpenClaw advisory summary"
+      },
+      {
+        "createUname": "lixia",
+        "publishTime": "2026-05-14 14:30:56",
+        "warnName": "【漏洞通报】CNNVD关于微软多个安全漏洞的通报",
+        "warnId": "c0f1edb8b3ae4d0fbb65714730d63dde",
+        "contentStr": null
+      }
+    ],
+    "pageIndex": 1,
+    "pageSize": 2
+  }
+}

@@ -1,0 +1,320 @@
+# Vulnerability Bulletin Scrapers
+
+Terminal scrapers ingest vulnerability bulletins into MongoDB, and `mongodb-filter`
+browses, reads, and exports filtered records from the same database. There is no web UI.
+
+## Install
+
+Use Python 3.11 or newer.
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+For scrapers that need a real browser (Aliyun AVD, Hikvision, Juniper), install the optional
+browser extra:
+
+```bash
+pip install -e '.[browser]'
+```
+
+HKCERT, zero-day.cz, GovCERT.HK,
+InfoSec, Splunk, and Palo Alto Networks advisories are server-rendered HTML and
+do not use browser fallback. Hikvision and Juniper render through the browser
+path. CVE sync calls the NVD API directly. Cisco PSIRT, CNNVD, and Qianxin sync
+call JSON APIs directly. Huawei SA sync calls Huawei's JSON advisory endpoint;
+set `HUAWEI_SA_X_CK` and `HUAWEI_SA_CSRF_TOKEN` if the endpoint requires browser
+session tokens. CNVD uses HTTP with an optional `cnvd` extra
+(`quickjs`, `ddddocr`, `requests`) to solve the site gate and persist cookies.
+
+## MongoDB Layout
+
+All scrapers use one MongoDB database, with one collection per scraper.
+
+| Scraper folder | MongoDB collection | Ingest CLI |
+| --- | --- | --- |
+| `vuln_scraper/scrapers/avd/` | `avd` | `python scrape.py run avd --limit 100` / `python scrape.py tui` |
+| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `python scrape.py tui` / `python scrape.py sync <hours>` |
+| `vuln_scraper/scrapers/cve/` | `cve` | same |
+| `vuln_scraper/scrapers/cisco/` | `cisco` | same |
+| `vuln_scraper/scrapers/zeroday/` | `zeroday` | same |
+| `vuln_scraper/scrapers/govcert/` | `govcert` | same |
+| `vuln_scraper/scrapers/huawei_sa/` | `huawei_sa` | same |
+| `vuln_scraper/scrapers/paloalto/` | `paloalto` | same |
+| `vuln_scraper/scrapers/qianxin/` | `qianxin` | same |
+| `vuln_scraper/scrapers/ransomwarelive/` | `ransomwarelive` | same |
+| `vuln_scraper/scrapers/infosec/` | `infosec` | same |
+| `vuln_scraper/scrapers/splunk/` | `splunk` | same |
+| `vuln_scraper/scrapers/hikvision/` | `hikvision` | same |
+| `vuln_scraper/scrapers/cnnvd/` | `cnnvd` | same |
+| `vuln_scraper/scrapers/cnvd/` | `cnvd` | `pip install -e '.[cnvd]'` then `python scrape.py run cnvd --limit 100` |
+| `vuln_scraper/scrapers/juniper/` | `juniper` | same |
+
+`mongodb.toml`:
+
+```toml
+[mongodb]
+uri = "mongodb://localhost:27017"
+database = "vulnerabilities"
+conflict = "prompt"
+
+[mongodb.collections]
+avd = "avd"
+hkcert = "hkcert"
+cve = "cve"
+cisco = "cisco"
+zeroday = "zeroday"
+govcert = "govcert"
+huawei_sa = "huawei_sa"
+paloalto = "paloalto"
+qianxin = "qianxin"
+ransomwarelive = "ransomwarelive"
+infosec = "infosec"
+splunk = "splunk"
+hikvision = "hikvision"
+cnnvd = "cnnvd"
+cnvd = "cnvd"
+juniper = "juniper"
+```
+
+Precedence for connection settings is CLI flags, environment variables
+(`MONGO_URI`, `MONGO_DB`, `MONGO_COLLECTION`; legacy `AVD_MONGO_*` names still
+work), `mongodb.toml`, then built-in defaults. The `[mongodb.collections]` table
+maps each scraper to its collection inside the configured database.
+
+`scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
+the combined error log filename. Precedence is explicit `ScraperSettings` values,
+then `[scrapers.<provider>]`, then `[scrapers.defaults]`, then built-in defaults.
+
+```toml
+[scrapers.defaults]
+retries = 3
+backoff_base = 1.0
+backoff_max = 30.0
+backoff_jitter = 0.4
+error_log = "scraper-errors.log"
+
+[scrapers.cnvd]
+retries = 5
+backoff_base = 2.0
+session_max_retries = 50
+session_retry_delay = 0.3
+```
+
+When a scrape records a failure (list/detail errors or an aborted run), a JSON
+line is appended to `{data_dir}/scraper-errors.log` (or the configured name).
+Set `error_log = ""` under `[scrapers.defaults]` to disable file logging.
+
+## Usage
+
+Interactive scrape, choosing scraper and amount:
+
+```bash
+python scrape.py tui
+```
+
+Periodic sync for every registered scraper, in a foreground loop:
+
+```bash
+python scrape.py sync 3
+```
+
+Catch up every provider: scrape and sync once per iteration until MongoDB overlap,
+then move to the next provider (no sleep between providers):
+
+```bash
+python scrape.py catch-up
+python scrape.py catch-up --limit 200 --max-runs-per-provider 50
+```
+
+Run one scraper once, for example AVD (browser extra recommended) or CNVD (requires the `cnvd` extra):
+
+```bash
+pip install -e '.[browser]'
+python scrape.py run avd --limit 100
+
+pip install -e '.[cnvd]'
+python scrape.py run cnvd --limit 100
+```
+
+Filter and browse records in MongoDB:
+
+```bash
+mongodb-filter
+mongodb-filter --mongo-config mongodb.toml
+mongodb-filter --mongo-collection hkcert
+```
+
+Without `--mongo-collection`, `mongodb-filter` opens a collection picker using
+`[mongodb.collections]`. Filtering stays in the terminal: checkbox fields,
+text-contains fields, paged result browsing, record read (Enter on a result), and
+JSON export (`e` in the TUI — prompts for a filename under `data/`; if the file
+already exists, choose replace or rename).
+
+## Document Shape
+
+Each document is keyed by unique lowercase scraper `type` + provider-native
+`code`, with `_id` such as `avd:2026-42945`,
+`hkcert:suse-linux-kernel-multiple-vulnerabilities_20260601`,
+`huawei_sa:huawei-sa-LKEiSHPVtLPEDF-60937345`, or `cve:2024-3094`. Common fields live at the top level:
+
+- `type`, `code`, `cve_code`, `title`, `disclosure_date`, `status`
+- `source`
+- `details`
+
+Provider-specific fields live under `details.<provider>`.
+
+Aliyun AVD detail fields include `danger_level`, `exploitability`, `patch_status`,
+`description`, `impact_range`, `security_versions`, `solution`, `reference_links`,
+`cwe`, `attack_metrics`, and `affected_software`.
+HKCERT detail fields include `intro`, `note`, `impact`, `systems_affected`,
+`solutions`, `solution_links`, `vulnerability_identifiers`, `bulletin_source`,
+`related_links`, `risk_level`, `release_date`, `last_update_date`, and `views`.
+zero-day.cz detail fields include `advisory`, `vulnerable_component`,
+`cvss_v3_vector`, `cwe`, `description`, `patch_status`, and `reference_links`.
+GovCERT.HK detail fields include `alert_code`, `alert_type`, `published_date`,
+`description`, `affected_systems`, `impact`, `recommendation`,
+`more_information_links`, `tags`, `cve_ids`, and `raw_sections`. Huawei SA records
+preserve the advisory API payload under `details.huawei_sa` and add `cve_ids`
+when non-empty CVE IDs are present in Huawei's `vul` list. Cisco OpenVuln detail fields include `advisory_id`, `advisory_title`, `sir`,
+`first_published`, `last_updated`, `cve_ids`, `bug_ids`, `cwe`,
+`cvss_base_score`, `product_names`, `publication_url`, `summary`, and `raw`.
+Palo Alto Networks detail fields include `advisory_id`, `severity`, `urgency`,
+`cvss_score`, `cvss_vector`, `published_date`, `updated_date`, `products`,
+`product_status`, `weakness`, `impact`, `solution`, `timeline`, `cve_ids`, and
+`raw_sections`.
+Ransomware.live detail fields include `victim`, `group`, `attackdate`,
+`discovered`, `country`, `activity`, `website`, `screenshot`, `infostealer`,
+`press`, `permalink`, and `raw`.
+InfoSec detail fields include `alert_code`, `alert_type`, `published_date`,
+`summary`, `description`, `affected_systems`, `impact`, `recommendation`,
+`more_information_links`, `tags`, `cve_ids`, `raw_sections`, and
+`govcert_detail_url`.
+Splunk detail fields include `advisory_id`, `cve_ids`, `published_date`,
+`last_modified`, `cvss_vector`, `cvss_score`, `cwe`, `bug_ids`,
+`affected_products`, `fixed_versions`, `affected_versions`,
+`affected_components`, `description`, `solution`, `mitigations`,
+`severity_summary`, `packages`, `product_status`, `credit`, and
+`reference_links`.
+CVEs from HKCERT/zero-day.cz/GovCERT.HK/Cisco/Huawei SA/Palo Alto Networks/
+InfoSec/Splunk details are stored as top-level `cve_code` using the normalized
+`YYYY-NNNN` form. Non-CVE bulletins use `cve_code = null`.
+CNVD detail fields include `cnvd_id`, `severity`, `cvss_score`,
+`cvss_vector`, `affected_products`, `cve_ids`, `description`, `solution`,
+`reference_links`, `published_date`, and `raw_fields`.
+
+CVE master records use `type = "cve"`, `code = "YYYY-NNNN"`, `cve_code = null`,
+and store the NVD payload under `details.cve`, including a `raw` copy for
+forward compatibility.
+
+Legacy documents that still have uppercase `type` or `cross_refs` should be
+migrated before relying on filters:
+
+```bash
+PYTHONPATH=. python scripts/migrate_schema_v2.py
+PYTHONPATH=. python scripts/migrate_schema_v2.py --apply
+```
+
+## Development
+
+Scrapers live under:
+
+```text
+vuln_scraper/scrapers/
+  __init__.py
+  avd/
+  cisco/
+  cnnvd/
+  cve/
+  govcert/
+  hikvision/
+  hkcert/
+  huawei_sa/
+  infosec/
+  juniper/
+  cnvd/
+  qianxin/
+  ransomwarelive/
+  splunk/
+  zeroday/
+```
+
+Each scraper owns its URL config, provider, filter fields, and parsers.
+
+Run tests:
+
+```bash
+PYTHONPATH=. uv run pytest -q
+```
+
+## Operational Notes
+
+These scrapers are for personal or research use. Keep conservative request pacing
+and stop if a site returns rate-limit or challenge responses persistently. HKCERT
+bulletin pages are public,
+server-rendered HTML at [Security Bulletin](https://www.hkcert.org/security-bulletin).
+zero-day.cz records are scraped from [Zero-day Vulnerability Database](https://www.zero-day.cz/database/);
+Mongo sync treats that feed as newest-first and stops once it reaches a stored
+record to avoid historical backfill.
+GovCERT.HK security alerts are scraped from [Security Alerts](https://www.govcert.gov.hk/en/alerts.php)
+and use the same newest-first sync stop behavior. Huawei SA advisories are
+retrieved from Huawei's enterprise security advisory JSON endpoint with a POST
+payload equivalent to the standalone Huawei bulletin script.
+InfoSec security alerts are scraped from [Security Alerts and Advisories](https://www.infosec.gov.hk/en/news-events/security-alerts-and-advisories)
+year pages and use linked GovCERT detail pages for full advisory content.
+Palo Alto Networks advisories are scraped from [Security Advisories](https://security.paloaltonetworks.com/)
+and use the same newest-first sync stop behavior.
+Qianxin risk notices are ingested from the JSON endpoints behind
+[漏洞通告](https://ti.qianxin.com/vulnerability/notice-list): `article-notice`
+for newest-first lists and `article-detail` for article HTML. Mongo sync stops
+at the first stored notice.
+Splunk advisories are scraped from [Splunk Security Advisories](https://advisory.splunk.com/).
+The homepage advisory table is newest-first, and detail pages under
+`/advisories/SVD-...` provide CVE, CVSS, CWE, package remediation, product
+status, solution, and severity fields. Mongo sync stops once it reaches a stored
+Splunk advisory.
+Hikvision advisories are scraped from [Security Advisory](https://www.hikvision.com/hk/support/cybersecurity/security-advisory/).
+The public page may return a Tencent EdgeOne JavaScript challenge, so this
+provider uses browser rendering by default and stops Mongo sync at the first
+stored advisory.
+CNNVD vulnerability notices are ingested from the JSON endpoints behind
+[漏洞通报](https://www.cnnvd.org.cn/home/warn): `homePage/vulWarnList` for newest-first
+lists and `homePage/vulWarnDetail` for advisory bodies. Mongo sync stops at the
+first stored notice.
+CNVD flaws are scraped from [漏洞列表](https://www.cnvd.org.cn/flaw/list) over HTTP.
+Install the CNVD gate dependencies with `pip install -e '.[cnvd]'`. On each run
+the scraper refreshes session cookies in memory (Jiasule clearance + captcha OCR)
+and passes them to httpx—no cookie JSON file is required. List and detail pages
+are synced into the `cnvd` MongoDB collection; Mongo sync stops at the first
+stored flaw. To authenticate and scrape in one step, run
+`python vuln_scraper/cnvd-crawler-ng/getter.py --data-dir data --limit 100`.
+Juniper advisories are scraped from the browser-rendered
+[Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#sortCriteria=date%20descending&f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories)
+and detail pages under `/s/article/JSA...`. Mongo sync stops at the first stored
+advisory.
+Ransomware.live victims are ingested from the
+[API PRO](https://api-pro.ransomware.live/) `/victims/recent` endpoint. Set
+`RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY`; the scraper sends it as
+`X-API-KEY`. These can be exported in the shell or placed in a project `.env`
+file. The API PRO
+documentation currently lists a 500,000 requests/month quota per key. Mongo sync
+treats this feed as newest-first and stops once it reaches a stored victim.
+
+The CVE scraper uses the [NVD API 2.0](https://nvd.nist.gov/developers/vulnerabilities).
+Set `NVD_API_KEY` for production syncs. Without a key, NVD's public rate limit is
+much lower; the CVE provider defaults to a six-second request delay and uses
+120-day modified-date windows with NVD's 2,000-result page size. This product
+uses data from the NVD API but is not endorsed or certified by the NVD.
+
+The Cisco scraper uses the [PSIRT OpenVuln API](https://developer.cisco.com/docs/psirt/).
+Cisco requires an access token for every OpenVuln API request. Set
+`CISCO_OPENVULN_TOKEN` to use an existing Bearer token, or set
+`CISCO_OPENVULN_CLIENT_ID` (or `CISCO_OPENVULN_CLIENT_KEY`) and
+`CISCO_OPENVULN_CLIENT_SECRET` so the scraper can obtain and cache an OAuth
+client-credentials token from Cisco. The shorter `CISCO_CLIENT_ID`,
+`CISCO_CLIENT_KEY`, and `CISCO_CLIENT_SECRET` names are also accepted. These can
+be exported in the shell or placed in a project `.env` file (loaded automatically
+when you run `python scrape.py` or `vuln-scrape`).
+# cyberclawer
