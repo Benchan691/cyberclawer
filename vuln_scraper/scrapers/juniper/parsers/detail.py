@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_module
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -168,10 +169,24 @@ def _cve_ids(text: str) -> list[str]:
     return result
 
 
+def strip_html(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = str(text)
+    cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"</p>", "\n\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"</li>", "\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    cleaned = html_module.unescape(cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or None
+
+
 def _lines(value: str | None) -> list[str]:
     if not value:
         return []
-    return [line.strip() for line in value.splitlines() if line.strip()]
+    stripped = strip_html(value) or value
+    return [line.strip() for line in stripped.splitlines() if line.strip()]
 
 
 def _iso_date(value: str | None) -> str | None:

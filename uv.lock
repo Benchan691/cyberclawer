@@ -853,6 +853,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+avd = [
+    { name = "quickjs" },
+    { name = "requests" },
+]
 browser = [
     { name = "playwright" },
 ]
@@ -874,7 +878,9 @@ requires-dist = [
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.44.0" },
     { name = "pymongo", specifier = ">=4.7.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "quickjs", marker = "extra == 'avd'", specifier = ">=1.0.0" },
     { name = "quickjs", marker = "extra == 'cnvd'", specifier = ">=1.0.0" },
+    { name = "requests", marker = "extra == 'avd'", specifier = ">=2.31.0" },
     { name = "requests", marker = "extra == 'cnvd'", specifier = ">=2.31.0" },
 ]
-provides-extras = ["browser", "cnvd", "dev"]
+provides-extras = ["browser", "avd", "cnvd", "dev"]

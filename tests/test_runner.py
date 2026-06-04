@@ -724,8 +724,7 @@ def test_juniper_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     assert output["vulnerabilities"][0]["cve_code"] == "2026-55555"
     assert output["mongo_sync"]["inserted"] == 1
     assert set(collection.documents) == {"juniper:JSA93456", "juniper:JSA93455"}
-    assert client.detail_ids_seen == ["JSA93456"]
-    assert client.force_browser_seen == [True, True]
+    assert client.detail_slugs_seen == ["JSA93456"]
 
 
 def test_cisco_json_provider_uses_bearer_header_and_embeds_detail(tmp_path, monkeypatch) -> None:
@@ -1064,18 +1063,26 @@ class FakeCNVDClient:
 
 class FakeJuniperClient:
     def __init__(self) -> None:
-        self.detail_ids_seen: list[str] = []
-        self.force_browser_seen: list[bool] = []
+        self.detail_slugs_seen: list[str] = []
+        self.list_requests: list[dict] = []
 
-    async def get_html(self, url: str, *, force_browser: bool = False) -> FetchResult:
-        self.force_browser_seen.append(force_browser)
-        parsed = urlparse(url)
-        if parsed.path.startswith("/s/global-search"):
-            return FetchResult(html=juniper_list_html(), status_code=200, url=url)
-
-        code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        self.detail_ids_seen.append(code)
-        return FetchResult(html=juniper_detail_html(code), status_code=200, url=url)
+    async def request_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers=None,
+        json_body=None,
+        data=None,
+    ):
+        self.list_requests.append({"method": method, "url": url, "json": json_body})
+        if json_body and json_body.get("fieldsToInclude"):
+            slug = str(json_body.get("q", "")).split('"')[1] if '"' in str(json_body.get("q", "")) else ""
+            if not slug:
+                slug = "JSA93456"
+            self.detail_slugs_seen.append(slug)
+            return FakeJSONResult(juniper_detail_coveo_payload(slug), url)
+        return FakeJSONResult(juniper_list_coveo_payload(), url)
 
 
 class FakeCiscoClient:
@@ -1592,41 +1599,64 @@ def cnvd_detail_html(code: str) -> str:
     """
 
 
-def juniper_list_html() -> str:
-    return """
-    <section>
-      <div>Results 1 - 3 of 3</div>
-      <div class="CoveoResult">
-        <a class="CoveoResultLink" href="/s/article/JSA93456">JSA93456: Junos OS: New J-Web issue</a>
-        <span>Security Advisories</span><time>2026-05-29</time>
-      </div>
-      <div class="CoveoResult">
-        <a class="CoveoResultLink" href="/s/article/JSA93455">JSA93455: Known Junos issue</a>
-        <span>Security Advisories</span><time>2026-05-22</time>
-      </div>
-      <div class="CoveoResult">
-        <a class="CoveoResultLink" href="/s/article/JSA93454">JSA93454: Older Junos issue</a>
-        <span>Security Advisories</span><time>2026-05-15</time>
-      </div>
-    </section>
-    """
+def juniper_list_coveo_payload() -> dict:
+    return {
+        "totalCount": 3,
+        "results": [
+            {
+                "title": "JSA93456: Junos OS: New J-Web issue",
+                "raw": {
+                    "sfcec_documentid__c": "JSA93456",
+                    "sftitle": "JSA93456: Junos OS: New J-Web issue",
+                    "sfrecordtypename": "Security Advisories",
+                    "sflastpublisheddate": "2026-05-29",
+                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93456",
+                    "sfurlname": "JSA93456",
+                },
+            },
+            {
+                "title": "JSA93455: Known Junos issue",
+                "raw": {
+                    "sfcec_documentid__c": "JSA93455",
+                    "sftitle": "JSA93455: Known Junos issue",
+                    "sfrecordtypename": "Security Advisories",
+                    "sflastpublisheddate": "2026-05-22",
+                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93455",
+                },
+            },
+            {
+                "title": "JSA93454: Older Junos issue",
+                "raw": {
+                    "sfcec_documentid__c": "JSA93454",
+                    "sftitle": "JSA93454: Older Junos issue",
+                    "sfrecordtypename": "Security Advisories",
+                    "sflastpublisheddate": "2026-05-15",
+                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93454",
+                },
+            },
+        ],
+    }
 
 
-def juniper_detail_html(code: str) -> str:
-    return f"""
-    <article>
-      <h1>{code}: Junos OS Security Advisory</h1>
-      <dl>
-        <dt>Article Type</dt><dd>Security Advisories</dd>
-        <dt>Source Name</dt><dd>Knowledge</dd>
-        <dt>Published</dt><dd>2026-05-29</dd>
-      </dl>
-      <p>Detail includes CVE-2026-55555.</p>
-      <h2>Description</h2><p>Detail for {code}.</p>
-      <h2>Product Affected</h2><ul><li>Junos OS</li></ul>
-      <h2>Solution</h2><p>Upgrade Junos OS.</p>
-    </article>
-    """
+def juniper_detail_coveo_payload(slug: str) -> dict:
+    code = slug if slug.upper().startswith("JSA") else "JSA93456"
+    return {
+        "results": [
+            {
+                "title": f"{code}: Junos OS Security Advisory",
+                "raw": {
+                    "sfcec_documentid__c": code,
+                    "sftitle": f"{code}: Junos OS Security Advisory",
+                    "sfrecordtypename": "Security Advisories",
+                    "sflastpublisheddate": "2026-05-29",
+                    "sfcustomer_url__c": f"https://supportportal.juniper.net/s/article/{slug}",
+                    "sfcec_problem__c": f"Detail includes CVE-2026-55555 for {code}.",
+                    "sfcec_product_affected__c": "Junos OS",
+                    "sfcec_solution__c": "Upgrade Junos OS.",
+                },
+            }
+        ]
+    }
 
 
 def fake_mongo_factory(collection: "FakeMongoCollection"):

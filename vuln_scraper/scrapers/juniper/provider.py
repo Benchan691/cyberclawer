@@ -2,22 +2,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.juniper.config import ARTICLE_URL, DEFAULT_COLLECTION, PAGE_SIZE, SEARCH_URL, SOURCE_URL
-from vuln_scraper.scrapers.juniper.parsers.detail import JuniperDetailRecord, parse_detail_page
+from vuln_scraper.scrapers.juniper.coveo import (
+    ARTICLE_RAW_FIELDS,
+    DEFAULT_FACETS,
+    coveo_search_body,
+    coveo_search_url,
+    get_coveo_config,
+)
+from vuln_scraper.scrapers.juniper.parsers.coveo import parse_coveo_detail, parse_coveo_list
+from vuln_scraper.scrapers.juniper.parsers.detail import JuniperDetailRecord
 from vuln_scraper.scrapers.juniper.parsers.list import parse_advisory_list
 
 
-@dataclass(frozen=True, slots=True)
+def _slug_from_detail_url(url: str) -> str:
+    path = urlparse(url).path.rstrip("/")
+    if "/s/article/" not in path:
+        raise ValueError(f"Not a Juniper article URL: {url}")
+    slug = path.split("/s/article/", 1)[-1]
+    if not slug:
+        raise ValueError(f"Missing article slug in URL: {url}")
+    return slug
+
+
+@dataclass(slots=True)
 class JuniperProvider:
     key: str = "juniper"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = True
-    always_use_browser: bool = True
-    content_type: str = "html"
+    browser_fallback: bool = False
+    always_use_browser: bool = False
+    content_type: str = "json"
     default_request_delay: float = 1.5
     stop_on_first_known: bool = True
 
@@ -43,13 +61,62 @@ class JuniperProvider:
             for link in links:
                 if isinstance(link, str) and link.strip():
                     return link.strip()
+        slug = detail.get("slug")
+        if isinstance(slug, str) and slug.strip():
+            return f"{ARTICLE_URL}/{quote(slug.strip(), safe='')}"
         return self.detail_url(entry.display_id)
 
-    def parse_list(self, html: str, *, page: int) -> ListPage:
-        return parse_advisory_list(html, page=page, provider=self.key, source_url=self.source_url)
+    def list_json_request(self, page: int, *, checkpoint: object | None = None) -> dict[str, Any]:
+        cfg = get_coveo_config(page_uri="/s/global-search/@uri")
+        first_result = max(0, (max(1, page) - 1) * PAGE_SIZE)
+        return {
+            "method": "POST",
+            "url": coveo_search_url(cfg),
+            "headers": {
+                "Authorization": f"Bearer {cfg['accessToken']}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            "json": coveo_search_body(
+                first_result=first_result,
+                number_of_results=PAGE_SIZE,
+                facet_filters=list(DEFAULT_FACETS),
+            ),
+        }
 
-    def parse_detail(self, html: str) -> JuniperDetailRecord:
-        return parse_detail_page(html)
+    def detail_json_request(self, entry: ListEntry, *, detail_url: str) -> dict[str, Any]:
+        slug = _slug_from_detail_url(detail_url)
+        cfg = get_coveo_config(page_uri=f"/s/article/{slug}")
+        return {
+            "method": "POST",
+            "url": coveo_search_url(cfg),
+            "headers": {
+                "Authorization": f"Bearer {cfg['accessToken']}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            "json": coveo_search_body(
+                q=f'@sfurlname=="{slug}"',
+                number_of_results=1,
+                fields_to_include=ARTICLE_RAW_FIELDS,
+            ),
+        }
+
+    def parse_list(self, data: object, *, page: int) -> ListPage:
+        if isinstance(data, dict) and "results" in data:
+            return parse_coveo_list(data, page=page, provider=self.key, source_url=self.source_url)
+        if isinstance(data, str):
+            return parse_advisory_list(data, page=page, provider=self.key, source_url=self.source_url)
+        raise TypeError(f"unsupported Juniper list payload: {type(data)!r}")
+
+    def parse_detail(self, data: object) -> JuniperDetailRecord:
+        if isinstance(data, dict) and "results" in data:
+            return parse_coveo_detail(data)
+        if isinstance(data, str):
+            from vuln_scraper.scrapers.juniper.parsers.detail import parse_detail_page
+
+            return parse_detail_page(data)
+        raise TypeError(f"unsupported Juniper detail payload: {type(data)!r}")
 
     def finalize_detail(self, detail: dict[str, Any], *, entry: ListEntry, detail_url: str) -> dict[str, Any]:
         merged = dict(detail)
