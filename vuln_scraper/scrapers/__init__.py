@@ -9,6 +9,7 @@ from vuln_scraper.scrapers.cnnvd import CNNVDProvider
 from vuln_scraper.scrapers.cnvd import CNVDProvider
 from vuln_scraper.scrapers.cve import CVEProvider
 from vuln_scraper.scrapers.govcert import GovCERTProvider
+from vuln_scraper.scrapers.github_advisory import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.hikvision import HikvisionProvider
 from vuln_scraper.scrapers.hkcert import HKCERTProvider
 from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
@@ -46,6 +47,7 @@ PROVIDERS: dict[str, type[ScraperProvider]] = {
     "cisco": CiscoProvider,
     "zeroday": ZeroDayProvider,
     "govcert": GovCERTProvider,
+    "github_advisory": GitHubAdvisoryProvider,
     "huawei_sa": HuaweiSAProvider,
     "paloalto": PaloAltoProvider,
     "qianxin": QianxinProvider,
@@ -60,7 +62,7 @@ PROVIDERS: dict[str, type[ScraperProvider]] = {
 
 
 def provider_keys() -> tuple[str, ...]:
-    return tuple(PROVIDERS.keys())
+    return tuple(sorted(PROVIDERS))
 
 
 def get_provider(key: str) -> ScraperProvider:

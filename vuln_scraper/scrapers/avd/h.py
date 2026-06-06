@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from vuln_scraper.config import configure_requests_session_proxy
 from vuln_scraper.scrapers.avd.config import LIST_URL
 
 DEFAULT_LIST_URL = f"{LIST_URL}?page=1"
@@ -138,9 +139,17 @@ def _iter_inline_scripts(html: str, page_url: str, session: requests.Session, he
             yield page_url, code
 
 
-def solve_redirect_url(url: str, html: str, *, user_agent: str, headers: Mapping[str, str] | None = None) -> str:
+def solve_redirect_url(
+    url: str,
+    html: str,
+    *,
+    user_agent: str,
+    headers: Mapping[str, str] | None = None,
+    proxy_url: str | None = None,
+) -> str:
     hdrs = dict(headers or HEADERS)
     with requests.Session() as session:
+        configure_requests_session_proxy(session, proxy_url)
         for script_url, code in _iter_inline_scripts(html, url, session, hdrs):
             redirect = _run_inline_script(code, script_url, user_agent)
             if redirect:
@@ -183,6 +192,7 @@ def fetch_via_redirect(
     *,
     headers: Mapping[str, str] | None = None,
     cookies: list[dict[str, Any]] | None = None,
+    proxy_url: str | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """
     GET url (challenge), solve sigchl redirect, GET redirect URL.
@@ -192,6 +202,7 @@ def fetch_via_redirect(
     user_agent = hdrs.get("User-Agent") or HEADERS["User-Agent"]
 
     with requests.Session() as session:
+        configure_requests_session_proxy(session, proxy_url)
         _apply_cookies(session, cookies)
         challenge = session.get(url, headers=hdrs, timeout=REQUEST_TIMEOUT)
         challenge.raise_for_status()
@@ -200,6 +211,7 @@ def fetch_via_redirect(
             challenge.text,
             user_agent=user_agent,
             headers=hdrs,
+            proxy_url=proxy_url,
         )
         cleared = session.get(redirect_url, headers=hdrs, timeout=REQUEST_TIMEOUT)
         cleared.raise_for_status()

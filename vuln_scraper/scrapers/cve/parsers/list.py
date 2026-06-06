@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 import json
-import math
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId, normalize_cve_code
 from vuln_scraper.scrapers.cve.config import SOURCE_URL
-from vuln_scraper.scrapers.cve.parsers.detail import english_description, parse_cve_detail
+
+
+@dataclass(frozen=True, slots=True)
+class CVEDeltaEntry:
+    action: str
+    cve_id: str
+    github_link: str | None
+    cve_org_link: str | None
+    date_updated: str | None
+
+    @property
+    def code(self) -> str:
+        normalized = normalize_cve_code(self.cve_id)
+        if normalized is None:
+            raise ValueError(f"invalid CVE identifier: {self.cve_id!r}")
+        return normalized
+
+    @property
+    def identity(self) -> str:
+        return f"cve:{self.code}"
+
+
+@dataclass(frozen=True, slots=True)
+class CVEDeltaBatch:
+    fetch_time: str
+    entries: tuple[CVEDeltaEntry, ...]
 
 
 def parse_cve_list(
@@ -16,68 +42,109 @@ def parse_cve_list(
     provider: str = "cve",
     source_url: str | None = SOURCE_URL,
 ) -> ListPage:
-    payload = _coerce_json(data)
-    if not isinstance(payload, dict):
-        raise ValueError("NVD CVE list response must be a JSON object")
-
-    results_per_page = _optional_int(payload.get("resultsPerPage"))
-    start_index = _optional_int(payload.get("startIndex"))
-    total_records = _optional_int(payload.get("totalResults"))
-    total_pages = (
-        math.ceil(total_records / results_per_page)
-        if total_records is not None and results_per_page
-        else None
-    )
-
+    batches = parse_cve_delta_log(data, after="1970-01-01T00:00:00Z")
     entries: list[ListEntry] = []
-    vulnerabilities = payload.get("vulnerabilities")
-    if isinstance(vulnerabilities, list):
-        for item in vulnerabilities:
-            if isinstance(item, dict) and isinstance(item.get("cve"), dict):
-                entry = entry_from_cve(item["cve"], provider=provider, source_url=source_url)
-                if entry is not None:
-                    entries.append(entry)
+    for batch in reversed(batches):
+        for delta_entry in batch.entries:
+            if delta_entry.action == "deleted":
+                continue
+            entries.append(
+                ListEntry(
+                    identity=VulnerabilityId(type="CVE", code=delta_entry.code),
+                    title=delta_entry.cve_id,
+                    vuln_type=None,
+                    disclosure_date=delta_entry.date_updated,
+                    status=delta_entry.action,
+                    provider=provider,
+                    source_url=source_url,
+                    embedded_detail={
+                        "_list_summary": True,
+                        "_delta_action": delta_entry.action,
+                        "_github_link": delta_entry.github_link,
+                    },
+                )
+            )
 
     return ListPage(
         page=page,
         entries=entries,
-        total_pages=total_pages,
-        total_records=total_records,
-        start_index=start_index,
-        results_per_page=results_per_page,
+        total_pages=1,
+        total_records=len(entries),
+        start_index=0,
+        results_per_page=len(entries),
     )
 
 
-def entry_from_cve(
-    cve: dict[str, Any],
-    *,
-    provider: str = "cve",
-    source_url: str | None = SOURCE_URL,
-) -> ListEntry | None:
-    cve_id = cve.get("id")
-    code = normalize_cve_code(str(cve_id)) if cve_id else None
-    if code is None:
+def parse_cve_delta_log(data: Any, *, after: str) -> list[CVEDeltaBatch]:
+    payload = _coerce_json(data)
+    if not isinstance(payload, list):
+        raise ValueError("CVE delta log must be a JSON array")
+
+    cutoff = parse_cve_datetime(after)
+    batches: list[tuple[datetime, CVEDeltaBatch]] = []
+    for raw_batch in payload:
+        if not isinstance(raw_batch, dict):
+            raise ValueError("CVE delta batch must be a JSON object")
+        fetch_time = _required_text(raw_batch.get("fetchTime"), "delta batch fetchTime")
+        parsed_fetch_time = parse_cve_datetime(fetch_time)
+        if parsed_fetch_time <= cutoff:
+            continue
+
+        entries: list[CVEDeltaEntry] = []
+        for action in ("new", "updated", "deleted"):
+            raw_entries = raw_batch.get(action) or []
+            if not isinstance(raw_entries, list):
+                raise ValueError(f"CVE delta batch {action} must be an array")
+            for raw_entry in raw_entries:
+                if not isinstance(raw_entry, dict):
+                    raise ValueError(f"CVE delta {action} entry must be an object")
+                cve_id = _required_text(raw_entry.get("cveId"), f"CVE delta {action} cveId")
+                if normalize_cve_code(cve_id) is None:
+                    raise ValueError(f"invalid CVE delta identifier: {cve_id!r}")
+                github_link = _optional_text(raw_entry.get("githubLink"))
+                if action != "deleted" and github_link is None:
+                    raise ValueError(f"CVE delta {action} entry {cve_id} has no githubLink")
+                entries.append(
+                    CVEDeltaEntry(
+                        action=action,
+                        cve_id=cve_id,
+                        github_link=github_link,
+                        cve_org_link=_optional_text(raw_entry.get("cveOrgLink")),
+                        date_updated=_optional_text(raw_entry.get("dateUpdated")),
+                    )
+                )
+
+        batches.append(
+            (
+                parsed_fetch_time,
+                CVEDeltaBatch(fetch_time=fetch_time, entries=tuple(entries)),
+            )
+        )
+    return [batch for _, batch in sorted(batches, key=lambda item: item[0])]
+
+
+def parse_cve_datetime(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _required_text(value: Any, field: str) -> str:
+    text = _optional_text(value)
+    if text is None:
+        raise ValueError(f"{field} is required")
+    return text
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
         return None
-
-    detail = parse_cve_detail(cve).to_dict()
-    title = english_description(detail) or str(cve_id)
-    return ListEntry(
-        identity=VulnerabilityId(type="CVE", code=code),
-        title=title,
-        vuln_type=None,
-        disclosure_date=detail.get("published"),
-        status=None,
-        provider=provider,
-        source_url=source_url,
-        embedded_detail=detail,
-    )
-
-
-def _optional_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _coerce_json(data: Any) -> Any:

@@ -14,12 +14,16 @@ TEXT_FIELDS: tuple[str, ...] = (
     "cve_code",
     "title",
     "details.hkcert.intro",
+    "details.hkcert.summary",
     "details.hkcert.note",
     "details.hkcert.impact",
     "details.hkcert.systems_affected",
     "details.hkcert.solutions",
     "details.hkcert.solution_links",
     "details.hkcert.related_links",
+    "details.hkcert.table.name",
+    "details.hkcert.table.impacts",
+    "details.hkcert.table.details",
 )
 
 DYNAMIC_ATTACK_METRICS_PATH = None

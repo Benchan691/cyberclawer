@@ -17,8 +17,6 @@ def provider_caught_up(output: dict) -> bool:
     stop_reason = output.get("stop_reason")
     if stop_reason == "overlap":
         return True
-    if stop_reason == "nvd_window_complete":
-        return True
     source = output.get("source") or {}
     if source.get("provider") == "cve" and output.get("result_count", 0) == 0:
         mongo = output.get("mongo_sync") or {}
@@ -30,10 +28,19 @@ def provider_caught_up(output: dict) -> bool:
 def no_progress(output: dict) -> bool:
     if provider_caught_up(output):
         return False
-    if output.get("result_count", 0) == 0:
-        return True
     mongo = output.get("mongo_sync") or {}
-    if mongo.get("inserted", 0) == 0 and mongo.get("overwritten", 0) == 0:
+    mongo_changed = (
+        mongo.get("inserted", 0) > 0
+        or mongo.get("overwritten", 0) > 0
+        or mongo.get("deleted", 0) > 0
+    )
+    if output.get("result_count", 0) == 0:
+        return not mongo_changed
+    if (
+        mongo.get("inserted", 0) == 0
+        and mongo.get("overwritten", 0) == 0
+        and mongo.get("deleted", 0) == 0
+    ):
         return True
     return False
 
@@ -100,7 +107,7 @@ def run_catch_up_cycle(
             mongo = output.get("mongo_sync") or {}
             logger.info(
                 "Provider %s run %s: fetched %s records (%s with details, stop_reason=%s); "
-                "inserted=%s overwritten=%s skipped=%s",
+                "inserted=%s overwritten=%s deleted=%s skipped=%s",
                 provider.key,
                 runs,
                 len(vulnerabilities),
@@ -108,6 +115,7 @@ def run_catch_up_cycle(
                 last_stop_reason,
                 mongo.get("inserted", 0),
                 mongo.get("overwritten", 0),
+                mongo.get("deleted", 0),
                 mongo.get("skipped", 0),
             )
 

@@ -6,13 +6,13 @@ import pytest
 
 from vuln_scraper.client import FetchResult
 from vuln_scraper.config import ScraperSettings
-from vuln_scraper.mongo import MongoSyncResult
 from vuln_scraper.runner import ScraperRunner
 from vuln_scraper.scrapers.cisco import CiscoProvider
 from vuln_scraper.scrapers.cnnvd import CNNVDProvider
 from vuln_scraper.scrapers.cnvd import CNVDProvider
 from vuln_scraper.scrapers.cve import CVEProvider
 from vuln_scraper.scrapers.govcert import GovCERTProvider
+from vuln_scraper.scrapers.hkcert import HKCERTProvider
 from vuln_scraper.scrapers.hikvision import HikvisionProvider
 from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
 from vuln_scraper.scrapers.infosec import InfoSecProvider
@@ -23,14 +23,6 @@ from vuln_scraper.scrapers.splunk import SplunkProvider
 from vuln_scraper.scrapers.zeroday import ZeroDayProvider
 
 from tests.fake_avd_provider import FakeAvdProvider
-
-
-@pytest.fixture(autouse=True)
-def disable_cve_backfill(monkeypatch) -> None:
-    async def fake_backfill(*args, **kwargs) -> MongoSyncResult:
-        return MongoSyncResult()
-
-    monkeypatch.setattr("vuln_scraper.runner.backfill_missing_cves", fake_backfill)
 
 
 def test_limit_counts_raw_results(tmp_path) -> None:
@@ -215,7 +207,7 @@ def test_mongo_update_mixed_page_syncs_new_records_then_stops_on_known_page(tmp_
 
     assert identities(output["vulnerabilities"]) == ["avd:2026-10001"]
     assert output["mongo_sync"]["inserted"] == 1
-    assert output["stop_reason"] == "overlap"
+    assert output["stop_reason"] == "limit"
     assert set(collection.documents) == {
         "avd:2026-10001",
         "avd:2026-10002",
@@ -223,6 +215,37 @@ def test_mongo_update_mixed_page_syncs_new_records_then_stops_on_known_page(tmp_
         "avd:2026-10004",
     }
     assert client.list_pages_seen == [1, 2]
+
+
+def test_hkcert_mongo_sync_pages_past_leading_known_records(tmp_path) -> None:
+    client = FakeHKCERTClient()
+    known_codes = ["p1-a", "p1-b", "p2-a", "p2-b"]
+    collection = FakeMongoCollection(
+        {f"hkcert:{code}": {"_id": f"hkcert:{code}", "type": "hkcert", "code": code} for code in known_codes}
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "hkcert.json",
+        checkpoint_file=tmp_path / "hkcert_checkpoint.json",
+        limit=2,
+        mongo_enabled=True,
+        mongo_conflict="skip",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=HKCERTProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
+
+    assert identities(output["vulnerabilities"]) == ["hkcert:p3-a", "hkcert:p3-b"]
+    assert output["mongo_sync"]["inserted"] == 2
+    assert client.list_pages_seen == [1, 2, 3]
 
 
 def test_non_mongo_scrape_still_writes_json(tmp_path) -> None:
@@ -242,28 +265,90 @@ def test_non_mongo_scrape_still_writes_json(tmp_path) -> None:
     assert settings.output_file.exists()
 
 
-def test_cve_json_provider_embeds_detail_and_advances_checkpoint(tmp_path) -> None:
-    client = FakeCVEClient()
+def test_cve_mongo_sync_fetches_limit_of_new_records_skipping_known(tmp_path) -> None:
+    client = FakeCVEClient(
+        delta=[
+            cve_delta_batch(
+                "2026-06-05T03:00:00.000Z",
+                new=["CVE-2026-3000", "CVE-2026-3001"],
+            ),
+            cve_delta_batch(
+                "2026-06-05T02:00:00.000Z",
+                new=["CVE-2026-2000"],
+            ),
+        ]
+    )
+    collection = FakeMongoCollection(
+        {
+            "cve:2026-3000": {
+                "_id": "cve:2026-3000",
+                "type": "cve",
+                "code": "2026-3000",
+            },
+        }
+    )
     settings = ScraperSettings(
         data_dir=tmp_path,
         output_file=tmp_path / "cves.json",
         checkpoint_file=tmp_path / "cve_checkpoint.json",
-        limit=1,
+        limit=2,
+        mongo_enabled=True,
+        mongo_conflict="skip",
         request_delay=0,
         retries=0,
         concurrency=1,
     )
 
-    scraper = ScraperRunner(settings, provider=CVEProvider())
-    output = asyncio.run(scraper._run_with_client(client))
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
 
-    assert identities(output["vulnerabilities"]) == ["cve:2024-3094"]
-    record = output["vulnerabilities"][0]
-    assert record["cve_code"] is None
-    assert record["details"]["cve"]["cve_id"] == "CVE-2024-3094"
-    assert scraper.checkpoint.nvd_start_index == 1
-    assert scraper.checkpoint.nvd_last_mod_end is not None
-    assert "startIndex=0" in client.urls_seen[0]
+    assert identities(output["vulnerabilities"]) == ["cve:2026-3001", "cve:2026-2000"]
+    assert output["stop_reason"] == "limit"
+    assert output["mongo_sync"]["inserted"] == 2
+    assert client.detail_ids_seen == ["CVE-2026-3001", "CVE-2026-2000"]
+
+
+def test_cve_mongo_sync_stops_when_no_new_records_remain(tmp_path) -> None:
+    client = FakeCVEClient(
+        delta=[
+            cve_delta_batch("2026-06-05T03:00:00.000Z", new=["CVE-2026-3000"]),
+        ]
+    )
+    collection = FakeMongoCollection(
+        {
+            "cve:2026-3000": {
+                "_id": "cve:2026-3000",
+                "type": "cve",
+                "code": "2026-3000",
+            },
+        }
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        checkpoint_file=tmp_path / "cve_checkpoint.json",
+        limit=5,
+        mongo_enabled=True,
+        mongo_conflict="skip",
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
+
+    assert output["result_count"] == 0
+    assert output["mongo_sync"]["inserted"] == 0
+    assert client.detail_ids_seen == []
 
 
 def test_zeroday_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
@@ -696,6 +781,47 @@ def test_juniper_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     assert client.detail_slugs_seen == ["JSA93456"]
 
 
+def test_juniper_fetches_second_list_page_when_limit_exceeds_page_size(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
+        lambda page_uri="/s/global-search/@uri": {
+            "organizationId": "junipernetworks",
+            "accessToken": "test-token",
+        },
+    )
+    known = {f"juniper:JSA{93456 - index}" for index in range(10)}
+    client = FakeJuniperClient()
+    collection = FakeMongoCollection({identity: {"_id": identity} for identity in known})
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "juniper.json",
+        checkpoint_file=tmp_path / "juniper_checkpoint.json",
+        limit=15,
+        mongo_enabled=True,
+        mongo_conflict="skip",
+        request_delay=0,
+        retries=0,
+        concurrency=4,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=JuniperProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
+
+    assert len(identities(output["vulnerabilities"])) == 15
+    expected_new_codes = {f"JSA{93456 - index}" for index in range(10, 25)}
+    assert {record["code"] for record in output["vulnerabilities"]} == expected_new_codes
+    list_offsets = [request["json"]["firstResult"] for request in client.list_requests]
+    assert 0 in list_offsets
+    assert 10 in list_offsets
+
+
 def test_cisco_json_provider_uses_bearer_header_and_embeds_detail(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CISCO_OPENVULN_TOKEN", "token-123")
     client = FakeCiscoClient()
@@ -868,6 +994,21 @@ def test_ransomwarelive_missing_auth_is_reported_in_output(tmp_path, monkeypatch
     assert "RANSOM_API_KEY" in output["failed"][0]["error"]
 
 
+class FakeHKCERTClient:
+    def __init__(self) -> None:
+        self.list_pages_seen: list[int] = []
+
+    async def get_html(self, url: str) -> FetchResult:
+        parsed = urlparse(url)
+        if parsed.path.endswith("/security-bulletin") and "page" in parse_qs(parsed.query):
+            page = int(parse_qs(parsed.query)["page"][0])
+            self.list_pages_seen.append(page)
+            return FetchResult(html=hkcert_list_html(page), status_code=200, url=url)
+
+        slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        return FetchResult(html=hkcert_detail_html(slug), status_code=200, url=url)
+
+
 class FakeClient:
     def __init__(self) -> None:
         self.list_pages_seen: list[int] = []
@@ -884,34 +1025,18 @@ class FakeClient:
 
 
 class FakeCVEClient:
-    def __init__(self) -> None:
+    def __init__(self, *, delta: list[dict] | None = None) -> None:
+        self.delta = delta or []
         self.urls_seen: list[str] = []
+        self.detail_ids_seen: list[str] = []
 
     async def get_json(self, url: str, *, headers=None):
         self.urls_seen.append(url)
-        return FakeJSONResult(
-            {
-                "resultsPerPage": 1,
-                "startIndex": 0,
-                "totalResults": 2,
-                "vulnerabilities": [
-                    {
-                        "cve": {
-                            "id": "CVE-2024-3094",
-                            "published": "2024-03-29T17:15:21.150",
-                            "lastModified": "2025-08-19T01:15:57.407",
-                            "vulnStatus": "Modified",
-                            "descriptions": [{"lang": "en", "value": "xz backdoor"}],
-                            "metrics": {},
-                            "weaknesses": [],
-                            "references": [],
-                            "configurations": [],
-                        }
-                    }
-                ],
-            },
-            url,
-        )
+        if url.endswith("/deltaLog.json"):
+            return FakeJSONResult(self.delta, url)
+        cve_id = url.rsplit("/", 1)[-1].removesuffix(".json")
+        self.detail_ids_seen.append(cve_id)
+        return FakeJSONResult(cve_v5_record(cve_id), url)
 
 
 class FakeZeroDayClient:
@@ -1051,7 +1176,8 @@ class FakeJuniperClient:
                 slug = "JSA93456"
             self.detail_slugs_seen.append(slug)
             return FakeJSONResult(juniper_detail_coveo_payload(slug), url)
-        return FakeJSONResult(juniper_list_coveo_payload(), url)
+        first_result = int((json_body or {}).get("firstResult", 0))
+        return FakeJSONResult(juniper_list_coveo_payload(first_result=first_result), url)
 
 
 class FakeCiscoClient:
@@ -1551,6 +1677,33 @@ def cnvd_list_html() -> str:
     """
 
 
+def hkcert_list_html(page: int) -> str:
+    page_codes = {
+        1: ["p1-a", "p1-b"],
+        2: ["p2-a", "p2-b"],
+        3: ["p3-a", "p3-b"],
+    }
+    cards = "".join(
+        f'<a class="listingcard__item" href="/security-bulletin/{code}">'
+        f'<p class="listingcard__title">{code}</p></a>'
+        for code in page_codes[page]
+    )
+    pages = "".join(
+        f'<a href="/security-bulletin?item_per_page=10&amp;page={index}">{index}</a>'
+        for index in range(1, 4)
+    )
+    return f"<html><body>{cards}{pages}</body></html>"
+
+
+def hkcert_detail_html(code: str) -> str:
+    return f"""
+    <html><body>
+      <h1 class="page-title page-title--inner">{code}</h1>
+      <div class="page-intro"><div class="ckec"><p>Intro for {code}</p></div></div>
+    </body></html>
+    """
+
+
 def cnvd_detail_html(code: str) -> str:
     return f"""
     <h1>Example CNVD Detail {code}</h1>
@@ -1568,43 +1721,24 @@ def cnvd_detail_html(code: str) -> str:
     """
 
 
-def juniper_list_coveo_payload() -> dict:
-    return {
-        "totalCount": 3,
-        "results": [
-            {
-                "title": "JSA93456: Junos OS: New J-Web issue",
-                "raw": {
-                    "sfcec_documentid__c": "JSA93456",
-                    "sftitle": "JSA93456: Junos OS: New J-Web issue",
-                    "sfrecordtypename": "Security Advisories",
-                    "sflastpublisheddate": "2026-05-29",
-                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93456",
-                    "sfurlname": "JSA93456",
-                },
+def juniper_list_coveo_payload(*, first_result: int = 0, per_page: int = 10) -> dict:
+    all_codes = [f"JSA{93456 - index}" for index in range(25)]
+    page_codes = all_codes[first_result : first_result + per_page]
+    results = [
+        {
+            "title": f"{code}: Junos OS advisory",
+            "raw": {
+                "sfcec_documentid__c": code,
+                "sftitle": f"{code}: Junos OS advisory",
+                "sfrecordtypename": "Security Advisories",
+                "sflastpublisheddate": "2026-05-29",
+                "sfcustomer_url__c": f"https://supportportal.juniper.net/s/article/{code}",
+                "sfurlname": code,
             },
-            {
-                "title": "JSA93455: Known Junos issue",
-                "raw": {
-                    "sfcec_documentid__c": "JSA93455",
-                    "sftitle": "JSA93455: Known Junos issue",
-                    "sfrecordtypename": "Security Advisories",
-                    "sflastpublisheddate": "2026-05-22",
-                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93455",
-                },
-            },
-            {
-                "title": "JSA93454: Older Junos issue",
-                "raw": {
-                    "sfcec_documentid__c": "JSA93454",
-                    "sftitle": "JSA93454: Older Junos issue",
-                    "sfrecordtypename": "Security Advisories",
-                    "sflastpublisheddate": "2026-05-15",
-                    "sfcustomer_url__c": "https://supportportal.juniper.net/s/article/JSA93454",
-                },
-            },
-        ],
-    }
+        }
+        for code in page_codes
+    ]
+    return {"totalCount": len(all_codes), "results": results}
 
 
 def juniper_detail_coveo_payload(slug: str) -> dict:
@@ -1625,6 +1759,60 @@ def juniper_detail_coveo_payload(slug: str) -> dict:
                 },
             }
         ]
+    }
+
+
+def cve_delta_batch(
+    fetch_time: str,
+    *,
+    new: list[str] | None = None,
+    updated: list[str] | None = None,
+    deleted: list[str] | None = None,
+) -> dict:
+    return {
+        "fetchTime": fetch_time,
+        "new": [cve_delta_entry(cve_id) for cve_id in new or []],
+        "updated": [cve_delta_entry(cve_id) for cve_id in updated or []],
+        "deleted": [cve_delta_entry(cve_id, include_link=False) for cve_id in deleted or []],
+    }
+
+
+def cve_delta_entry(cve_id: str, *, include_link: bool = True) -> dict:
+    return {
+        "cveId": cve_id,
+        "cveOrgLink": f"https://www.cve.org/CVERecord?id={cve_id}",
+        "githubLink": f"https://example.test/{cve_id}.json" if include_link else None,
+        "dateUpdated": "2026-06-05T00:00:00.000Z",
+    }
+
+
+def cve_v5_record(cve_id: str) -> dict:
+    return {
+        "dataType": "CVE_RECORD",
+        "dataVersion": "5.2",
+        "cveMetadata": {
+            "cveId": cve_id,
+            "assignerShortName": "example",
+            "state": "PUBLISHED",
+            "datePublished": "2026-06-05T00:00:00.000Z",
+            "dateUpdated": "2026-06-05T00:00:00.000Z",
+        },
+        "containers": {
+            "cna": {
+                "title": f"Title {cve_id}",
+                "descriptions": [{"lang": "en", "value": f"Description {cve_id}"}],
+                "affected": [
+                    {
+                        "vendor": "Example",
+                        "product": "Widget",
+                        "versions": [{"status": "affected", "version": "1.0"}],
+                    }
+                ],
+                "metrics": [],
+                "problemTypes": [],
+                "references": [{"url": f"https://example.test/advisory/{cve_id}"}],
+            }
+        },
     }
 
 
@@ -1660,9 +1848,15 @@ class FakeMongoDatabase:
 
 
 class FakeMongoCollection:
-    def __init__(self, documents: dict[str, dict] | None = None) -> None:
+    def __init__(
+        self,
+        documents: dict[str, dict] | None = None,
+        *,
+        fail_insert_once_for: str | None = None,
+    ) -> None:
         self.documents = copy.deepcopy(documents or {})
         self.indexes: list[tuple[str, bool]] = []
+        self.fail_insert_once_for = fail_insert_once_for
 
     def create_index(self, field: str, unique: bool = False) -> None:
         self.indexes.append((field, unique))
@@ -1678,7 +1872,20 @@ class FakeMongoCollection:
         return copy.deepcopy(document) if document is not None else None
 
     def insert_one(self, document: dict) -> None:
+        if document["_id"] == self.fail_insert_once_for:
+            self.fail_insert_once_for = None
+            raise RuntimeError(f"simulated insert failure for {document['_id']}")
         self.documents[document["_id"]] = copy.deepcopy(document)
 
     def replace_one(self, query: dict, document: dict, *, upsert: bool = False) -> None:
         self.documents[query["_id"]] = copy.deepcopy(document)
+
+    def delete_one(self, query: dict):
+        deleted = int(query["_id"] in self.documents)
+        self.documents.pop(query["_id"], None)
+        return FakeDeleteResult(deleted)
+
+
+class FakeDeleteResult:
+    def __init__(self, deleted_count: int) -> None:
+        self.deleted_count = deleted_count

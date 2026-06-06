@@ -74,6 +74,7 @@ def test_juniper_list_json_request_uses_coveo_facets(monkeypatch: pytest.MonkeyP
     assert "coveo.com" in request["url"]
     assert request["headers"]["Authorization"] == "Bearer test-token"
     assert request["json"]["firstResult"] == 10
+    assert request["json"]["q"] == '@sfrecordtypename=="Security Advisories"'
     assert request["json"]["facetFilters"] == [
         {"field": "@primarysourcename", "values": ["Knowledge"]},
         {"field": "@articletype", "values": ["Security Advisories"]},

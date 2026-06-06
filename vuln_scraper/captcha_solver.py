@@ -4,7 +4,6 @@ import base64
 import binascii
 import hashlib
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -89,34 +88,3 @@ class CaptchaMap:
     def __len__(self) -> int:
         return len(self._answers)
 
-
-# #region agent log
-def debug_log(
-    *,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any] | None = None,
-    run_id: str = "pre-fix",
-) -> None:
-    payload = {
-        "sessionId": "1d4eda",
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data or {},
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(
-            "/Users/chankokpan/Documents/avd/.cursor/debug-1d4eda.log",
-            "a",
-            encoding="utf-8",
-        ) as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-
-
-# #endregion

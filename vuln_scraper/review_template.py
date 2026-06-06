@@ -1,0 +1,1056 @@
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Callable
+from typing import Any
+
+
+_CISCO_PARAGRAPH_TAG_RE = re.compile(r"</?p(?:\s[^>]*)?>", re.IGNORECASE)
+
+
+REVIEW_TEMPLATE_FIELDS = (
+    "title",
+    "description",
+    "impacts",
+    "affected",
+    "cve",
+    "recommendation",
+    "related_link",
+)
+
+
+def review_template_from_document(document: dict[str, Any]) -> dict[str, Any]:
+    provider = _text(document.get("type")).lower()
+    detail = _detail(document, provider)
+    mapper = _MAPPERS.get(provider, _generic)
+    mapped = mapper(document, detail)
+    title = _text(mapped.get("title") or document.get("title"))
+    return {
+        "title": title,
+        "description": _string(mapped.get("description")),
+        "impacts": _string(mapped.get("impacts")),
+        "affected": _string_array(mapped.get("affected")),
+        "cve": _string(mapped.get("cve")),
+        "recommendation": _string(mapped.get("recommendation")),
+        "related_link": _string_array(mapped.get("related_link")),
+    }
+
+
+def _avd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    affected = _join_dicts(
+        detail.get("affected_software"),
+        lambda item: _parts(
+            item.get("vendor"),
+            item.get("product"),
+            item.get("version"),
+        ),
+    )
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts=detail.get("danger_level"),
+        affected=affected,
+        cve=document.get("cve_code") or detail.get("cve_id"),
+        recommendation=detail.get("solution"),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _hkcert(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    products = detail.get("vulnerable_products") or detail.get("table")
+    affected = _join_dicts(
+        products,
+        lambda item: _parts(
+            item.get("name") or item.get("vulnerable_product"),
+            item.get("details"),
+        ),
+    )
+    affected = affected or _join(detail.get("systems_affected"))
+    return _base(
+        document,
+        description=detail.get("summary") or detail.get("intro"),
+        impacts=detail.get("risk_level") or _first_nested(products, "risk_level"),
+        affected=affected,
+        cve=document.get("cve_code") or _first_nested(detail.get("vulnerability_identifiers"), "cve_id"),
+        recommendation=detail.get("solutions"),
+        related_link=_join(detail.get("related_links")),
+    )
+
+
+def _cve(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    severity = _first_available(
+        detail,
+        (
+            ("metrics", "cvss_v40", "cvssData", "baseSeverity"),
+            ("metrics", "cvss_v31", "cvssData", "baseSeverity"),
+            ("metrics", "cvss_v30", "cvssData", "baseSeverity"),
+            ("metrics", "cvss_v2", "baseSeverity"),
+        ),
+    )
+    return _base(
+        document,
+        description=_join(_nested_values(detail.get("descriptions"), "value")),
+        impacts=severity,
+        affected=_join(detail.get("affected_products")) or _cve_affected(detail.get("configurations")),
+        cve=detail.get("cve_id") or document.get("code"),
+        related_link=_join(_nested_values(detail.get("references"), "url")),
+    )
+
+
+def _cisco(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=_strip_cisco_paragraph_tags(detail.get("summary")),
+        impacts=detail.get("sir") or detail.get("cvss_base_score"),
+        affected=_join(detail.get("product_names")),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        related_link=_join([detail.get("publication_url"), detail.get("cvrf_url"), detail.get("csaf_url")]),
+    )
+
+
+def _github_advisory(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    vulnerabilities = _dicts(detail.get("vulnerabilities"))
+    affected = _join(
+        _parts(
+            f"{_text(_path(item, 'package', 'ecosystem'))}:{_text(_path(item, 'package', 'name'))}",
+            item.get("vulnerable_version_range"),
+        )
+        for item in vulnerabilities
+    )
+    patched = _join(item.get("first_patched_version") for item in vulnerabilities)
+    return _base(
+        document,
+        description=detail.get("description") or detail.get("summary"),
+        impacts=detail.get("severity"),
+        affected=affected,
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=patched,
+        related_link=_join(detail.get("references")),
+    )
+
+
+def _zeroday(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts="",
+        affected=detail.get("vulnerable_component"),
+        cve=document.get("cve_code") or detail.get("cve_id"),
+        recommendation=detail.get("patch_status"),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _govcert(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts="",
+        affected=_join(detail.get("affected_systems")),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=detail.get("recommendation"),
+        related_link=_join(detail.get("more_information_links")),
+    )
+
+
+def _infosec(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    mapped = _govcert(document, detail)
+    mapped["description"] = detail.get("description") or detail.get("summary")
+    return mapped
+
+
+def _huawei_sa(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    raw = detail.get("raw") if isinstance(detail.get("raw"), dict) else {}
+    vul = detail.get("vul") or raw.get("vul")
+    return _base(
+        document,
+        description=detail.get("summary") or raw.get("summary"),
+        impacts=detail.get("severity") or raw.get("severity"),
+        affected="",
+        cve=document.get("cve_code")
+        or _first(detail.get("cve_ids"))
+        or _first_nested(vul, "cveId"),
+        related_link=detail.get("allPath") if isinstance(detail.get("allPath"), str) else raw.get("allPath"),
+    )
+
+
+def _paloalto(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    status_lines: list[str] = []
+    for item in _dicts(detail.get("product_status")):
+        affected = item.get("affected")
+        if affected:
+            status_lines.append(_string(affected))
+    affected = _join([_join(detail.get("products")), _join(status_lines)])
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts=detail.get("severity"),
+        affected=affected,
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=_join([detail.get("solution"), detail.get("workarounds")]),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _qianxin(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    description = detail.get("description")
+    if not isinstance(description, dict):
+        description = {}
+    vulnerability = description.get("vulnerability_information")
+    if not isinstance(vulnerability, dict):
+        vulnerability = {}
+    assessment = description.get("threat_assessment")
+    if not isinstance(assessment, dict):
+        assessment = {}
+    risk = vulnerability.get("risk")
+    if not isinstance(risk, dict):
+        risk = {}
+    other_components = vulnerability.get("other_affected_components")
+    if _text(other_components) == "无":
+        other_components = ""
+    return _base(
+        document,
+        description=_join(
+            [
+                description.get("security_advisory"),
+                vulnerability.get("summary"),
+                vulnerability.get("vulnerability_description"),
+                assessment.get("impact_description"),
+                description.get("affected_assets"),
+            ]
+        )
+        or detail.get("description"),
+        impacts=detail.get("level")
+        or assessment.get("cvss_3_1_rating")
+        or risk.get("qianxin_cert_rating")
+        or risk.get("risk_level"),
+        affected=_join(
+            [
+                _parts(vulnerability.get("vendor"), vulnerability.get("product")),
+                vulnerability.get("affected_versions"),
+                other_components,
+            ]
+        ),
+        cve=document.get("cve_code")
+        or vulnerability.get("cve_id")
+        or assessment.get("cve_id")
+        or _first(detail.get("cve_ids")),
+        recommendation=_join(description.get("recommendations")),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _ransomwarelive(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("press"),
+        impacts="",
+        affected="",
+        cve=document.get("cve_code"),
+        related_link=_join([detail.get("website"), detail.get("permalink"), detail.get("screenshot")]),
+    )
+
+
+def _splunk(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    status_versions = _join_dicts(
+        detail.get("product_status"),
+        lambda item: _parts(item.get("product"), item.get("base_version"), item.get("affected_version")),
+    )
+    affected = _join(
+        [
+            detail.get("affected_products"),
+            detail.get("affected_versions"),
+            detail.get("all_affected_versions"),
+            detail.get("affected_components"),
+            status_versions,
+        ]
+    )
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts=detail.get("severity") or detail.get("severity_summary") or detail.get("severity_detail"),
+        affected=_string(affected),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=_join([detail.get("solution"), detail.get("mitigations")]),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _hikvision(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description") or detail.get("summary"),
+        impacts=detail.get("severity"),
+        affected=_join(detail.get("affected_products")),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=detail.get("solution"),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _cnnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description") or detail.get("summary"),
+        impacts="",
+        affected="",
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation="",
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _cnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts=detail.get("severity"),
+        affected=_join(detail.get("affected_products")),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=detail.get("solution"),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _juniper(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description") or detail.get("summary"),
+        impacts=_path(detail, "raw_fields", "severity"),
+        affected=_join(detail.get("products")),
+        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        recommendation=_join([detail.get("solution"), detail.get("workaround")]),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
+def _generic(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description") or detail.get("summary"),
+        impacts="",
+        cve=document.get("cve_code"),
+    )
+
+
+def _cve_affected(configurations: Any) -> str:
+    lines: list[str] = []
+    for configuration in _dicts(configurations):
+        for node in _dicts(configuration.get("nodes")):
+            for match in _dicts(node.get("cpeMatch")):
+                if match.get("vulnerable") is False:
+                    continue
+                line = _parts(
+                    match.get("criteria"),
+                    _version_bound(match, "versionStartIncluding", ">="),
+                    _version_bound(match, "versionStartExcluding", ">"),
+                    _version_bound(match, "versionEndIncluding", "<="),
+                    _version_bound(match, "versionEndExcluding", "<"),
+                )
+                if line:
+                    lines.append(line)
+    return _join(lines)
+
+
+def _version_bound(item: dict[str, Any], key: str, operator: str) -> str:
+    value = _text(item.get(key))
+    return f"{operator}{value}" if value else ""
+
+
+def _strip_cisco_paragraph_tags(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return _CISCO_PARAGRAPH_TAG_RE.sub("", value)
+
+
+def _base(document: dict[str, Any], **values: Any) -> dict[str, Any]:
+    return {"title": document.get("title"), **values}
+
+
+def _detail(document: dict[str, Any], provider: str) -> dict[str, Any]:
+    details = document.get("details")
+    if not isinstance(details, dict):
+        return {}
+    value = details.get(provider)
+    return value if isinstance(value, dict) else {}
+
+
+def _string(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple, set)):
+        return _join(value)
+    if isinstance(value, dict):
+        return _json(value)
+    return str(value).strip()
+
+
+def _string_array(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    if isinstance(value, (list, tuple, set)):
+        lines: list[str] = []
+        for item in value:
+            lines.extend(_string_array(item))
+        return lines
+    text = _string(value)
+    return [text] if text else []
+
+
+def _join(values: Any) -> str:
+    if values is None:
+        return ""
+    if isinstance(values, str):
+        return values.strip()
+    if isinstance(values, dict):
+        values = [values]
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    return "\n".join(text for item in items if (text := _string(item)))
+
+
+def _join_dicts(values: Any, formatter: Callable[[dict[str, Any]], str]) -> str:
+    return _join(formatter(item) for item in _dicts(values))
+
+
+def _dicts(values: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    return [item for item in values if isinstance(item, dict)]
+
+
+def _json(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else _string(value)
+
+
+def _parts(*values: Any) -> str:
+    return " ".join(text for value in values if (text := _text(value)))
+
+
+def _first(values: Any) -> Any:
+    if isinstance(values, list):
+        return next((value for value in values if _string(value)), "")
+    return values if _string(values) else ""
+
+
+def _first_nested(values: Any, *path: str) -> Any:
+    return _first(_nested_values(values, *path))
+
+
+def _nested_values(values: Any, *path: str) -> list[Any]:
+    results: list[Any] = []
+    nodes = values if isinstance(values, list) else [values]
+    for node in nodes:
+        value = _path(node, *path)
+        if isinstance(value, list):
+            results.extend(value)
+        elif value is not None:
+            results.append(value)
+    return results
+
+
+def _path(value: Any, *parts: str) -> Any:
+    nodes = [value]
+    for part in parts:
+        next_nodes: list[Any] = []
+        for node in nodes:
+            if isinstance(node, dict) and part in node:
+                child = node[part]
+                next_nodes.extend(child if isinstance(child, list) else [child])
+        nodes = next_nodes
+        if not nodes:
+            return None
+    return nodes[0] if len(nodes) == 1 else nodes
+
+
+def _first_available(detail: dict[str, Any], paths: tuple[tuple[str, ...], ...]) -> Any:
+    for path in paths:
+        value = _path(detail, *path)
+        first = _first(value)
+        if _string(first):
+            return first
+    return ""
+
+
+_MAPPERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
+    "avd": _avd,
+    "hkcert": _hkcert,
+    "cve": _cve,
+    "cisco": _cisco,
+    "github_advisory": _github_advisory,
+    "zeroday": _zeroday,
+    "govcert": _govcert,
+    "infosec": _infosec,
+    "huawei_sa": _huawei_sa,
+    "paloalto": _paloalto,
+    "qianxin": _qianxin,
+    "ransomwarelive": _ransomwarelive,
+    "splunk": _splunk,
+    "hikvision": _hikvision,
+    "cnnvd": _cnnvd,
+    "cnvd": _cnvd,
+    "juniper": _juniper,
+}
+
+
+class ReviewViewError(RuntimeError):
+    """Raised when a review view cannot be refreshed safely."""
+
+
+def review_view_name(collection_name: str) -> str:
+    return f"{collection_name}_review"
+
+
+def ensure_review_view(database: Any, *, provider: str, collection_name: str) -> bool:
+    existing = {
+        item["name"]: item.get("type")
+        for item in database.list_collections(filter={})
+    }
+    if collection_name not in existing:
+        return False
+
+    view_name = review_view_name(collection_name)
+    view_type = existing.get(view_name)
+    if view_type and view_type != "view":
+        raise ReviewViewError(
+            f"refusing to replace physical collection {view_name!r} with a review view"
+        )
+    if view_type == "view":
+        database[view_name].drop()
+
+    database.command(
+        {
+            "create": view_name,
+            "viewOn": collection_name,
+            "pipeline": review_view_pipeline(provider),
+        }
+    )
+    return True
+
+
+def review_view_pipeline(provider: str) -> list[dict[str, Any]]:
+    detail = f"$details.{provider}"
+    fields = {
+        "title": _mstr("$title"),
+        "description": _mongo_description(provider, detail),
+        "impacts": _mongo_impacts(provider, detail),
+        "affected": _marray_lines(_mongo_affected(provider, detail)),
+        "cve": _mongo_cve(provider, detail),
+        "recommendation": _mongo_recommendation(provider, detail),
+        "related_link": _marray_lines(_mongo_related_link(provider, detail)),
+    }
+    return [{"$project": {"_id": 0, **fields}}]
+
+
+def _mongo_description(provider: str, detail: str) -> dict[str, Any]:
+    sources: dict[str, list[Any]] = {
+        "avd": [f"{detail}.description"],
+        "hkcert": [f"{detail}.summary", f"{detail}.intro"],
+        "cve": [_mjoin_values(f"{detail}.descriptions", "value")],
+        "cisco": [_mstrip_cisco_paragraph_tags(f"{detail}.summary")],
+        "github_advisory": [f"{detail}.description", f"{detail}.summary"],
+        "zeroday": [f"{detail}.description"],
+        "govcert": [f"{detail}.description"],
+        "infosec": [f"{detail}.description", f"{detail}.summary"],
+        "huawei_sa": [f"{detail}.summary", f"{detail}.raw.summary"],
+        "paloalto": [f"{detail}.description"],
+        "qianxin": [
+            _mjoin_many(
+                [
+                    f"{detail}.description.security_advisory",
+                    f"{detail}.description.vulnerability_information.summary",
+                    f"{detail}.description.vulnerability_information.vulnerability_description",
+                    f"{detail}.description.threat_assessment.impact_description",
+                    f"{detail}.description.affected_assets",
+                    f"{detail}.description",
+                ]
+            )
+        ],
+        "ransomwarelive": [f"{detail}.press"],
+        "splunk": [f"{detail}.description"],
+        "hikvision": [f"{detail}.description", f"{detail}.summary"],
+        "cnnvd": [f"{detail}.description", f"{detail}.summary"],
+        "cnvd": [f"{detail}.description"],
+        "juniper": [f"{detail}.description", f"{detail}.summary"],
+    }
+    return _mfirst(sources.get(provider, []))
+
+
+def _mongo_impacts(provider: str, detail: str) -> dict[str, Any]:
+    sources: dict[str, list[Any]] = {
+        "avd": [f"{detail}.danger_level"],
+        "hkcert": [f"{detail}.risk_level", _mfirst_array_value(f"{detail}.table", "risk_level")],
+        "cve": [
+            _mfirst_nested(f"{detail}.metrics.cvss_v40", "cvssData.baseSeverity"),
+            _mfirst_nested(f"{detail}.metrics.cvss_v31", "cvssData.baseSeverity"),
+            _mfirst_nested(f"{detail}.metrics.cvss_v30", "cvssData.baseSeverity"),
+            _mfirst_nested(f"{detail}.metrics.cvss_v2", "baseSeverity"),
+        ],
+        "cisco": [f"{detail}.sir"],
+        "github_advisory": [f"{detail}.severity"],
+        "huawei_sa": [f"{detail}.severity", f"{detail}.raw.severity"],
+        "paloalto": [f"{detail}.severity"],
+        "qianxin": [
+            f"{detail}.level",
+            f"{detail}.description.threat_assessment.cvss_3_1_rating",
+            f"{detail}.description.vulnerability_information.risk.qianxin_cert_rating",
+            f"{detail}.description.vulnerability_information.risk.risk_level",
+        ],
+        "splunk": [f"{detail}.severity", f"{detail}.severity_summary", f"{detail}.severity_detail"],
+        "hikvision": [f"{detail}.severity"],
+        "cnvd": [f"{detail}.severity"],
+        "juniper": [f"{detail}.raw_fields.severity"],
+    }
+    return _mfirst(sources.get(provider, []))
+
+
+def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
+    if provider == "avd":
+        return _mjoin_mapped(
+            f"{detail}.affected_software",
+            _mconcat_parts(["$$item.vendor", "$$item.product", "$$item.version"]),
+        )
+    if provider == "hkcert":
+        products = _mjoin_mapped(
+            _mfirst_array([f"{detail}.vulnerable_products", f"{detail}.table"]),
+            _mconcat_parts(
+                [
+                    _mfirst(["$$item.name", "$$item.vulnerable_product"]),
+                    "$$item.details",
+                ]
+            ),
+        )
+        return _mfirst([products, _mjoin(f"{detail}.systems_affected")])
+    if provider == "cve":
+        return _mfirst(
+            [
+                _mjoin(f"{detail}.affected_products"),
+                _mongo_cve_affected(f"{detail}.configurations"),
+            ]
+        )
+    if provider == "cisco":
+        return _mjoin(f"{detail}.product_names")
+    if provider == "github_advisory":
+        return _mjoin_mapped(
+            f"{detail}.vulnerabilities",
+            _mconcat_parts(
+                [
+                    {
+                        "$concat": [
+                            _mstr("$$item.package.ecosystem"),
+                            ":",
+                            _mstr("$$item.package.name"),
+                        ]
+                    },
+                    "$$item.vulnerable_version_range",
+                ]
+            ),
+        )
+    if provider == "zeroday":
+        return _mstr(f"{detail}.vulnerable_component")
+    if provider in {"govcert", "infosec"}:
+        return _mjoin(f"{detail}.affected_systems")
+    if provider == "paloalto":
+        return _mjoin_many(
+            [
+                _mjoin(f"{detail}.products"),
+                _mjoin_mapped(
+                    f"{detail}.product_status",
+                    _mconcat_parts(["$$item.product", "$$item.affected"]),
+                ),
+            ]
+        )
+    if provider == "qianxin":
+        return _mjoin_many(
+            [
+                _mconcat_parts(
+                    [
+                        f"{detail}.description.vulnerability_information.vendor",
+                        f"{detail}.description.vulnerability_information.product",
+                    ]
+                ),
+                _mjoin(f"{detail}.description.vulnerability_information.affected_versions"),
+                {
+                    "$cond": [
+                        {
+                            "$eq": [
+                                _mstr(
+                                    f"{detail}.description.vulnerability_information.other_affected_components"
+                                ),
+                                "无",
+                            ]
+                        },
+                        "",
+                        f"{detail}.description.vulnerability_information.other_affected_components",
+                    ]
+                },
+            ]
+        )
+    if provider == "splunk":
+        return _mjoin_many(
+            [
+                f"{detail}.affected_products",
+                f"{detail}.affected_versions",
+                f"{detail}.all_affected_versions",
+                f"{detail}.affected_components",
+                _mjoin_mapped(
+                    f"{detail}.product_status",
+                    _mconcat_parts(
+                        ["$$item.product", "$$item.base_version", "$$item.affected_version"]
+                    ),
+                ),
+            ]
+        )
+    if provider == "hikvision":
+        return _mjoin(f"{detail}.affected_products")
+    if provider == "cnvd":
+        return _mjoin(f"{detail}.affected_products")
+    if provider == "juniper":
+        return _mjoin(f"{detail}.products")
+    return _mstr("")
+
+
+def _mongo_cve(provider: str, detail: str) -> dict[str, Any]:
+    sources: dict[str, list[Any]] = {
+        "avd": ["$cve_code", f"{detail}.cve_id"],
+        "hkcert": ["$cve_code", _mfirst_nested(f"{detail}.vulnerability_identifiers", "cve_id")],
+        "cve": [f"{detail}.cve_id", "$code"],
+        "cisco": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "github_advisory": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "zeroday": ["$cve_code", f"{detail}.cve_id"],
+        "govcert": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "infosec": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "huawei_sa": [
+            "$cve_code",
+            _mfirst_item(f"{detail}.cve_ids"),
+            _mfirst_nested(f"{detail}.vul", "cveId"),
+            _mfirst_nested(f"{detail}.raw.vul", "cveId"),
+        ],
+        "paloalto": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "qianxin": [
+            "$cve_code",
+            f"{detail}.description.vulnerability_information.cve_id",
+            f"{detail}.description.threat_assessment.cve_id",
+            _mfirst_item(f"{detail}.cve_ids"),
+        ],
+        "ransomwarelive": ["$cve_code"],
+        "splunk": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "hikvision": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "cnnvd": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "cnvd": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "juniper": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+    }
+    return _mfirst(sources.get(provider, ["$cve_code"]))
+
+
+def _mongo_recommendation(provider: str, detail: str) -> dict[str, Any]:
+    sources: dict[str, list[Any]] = {
+        "avd": [f"{detail}.solution"],
+        "hkcert": [f"{detail}.solutions"],
+        "github_advisory": [
+            _mjoin_mapped(f"{detail}.vulnerabilities", _mstr("$$item.first_patched_version"))
+        ],
+        "zeroday": [f"{detail}.patch_status"],
+        "govcert": [f"{detail}.recommendation"],
+        "infosec": [f"{detail}.recommendation"],
+        "paloalto": [_mjoin_many([f"{detail}.solution", f"{detail}.workarounds"])],
+        "qianxin": [_mjoin(f"{detail}.description.recommendations")],
+        "splunk": [_mjoin_many([f"{detail}.solution", f"{detail}.mitigations"])],
+        "hikvision": [f"{detail}.solution"],
+        "cnvd": [f"{detail}.solution"],
+        "juniper": [_mjoin_many([f"{detail}.solution", f"{detail}.workaround"])],
+    }
+    return _mfirst(sources.get(provider, []))
+
+
+def _mongo_related_link(provider: str, detail: str) -> dict[str, Any]:
+    if provider == "cve":
+        return _mjoin_values(f"{detail}.references", "url")
+    if provider == "cisco":
+        return _mjoin_many(
+            [f"{detail}.publication_url", f"{detail}.cvrf_url", f"{detail}.csaf_url"]
+        )
+    if provider == "ransomwarelive":
+        return _mjoin_many(
+            [f"{detail}.website", f"{detail}.permalink", f"{detail}.screenshot"]
+        )
+    if provider == "huawei_sa":
+        return _mfirst([f"{detail}.allPath", f"{detail}.raw.allPath"])
+
+    sources: dict[str, list[Any]] = {
+        "avd": [f"{detail}.reference_links"],
+        "hkcert": [f"{detail}.related_links"],
+        "github_advisory": [f"{detail}.references"],
+        "zeroday": [f"{detail}.reference_links"],
+        "govcert": [f"{detail}.more_information_links"],
+        "infosec": [f"{detail}.more_information_links"],
+        "paloalto": [f"{detail}.reference_links"],
+        "qianxin": [f"{detail}.reference_links"],
+        "splunk": [f"{detail}.reference_links"],
+        "hikvision": [f"{detail}.reference_links"],
+        "cnnvd": [f"{detail}.reference_links"],
+        "cnvd": [f"{detail}.reference_links"],
+        "juniper": [f"{detail}.reference_links"],
+    }
+    values = sources.get(provider, [])
+    return _mjoin(values[0]) if values else _mstr("")
+
+
+def _mstr(value: Any) -> dict[str, Any]:
+    return {"$convert": {"input": value, "to": "string", "onError": "", "onNull": ""}}
+
+
+def _mstrip_cisco_paragraph_tags(value: Any) -> dict[str, Any]:
+    result: Any = _mstr(value)
+    for tag in ("<p>", "</p>", "<P>", "</P>"):
+        result = {
+            "$replaceAll": {
+                "input": result,
+                "find": tag,
+                "replacement": "",
+            }
+        }
+    return result
+
+
+def _marray_lines(value: Any) -> dict[str, Any]:
+    return {
+        "$filter": {
+            "input": {"$split": [_mstr(value), "\n"]},
+            "as": "line",
+            "cond": {"$ne": [{"$trim": {"input": "$$line"}}, ""]},
+        }
+    }
+
+
+def _mfirst(values: list[Any]) -> dict[str, Any]:
+    converted = [_mstr(value) for value in values]
+    return {
+        "$let": {
+            "vars": {"values": converted},
+            "in": {
+                "$ifNull": [
+                    {
+                        "$arrayElemAt": [
+                            {
+                                "$filter": {
+                                    "input": "$$values",
+                                    "as": "value",
+                                    "cond": {"$ne": [{"$trim": {"input": "$$value"}}, ""]},
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                    "",
+                ]
+            },
+        }
+    }
+
+
+def _mfirst_array(values: list[Any]) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {"arrays": values},
+            "in": {
+                "$ifNull": [
+                    {
+                        "$arrayElemAt": [
+                            {
+                                "$filter": {
+                                    "input": "$$arrays",
+                                    "as": "value",
+                                    "cond": {"$isArray": "$$value"},
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                    [],
+                ]
+            },
+        }
+    }
+
+
+def _mfirst_item(value: Any) -> dict[str, Any]:
+    return _mstr(
+        {
+            "$arrayElemAt": [
+                {"$cond": [{"$isArray": value}, value, []]},
+                0,
+            ]
+        }
+    )
+
+
+def _mjoin(value: Any) -> dict[str, Any]:
+    return _mjoin_mapped(value, _mstr("$$item"))
+
+
+def _mjoin_many(values: list[Any]) -> dict[str, Any]:
+    return _mjoin_mapped(
+        {"$concatArrays": [[value] for value in values]},
+        _mstr("$$item"),
+    )
+
+
+def _mjoin_values(value: Any, field: str) -> dict[str, Any]:
+    return _mjoin_mapped(value, _mstr(f"$$item.{field}"))
+
+
+def _mjoin_mapped(value: Any, mapped_expression: Any) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {
+                "lines": {
+                    "$filter": {
+                        "input": {
+                            "$map": {
+                                "input": {"$cond": [{"$isArray": value}, value, []]},
+                                "as": "item",
+                                "in": mapped_expression,
+                            }
+                        },
+                        "as": "line",
+                        "cond": {"$ne": [{"$trim": {"input": "$$line"}}, ""]},
+                    }
+                }
+            },
+            "in": {
+                "$reduce": {
+                    "input": "$$lines",
+                    "initialValue": "",
+                    "in": {
+                        "$concat": [
+                            "$$value",
+                            {"$cond": [{"$eq": ["$$value", ""]}, "", "\n"]},
+                            "$$this",
+                        ]
+                    },
+                }
+            },
+        }
+    }
+
+
+def _mconcat_parts(values: list[Any]) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {"parts": [_mstr(value) for value in values]},
+            "in": {
+                "$reduce": {
+                    "input": {
+                        "$filter": {
+                            "input": "$$parts",
+                            "as": "part",
+                            "cond": {"$ne": [{"$trim": {"input": "$$part"}}, ""]},
+                        }
+                    },
+                    "initialValue": "",
+                    "in": {
+                        "$concat": [
+                            "$$value",
+                            {"$cond": [{"$eq": ["$$value", ""]}, "", " "]},
+                            "$$this",
+                        ]
+                    },
+                }
+            },
+        }
+    }
+
+
+def _mfirst_array_value(value: Any, field: str) -> dict[str, Any]:
+    return _mfirst_nested(value, field)
+
+
+def _mfirst_nested(value: Any, field: str) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {
+                "values": {
+                    "$map": {
+                        "input": {"$cond": [{"$isArray": value}, value, []]},
+                        "as": "item",
+                        "in": _mstr(f"$$item.{field}"),
+                    }
+                }
+            },
+            "in": {
+                "$ifNull": [
+                    {
+                        "$arrayElemAt": [
+                            {
+                                "$filter": {
+                                    "input": "$$values",
+                                    "as": "value",
+                                    "cond": {"$ne": [{"$trim": {"input": "$$value"}}, ""]},
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                    "",
+                ]
+            },
+        }
+    }
+
+
+def _mongo_cve_affected(configurations: Any) -> dict[str, Any]:
+    matches = {
+        "$reduce": {
+            "input": {"$cond": [{"$isArray": configurations}, configurations, []]},
+            "initialValue": [],
+            "in": {
+                "$concatArrays": [
+                    "$$value",
+                    {
+                        "$reduce": {
+                            "input": {"$ifNull": ["$$this.nodes", []]},
+                            "initialValue": [],
+                            "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this.cpeMatch", []]}]},
+                        }
+                    },
+                ]
+            },
+        }
+    }
+    return _mjoin_mapped(
+        {
+            "$filter": {
+                "input": matches,
+                "as": "match",
+                "cond": {"$ne": ["$$match.vulnerable", False]},
+            }
+        },
+        _mconcat_parts(
+            [
+                "$$item.criteria",
+                _mbound("$$item.versionStartIncluding", ">="),
+                _mbound("$$item.versionStartExcluding", ">"),
+                _mbound("$$item.versionEndIncluding", "<="),
+                _mbound("$$item.versionEndExcluding", "<"),
+            ]
+        ),
+    )
+
+
+def _mbound(value: Any, operator: str) -> dict[str, Any]:
+    text = _mstr(value)
+    return {"$cond": [{"$eq": [text, ""]}, "", {"$concat": [operator, text]}]}

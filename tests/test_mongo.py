@@ -3,7 +3,11 @@ import copy
 import pytest
 
 from vuln_scraper.config import ScraperSettings
-from vuln_scraper.mongo import build_mongo_document, redact_mongo_uri, sync_output_to_mongo
+from vuln_scraper.mongo import (
+    build_mongo_document,
+    redact_mongo_uri,
+    sync_output_to_mongo,
+)
 
 
 def test_build_mongo_document_requires_type_and_code() -> None:
@@ -189,3 +193,13 @@ class FakeCollection:
 
     def replace_one(self, query: dict, document: dict, *, upsert: bool = False) -> None:
         self.documents[query["_id"]] = copy.deepcopy(document)
+
+    def delete_one(self, query: dict):
+        deleted = int(query["_id"] in self.documents)
+        self.documents.pop(query["_id"], None)
+        return FakeDeleteResult(deleted)
+
+
+class FakeDeleteResult:
+    def __init__(self, deleted_count: int) -> None:
+        self.deleted_count = deleted_count

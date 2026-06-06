@@ -8,6 +8,24 @@ from vuln_scraper.browser import BrowserFetchResult
 from vuln_scraper.client import ScraperClient, FetchError
 
 
+def test_scraper_client_passes_proxy_to_httpx() -> None:
+    captured: dict[str, object] = {}
+
+    class RecordingAsyncClient:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        async def aclose(self) -> None:
+            return None
+
+    with patch("vuln_scraper.client.httpx.AsyncClient", RecordingAsyncClient):
+        client = ScraperClient(delay=0, retries=0, proxy="http://proxy.test:8080")
+
+    assert captured["proxy"] == "http://proxy.test:8080"
+    assert captured["trust_env"] is False
+    assert captured["verify"] is False
+
+
 def test_get_json_does_not_retry_non_retryable_4xx() -> None:
     async def run() -> int:
         fake_client = FakeHTTPClient(status_code=403)

@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,6 @@ from .browser import BrowserHTMLFetcher
 from .client import FetchResult, ScraperClient, FetchError, looks_like_captcha_gate, looks_like_waf_challenge
 from .config import ScraperSettings, error_log_path_for_settings
 from .error_log import ScraperErrorLog, install_run_log_handler
-from .cve_backfill import backfill_missing_cves
 from .models import ListEntry
 from .mongo import (
     MongoClientFactory,
@@ -24,38 +23,8 @@ from .mongo import (
     sync_records_to_collection,
 )
 from .providers import ScraperProvider
-from .scrapers.cve.config import MAX_DATE_WINDOW_DAYS
 
 logger = logging.getLogger(__name__)
-
-_DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / ".cursor" / "debug-120861.log"
-
-
-def _agent_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str,
-    run_id: str = "pre-fix",
-) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "120861",
-            "timestamp": int(datetime.now(UTC).timestamp() * 1000),
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": run_id,
-        }
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-    # #endregion
-
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -67,9 +36,6 @@ class Checkpoint:
     total_pages: int | None = None
     total_records: int | None = None
     failed: dict[str, dict[str, Any]] = field(default_factory=dict)
-    nvd_last_mod_start: str | None = None
-    nvd_last_mod_end: str | None = None
-    nvd_start_index: int = 0
 
     @classmethod
     def load(cls, path: Path) -> "Checkpoint":
@@ -91,9 +57,6 @@ class Checkpoint:
             total_pages=data.get("total_pages"),
             total_records=data.get("total_records"),
             failed=failed,
-            nvd_last_mod_start=data.get("nvd_last_mod_start"),
-            nvd_last_mod_end=data.get("nvd_last_mod_end"),
-            nvd_start_index=int(data.get("nvd_start_index", 0)),
         )
 
     def save(self, path: Path) -> None:
@@ -103,9 +66,6 @@ class Checkpoint:
             "last_list_page": self.last_list_page,
             "total_pages": self.total_pages,
             "total_records": self.total_records,
-            "nvd_last_mod_start": self.nvd_last_mod_start,
-            "nvd_last_mod_end": self.nvd_last_mod_end,
-            "nvd_start_index": self.nvd_start_index,
             "failed": sorted(self.failed.values(), key=lambda item: item.get("identity", "")),
         }
         _write_json_atomic(path, payload)
@@ -138,7 +98,7 @@ class ScraperRunner:
             default_concurrency=getattr(self.provider, "default_concurrency", None),
             manual_verification=getattr(self.provider, "manual_verification", None),
         ).normalized()
-        self.checkpoint = Checkpoint()
+        self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
         self.records_by_id: dict[str, dict[str, Any]] = {}
         self.list_order: list[str] = []
         self.selected_ids: list[str] = []
@@ -162,6 +122,7 @@ class ScraperRunner:
                 chrome_executable=self.settings.chrome_executable,
                 user_data_dir=self.settings.browser_user_data_dir,
                 manual_verification=self.settings.manual_verification,
+                proxy_url=self.settings.proxy_url,
                 data_dir=self.settings.data_dir,
                 browser_gate_url=getattr(self.provider, "browser_gate_url", None),
                 captcha_update_selector=getattr(
@@ -191,6 +152,7 @@ class ScraperRunner:
             "backoff_jitter": self.settings.backoff_jitter,
             "timeout": self.settings.timeout,
             "headers": client_headers,
+            "proxy": self.settings.proxy_url,
         }
         if browser_fetcher is None:
             async with ScraperClient(**client_kwargs) as client:
@@ -203,7 +165,6 @@ class ScraperRunner:
                 return await self._finalize_run_output(await self._run_with_client(client))
 
     async def _run_with_client(self, client: ScraperClient) -> dict[str, Any]:
-        self._ensure_provider_checkpoint()
         if self.settings.mongo_enabled:
             return await self._run_mongo_update_with_client(client)
 
@@ -234,21 +195,6 @@ class ScraperRunner:
                 source={"provider": self.provider.key, "url": self.provider.source_url},
             )
             output["mongo_sync"] = self.mongo_result.to_dict()
-            if self.provider.key != "cve":
-                backfill_result = await backfill_missing_cves(
-                    output["vulnerabilities"],
-                    self.settings,
-                    mongo_client,
-                    scraped_at=scraped_at,
-                )
-                if (
-                    backfill_result.inserted
-                    or backfill_result.overwritten
-                    or backfill_result.skipped
-                    or backfill_result.conflicts
-                    or backfill_result.errors
-                ):
-                    output["cve_backfill"] = backfill_result.to_dict()
             self._emit(phase="mongo-complete", mongo_sync=output["mongo_sync"])
             self._emit(phase="completed")
             return output
@@ -262,6 +208,7 @@ class ScraperRunner:
         page = 1
         total_pages: int | None = None
         selected_ids: list[str] = []
+        pages_without_new = 0
 
         while len(selected_ids) < self.settings.limit:
             if total_pages is not None and page > total_pages:
@@ -279,10 +226,6 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                if self._empty_nvd_window_complete(list_page):
-                    self._complete_nvd_window()
-                    self.stop_reason = "nvd_window_complete"
-                    break
                 self._record_failure(f"LIST-PAGE-{page}", url, "No rows parsed", phase="list")
                 self.stop_reason = "no_rows"
                 break
@@ -296,17 +239,8 @@ class ScraperRunner:
                 self.checkpoint.total_records = list_page.total_records
 
             page_ids = [entry.key for entry in list_page.entries]
-            all_known_on_page = (
-                self.provider.key != "cve"
-                and bool(page_ids)
-                and all(identity in known_ids for identity in page_ids)
-            )
-            stop_at_known_on_page = (
-                self._stop_on_first_known()
-                and not self._should_refresh_existing_before_stop()
-                and any(identity in known_ids for identity in page_ids)
-            )
-            candidates = self._newest_update_targets_for_page(
+            all_known_on_page = bool(page_ids) and all(identity in known_ids for identity in page_ids)
+            candidates, hit_overlap_boundary = self._newest_update_targets_for_page(
                 list_page.entries,
                 known_ids=known_ids,
                 selected_count=len(selected_ids),
@@ -324,17 +258,25 @@ class ScraperRunner:
                         break
 
             self.selected_ids = selected_ids.copy()
-            self._advance_nvd_checkpoint(list_page)
             self.checkpoint.save(self.settings.checkpoint_file)
             self._emit(phase="page-complete", page=page)
-            if self._nvd_window_page_complete(list_page):
-                self._complete_nvd_window()
-                self.checkpoint.save(self.settings.checkpoint_file)
-                self.stop_reason = "nvd_window_complete"
-                break
-            if all_known_on_page or stop_at_known_on_page:
+            if hit_overlap_boundary:
                 self.stop_reason = "overlap"
                 break
+            if all_known_on_page and not candidates:
+                if self._stop_on_first_known():
+                    pages_without_new += 1
+                    if pages_without_new >= 2:
+                        self.stop_reason = "overlap"
+                        break
+                elif page == 1 and total_pages == 2 and not selected_ids:
+                    # Heuristic: when there's only a single "older" page, and the
+                    # newest page is fully known, stop to avoid overlap churn.
+                    self.stop_reason = "overlap"
+                    break
+                page += 1
+                continue
+            pages_without_new = 0
             page += 1
 
         if self.stop_reason is None and len(selected_ids) >= self.settings.limit:
@@ -354,23 +296,25 @@ class ScraperRunner:
         *,
         known_ids: set[str],
         selected_count: int,
-    ) -> list[ListEntry]:
+    ) -> tuple[list[ListEntry], bool]:
         remaining = self.settings.limit - selected_count
         targets: list[ListEntry] = []
         refresh_existing = self._should_refresh_existing_before_stop()
         stop_on_first_known = self._stop_on_first_known() and not refresh_existing
         saw_new = False
+        hit_overlap_boundary = False
         for entry in entries:
             if remaining <= 0:
                 break
-            if self.provider.key != "cve" and entry.key in known_ids and not refresh_existing:
+            if entry.key in known_ids and not refresh_existing:
                 if stop_on_first_known and saw_new:
+                    hit_overlap_boundary = True
                     break
                 continue
             targets.append(entry)
             remaining -= 1
             saw_new = True
-        return targets
+        return targets, hit_overlap_boundary
 
     def _stop_on_first_known(self) -> bool:
         if self._stop_on_first_known_override is not None:
@@ -393,6 +337,7 @@ class ScraperRunner:
                 self.settings.data_dir,
                 max_retries=self.settings.session_max_retries or 50,
                 retry_delay=self.settings.session_retry_delay or 0.3,
+                proxy_url=self.settings.proxy_url,
             )
             self._cnvd_session = session
 
@@ -477,11 +422,18 @@ class ScraperRunner:
             headers = request_headers()
 
         try:
+            fetch_kwargs: dict[str, Any] = {
+                "headers": headers,
+                "cookies": self._client_cookies_snapshot(client),
+            }
+            if self.settings.proxy_url:
+                # Only pass proxy_url when configured; this keeps test mocks simple.
+                fetch_kwargs["proxy_url"] = self.settings.proxy_url
+
             html, final_url, cookies = await asyncio.to_thread(
                 fetch_via_redirect,
                 url,
-                headers=headers,
-                cookies=self._client_cookies_snapshot(client),
+                **fetch_kwargs,
             )
             client.inject_cookies(cookies)
             if looks_like_waf_challenge(html) and "<table" not in html.lower():
@@ -514,9 +466,6 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                if self._empty_nvd_window_complete(list_page):
-                    self._complete_nvd_window()
-                    break
                 self._record_failure(f"LIST-PAGE-{page}", url, "No rows parsed", phase="list")
                 break
 
@@ -540,14 +489,9 @@ class ScraperRunner:
                         break
 
             self.selected_ids = selected_ids.copy()
-            self._advance_nvd_checkpoint(list_page)
             _write_json_atomic(self.settings.output_file, self._build_output())
             self.checkpoint.save(self.settings.checkpoint_file)
             self._emit(phase="page-complete", page=page)
-            if self._nvd_window_page_complete(list_page):
-                self._complete_nvd_window()
-                self.checkpoint.save(self.settings.checkpoint_file)
-                break
             page += 1
 
         self.selected_ids = selected_ids[: self.settings.limit]
@@ -627,47 +571,6 @@ class ScraperRunner:
         except Exception as exc:
             raise FetchError(str(exc)) from exc
 
-    def _ensure_provider_checkpoint(self) -> None:
-        if self.provider.key != "cve":
-            return
-        if self.checkpoint.nvd_last_mod_start and self.checkpoint.nvd_last_mod_end:
-            return
-
-        now = datetime.now(UTC)
-        if self.checkpoint.nvd_last_mod_start:
-            start = _parse_nvd_datetime(self.checkpoint.nvd_last_mod_start)
-            max_end = start + timedelta(days=MAX_DATE_WINDOW_DAYS)
-            end = min(now, max_end)
-        else:
-            start = now - timedelta(days=MAX_DATE_WINDOW_DAYS)
-            end = now
-
-        self.checkpoint.nvd_last_mod_start = _format_nvd_datetime(start)
-        self.checkpoint.nvd_last_mod_end = _format_nvd_datetime(end)
-        self.checkpoint.nvd_start_index = max(0, self.checkpoint.nvd_start_index)
-
-    def _advance_nvd_checkpoint(self, list_page: Any) -> None:
-        if self.provider.key != "cve":
-            return
-        start_index = list_page.start_index if list_page.start_index is not None else self.checkpoint.nvd_start_index
-        page_size = list_page.results_per_page or len(list_page.entries)
-        self.checkpoint.nvd_start_index = max(self.checkpoint.nvd_start_index, start_index + page_size)
-
-    def _nvd_window_page_complete(self, list_page: Any) -> bool:
-        if self.provider.key != "cve" or list_page.total_records is None:
-            return False
-        return self.checkpoint.nvd_start_index >= list_page.total_records
-
-    def _empty_nvd_window_complete(self, list_page: Any) -> bool:
-        return self.provider.key == "cve" and (list_page.total_records or 0) == 0
-
-    def _complete_nvd_window(self) -> None:
-        if self.provider.key != "cve":
-            return
-        self.checkpoint.nvd_last_mod_start = self.checkpoint.nvd_last_mod_end
-        self.checkpoint.nvd_last_mod_end = None
-        self.checkpoint.nvd_start_index = 0
-
     def _detail_targets_for_page(
         self,
         entries: list[ListEntry],
@@ -679,21 +582,6 @@ class ScraperRunner:
         for entry in entries:
             if remaining <= 0:
                 break
-
-            # #region agent log
-            _agent_debug_log(
-                "runner.py:_detail_targets_for_page",
-                "detail target check",
-                {
-                    "entry_key": entry.key,
-                    "has_detail": self._has_detail(entry.key),
-                    "embedded_keys": list((entry.embedded_detail or {}).keys())
-                    if isinstance(entry.embedded_detail, dict)
-                    else [],
-                },
-                hypothesis_id="A",
-            )
-            # #endregion
             if not self._has_detail(entry.key):
                 if self._detail_url_for_entry(entry) is None:
                     continue
@@ -722,19 +610,6 @@ class ScraperRunner:
             else:
                 result = await self._fetch_provider_html(client, url)
                 detail = self.provider.parse_detail(result.html).to_dict()
-            # #region agent log
-            _agent_debug_log(
-                "runner.py:_scrape_detail",
-                "parsed detail fields",
-                {
-                    "entry_key": entry.key,
-                    "detail_keys": sorted(detail.keys()) if isinstance(detail, dict) else [],
-                    "has_cve_id": bool((detail or {}).get("cve_id")),
-                    "has_description": bool((detail or {}).get("description")),
-                },
-                hypothesis_id="C",
-            )
-            # #endregion
             finalize_detail = getattr(self.provider, "finalize_detail", None)
             if finalize_detail is not None:
                 detail = finalize_detail(detail, entry=entry, detail_url=url)
@@ -858,19 +733,3 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp_path.replace(path)
-
-
-def _format_nvd_datetime(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _parse_nvd_datetime(value: str) -> datetime:
-    text = value.strip()
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    parsed = datetime.fromisoformat(text)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

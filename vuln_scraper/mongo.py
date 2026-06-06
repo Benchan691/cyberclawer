@@ -17,6 +17,7 @@ MongoClientFactory = Callable[[str], Any]
 class MongoSyncResult:
     inserted: int = 0
     overwritten: int = 0
+    deleted: int = 0
     skipped: int = 0
     conflicts: int = 0
     unchanged: int = 0

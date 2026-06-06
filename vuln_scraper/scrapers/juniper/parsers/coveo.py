@@ -27,7 +27,8 @@ def parse_coveo_list(
         raise TypeError("Coveo list payload must be a dict")
     entries: list[ListEntry] = []
     seen: set[str] = set()
-    for hit in payload.get("results") or []:
+    raw_hits = payload.get("results") or []
+    for hit in raw_hits:
         entry = _entry_from_hit(hit, provider=provider, source_url=source_url)
         if entry is not None and entry.identity.code not in seen:
             entries.append(entry)

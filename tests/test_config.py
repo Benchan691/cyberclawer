@@ -1,5 +1,6 @@
 import pytest
 
+from vuln_scraper.providers import provider_keys
 from vuln_scraper.config import (
     DEFAULT_BACKOFF_BASE,
     DEFAULT_BACKOFF_JITTER,
@@ -13,6 +14,8 @@ from vuln_scraper.config import (
     mongo_collection_for_provider,
     mongo_collections_from_config,
     resolve_mongo_export_path,
+    apply_httpx_proxy_kwargs,
+    resolve_proxy_url,
     retry_config_for_provider,
 )
 
@@ -118,6 +121,7 @@ def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
         "cisco": "cisco",
         "zeroday": "zeroday",
         "govcert": "govcert",
+        "github_advisory": "github_advisory",
         "huawei_sa": "huawei_sa",
         "paloalto": "paloalto",
         "qianxin": "qianxin",
@@ -132,10 +136,94 @@ def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
     assert mongo_collection_for_provider("hkcert", config_file) == "hkcert"
 
 
+def test_mongo_collections_from_config_is_alphabetical() -> None:
+    keys = list(mongo_collections_from_config().keys())
+    assert keys == sorted(keys)
+
+
+def test_provider_keys_is_alphabetical() -> None:
+    assert provider_keys() == tuple(sorted(provider_keys()))
+
+
+def test_apply_httpx_proxy_kwargs_disables_tls_verify() -> None:
+    kwargs: dict[str, object] = {}
+    apply_httpx_proxy_kwargs(kwargs, "http://127.0.0.1:7890")
+    assert kwargs == {
+        "proxy": "http://127.0.0.1:7890",
+        "trust_env": False,
+        "verify": False,
+    }
+
+
+def test_resolve_proxy_url_prefers_explicit() -> None:
+    assert resolve_proxy_url(explicit="http://explicit.test:8080") == "http://explicit.test:8080"
+
+
+def test_resolve_proxy_url_prefers_scraper_proxy_over_http_proxy(monkeypatch) -> None:
+    monkeypatch.setenv("SCRAPER_PROXY", "http://scraper.test:7890")
+    monkeypatch.setenv("HTTP_PROXY", "http://global.test:3128")
+    assert resolve_proxy_url() == "http://scraper.test:7890"
+
+
+def test_scraper_settings_normalized_resolves_proxy_from_env(monkeypatch) -> None:
+    monkeypatch.delenv("SCRAPER_PROXY", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    monkeypatch.setenv("SCRAPER_PROXY", "http://127.0.0.1:7890")
+
+    class DummySocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def fake_create_connection(addr, timeout):
+        assert addr == ("127.0.0.1", 7890)
+        return DummySocket()
+
+    monkeypatch.setattr("vuln_scraper.config.socket.create_connection", fake_create_connection)
+    settings = default_scrape_settings().normalized()
+    assert settings.proxy_url == "http://127.0.0.1:7890"
+
+
+def test_resolve_proxy_url_local_unreachable_returns_none(monkeypatch) -> None:
+    monkeypatch.setenv("SCRAPER_PROXY", "http://127.0.0.1:8080")
+
+    def fake_create_connection(addr, timeout):
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setattr("vuln_scraper.config.socket.create_connection", fake_create_connection)
+    assert resolve_proxy_url() is None
+
+
 def test_scraper_settings_for_provider_disables_browser_for_cnvd() -> None:
     settings = ScraperSettings(browser_fallback=True).for_provider("cnvd")
 
     assert settings.browser_fallback is False
+
+
+def test_scraper_settings_for_provider_overrides_default_collection(tmp_path) -> None:
+    config_file = tmp_path / "mongodb.toml"
+    config_file.write_text(
+        """
+        [mongodb]
+        database = "vulnerabilities"
+
+        [mongodb.collections]
+        hkcert = "hkcert"
+        """,
+        encoding="utf-8",
+    )
+
+    settings = (
+        ScraperSettings(mongo_enabled=True, mongo_config_file=config_file)
+        .normalized()
+        .for_provider("hkcert")
+        .normalized()
+    )
+
+    assert settings.mongo_collection == "hkcert"
 
 
 def test_scraper_settings_for_provider_sets_collection(tmp_path) -> None:

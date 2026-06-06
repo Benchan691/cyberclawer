@@ -11,7 +11,6 @@ from vuln_scraper.providers import HKCERTProvider, ZeroDayProvider
 
 def test_provider_caught_up_on_overlap() -> None:
     assert provider_caught_up({"stop_reason": "overlap"})
-    assert provider_caught_up({"stop_reason": "nvd_window_complete"})
     assert not provider_caught_up({"stop_reason": "limit", "result_count": 10})
 
 
@@ -28,6 +27,7 @@ def test_provider_caught_up_cve_empty_run() -> None:
 
 def test_no_progress_on_empty_result() -> None:
     assert no_progress({"result_count": 0, "mongo_sync": {}})
+    assert not no_progress({"result_count": 0, "mongo_sync": {"deleted": 1}})
     assert not no_progress({"stop_reason": "overlap", "result_count": 0})
 
 

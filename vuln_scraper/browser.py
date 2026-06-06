@@ -9,7 +9,6 @@ from typing import Any
 
 from .captcha_solver import (
     CaptchaMap,
-    debug_log,
     hash_captcha_data_url,
     hash_captcha_image_bytes,
     resolve_captcha_map_path,
@@ -251,10 +250,12 @@ class BrowserHTMLFetcher:
         data_dir: str | Path | None = None,
         browser_gate_url: str | None = None,
         captcha_update_selector: str = _CNVD_CAPTCHA_UPDATE_SELECTOR,
+        proxy_url: str | None = None,
     ) -> None:
         self.headless = headless
         self.timeout_ms = timeout_ms
         self.chrome_executable = chrome_executable
+        self.proxy_url = proxy_url.strip() if proxy_url and proxy_url.strip() else None
         self.user_data_dir = Path(user_data_dir) if user_data_dir is not None else None
         self.manual_verification = manual_verification
         self.browser_gate_url = browser_gate_url
@@ -298,6 +299,9 @@ class BrowserHTMLFetcher:
             "viewport": {"width": 1440, "height": 1100},
             "extra_http_headers": {"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
         }
+        if self.proxy_url:
+            context_kwargs["proxy"] = {"server": self.proxy_url}
+            context_kwargs["ignore_https_errors"] = True
         if self.user_data_dir is not None:
             self.user_data_dir.mkdir(parents=True, exist_ok=True)
             self._context = await self._playwright.chromium.launch_persistent_context(
@@ -311,18 +315,6 @@ class BrowserHTMLFetcher:
             self._browser = await self._playwright.chromium.launch(**launch_kwargs)
             self._context = await self._browser.new_context(**context_kwargs)
 
-        # #region agent log
-        debug_log(
-            hypothesis_id="H1",
-            location="browser.py:__aenter__",
-            message="browser fetcher initialized",
-            data={
-                "manual_verification": self.manual_verification,
-                "captcha_map_entries": len(self.captcha_map) if self.captcha_map else 0,
-                "headless": self.headless,
-            },
-        )
-        # #endregion
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -359,21 +351,9 @@ class BrowserHTMLFetcher:
         if self.browser_gate_url is None or self._site_gate_cleared:
             return
 
-        debug_log(
-            hypothesis_id="H6",
-            location="browser.py:_clear_site_gate",
-            message="opening CNVD gate",
-            data={"gate_url": self.browser_gate_url},
-        )
         await page.goto(self.browser_gate_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         if await self._solve_cnvd_captcha(page):
             self._site_gate_cleared = True
-            debug_log(
-                hypothesis_id="H6",
-                location="browser.py:_clear_site_gate",
-                message="CNVD gate cleared",
-                data={"url": page.url},
-            )
 
     async def _solve_cnvd_captcha(self, page) -> bool:
         if self.captcha_map is None:
@@ -392,16 +372,6 @@ class BrowserHTMLFetcher:
                 continue
 
             answer = self.captcha_map.lookup(image_hash)
-            debug_log(
-                hypothesis_id="H2",
-                location="browser.py:_solve_cnvd_captcha",
-                message="captcha hash lookup",
-                data={
-                    "rotation": rotations,
-                    "image_hash_prefix": image_hash[:12],
-                    "map_hit": answer is not None,
-                },
-            )
             if answer is None:
                 await self._record_unknown_captcha(page, image_hash)
                 if not await self._refresh_cnvd_captcha(page):
@@ -410,12 +380,6 @@ class BrowserHTMLFetcher:
                 continue
 
             submit_result = await self._submit_captcha_answer(page, answer)
-            debug_log(
-                hypothesis_id="H3",
-                location="browser.py:_solve_cnvd_captcha",
-                message="captcha submitted",
-                data={"submit_result": submit_result},
-            )
             cleared = await _wait_until(
                 lambda: self._content_ready(page),
                 timeout_seconds=15,
@@ -458,13 +422,8 @@ class BrowserHTMLFetcher:
                 json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
-        except OSError as exc:
-            debug_log(
-                hypothesis_id="H2",
-                location="browser.py:_record_unknown_captcha",
-                message="could not record unknown captcha",
-                data={"error": str(exc), "image_hash_prefix": image_hash[:12]},
-            )
+        except OSError:
+            pass
 
     async def _page_is_blocked(self, page) -> bool:
         try:
@@ -550,12 +509,6 @@ class BrowserHTMLFetcher:
     async def _captcha_image_hash(self, page) -> str | None:
         src = await self._captcha_image_src(page)
         if not src:
-            debug_log(
-                hypothesis_id="H2",
-                location="browser.py:_captcha_image_hash",
-                message="captcha image src missing",
-                data={},
-            )
             return None
         if src.startswith("data:image"):
             image_hash = hash_captcha_data_url(src)
@@ -566,19 +519,8 @@ class BrowserHTMLFetcher:
                 response = await page.request.get(src, timeout=10_000)
                 if response.ok:
                     return hash_captcha_image_bytes(await response.body())
-            except Exception as exc:
-                debug_log(
-                    hypothesis_id="H2",
-                    location="browser.py:_captcha_image_hash",
-                    message="captcha http fetch failed",
-                    data={"error": str(exc), "src_prefix": src[:80]},
-                )
-        debug_log(
-            hypothesis_id="H2",
-            location="browser.py:_captcha_image_hash",
-            message="captcha src could not be hashed",
-            data={"src_prefix": src[:80]},
-        )
+            except Exception:
+                pass
         return None
 
     async def _wait_for_captcha_hash_change(self, page, previous_hash: str | None) -> str | None:
@@ -594,37 +536,15 @@ class BrowserHTMLFetcher:
         previous_hash = await self._captcha_image_hash(page)
         update_link = page.locator(self.captcha_update_selector).first
         if await update_link.count() == 0:
-            debug_log(
-                hypothesis_id="H4",
-                location="browser.py:_refresh_cnvd_captcha",
-                message="update link missing",
-                data={"selector": self.captcha_update_selector},
-            )
             return False
 
         try:
             await update_link.click(timeout=3_000)
-        except Exception as exc:
-            debug_log(
-                hypothesis_id="H4",
-                location="browser.py:_refresh_cnvd_captcha",
-                message="update click failed",
-                data={"error": str(exc)},
-            )
+        except Exception:
             return False
 
         new_hash = await self._wait_for_captcha_hash_change(page, previous_hash)
         changed = bool(new_hash and new_hash != previous_hash)
-        debug_log(
-            hypothesis_id="H4",
-            location="browser.py:_refresh_cnvd_captcha",
-            message="captcha refreshed",
-            data={
-                "previous_hash_prefix": (previous_hash or "")[:12],
-                "new_hash_prefix": (new_hash or "")[:12],
-                "hash_changed": changed,
-            },
-        )
         return changed
 
     async def _refresh_captcha(self, page) -> bool:
@@ -639,12 +559,6 @@ class BrowserHTMLFetcher:
 
     async def _attempt_captcha_solve(self, page) -> bool:
         if self.captcha_map is None:
-            debug_log(
-                hypothesis_id="H1",
-                location="browser.py:_attempt_captcha_solve",
-                message="captcha map not loaded",
-                data={},
-            )
             return False
 
         state = await self._detect_captcha(page)
@@ -653,28 +567,10 @@ class BrowserHTMLFetcher:
 
         image_hash = await self._captcha_image_hash(page)
         if not image_hash:
-            debug_log(
-                hypothesis_id="H2",
-                location="browser.py:_attempt_captcha_solve",
-                message="could not hash captcha image",
-                data={"has_input": state.get("hasInput")},
-            )
             await self._refresh_cnvd_captcha(page)
             return False
 
         answer = self.captcha_map.lookup(image_hash)
-        debug_log(
-            hypothesis_id="H2",
-            location="browser.py:_attempt_captcha_solve",
-            message="captcha hash lookup",
-            data={
-                "image_hash_prefix": image_hash[:12],
-                "map_hit": answer is not None,
-                "has_input": state.get("hasInput"),
-                "has_submit": state.get("hasSubmit"),
-                "src_len": len(str(state.get("src") or "")),
-            },
-        )
         if answer is None:
             await self._refresh_cnvd_captcha(page)
             return False
@@ -685,25 +581,13 @@ class BrowserHTMLFetcher:
 
         try:
             submit_result = await self._submit_captcha_answer(page, answer)
-        except Exception as exc:
-            debug_log(
-                hypothesis_id="H3",
-                location="browser.py:_attempt_captcha_solve",
-                message="submit failed",
-                data={"error": str(exc)},
-            )
+        except Exception:
             await self._refresh_cnvd_captcha(page)
             return False
         if not submit_result.get("ok"):
             await self._refresh_cnvd_captcha(page)
             return False
 
-        debug_log(
-            hypothesis_id="H3",
-            location="browser.py:_attempt_captcha_solve",
-            message="captcha answer submitted",
-            data={"submit_result": submit_result},
-        )
         await asyncio.sleep(0.8)
         if await self._content_ready(page):
             return True
@@ -729,36 +613,14 @@ class BrowserHTMLFetcher:
                     await page.wait_for_load_state("networkidle", timeout=5_000)
                 except Exception:
                     pass
-                debug_log(
-                    hypothesis_id="H5",
-                    location="browser.py:_wait_for_real_content",
-                    message="real content ready",
-                    data={"captcha_attempts": captcha_attempts},
-                )
                 return True
 
             if await self._cnvd_captcha_present(page):
                 if captcha_attempts >= max_captcha_attempts:
-                    debug_log(
-                        hypothesis_id="H5",
-                        location="browser.py:_wait_for_real_content",
-                        message="captcha attempt limit reached",
-                        data={
-                            "attempt": captcha_attempts,
-                            "unique_hashes": len(seen_hashes),
-                        },
-                    )
                     break
                 captcha_attempts += 1
                 if not await self._solve_cnvd_captcha(page):
                     await asyncio.sleep(0.5)
-            elif self.captcha_map is not None:
-                debug_log(
-                    hypothesis_id="H5",
-                    location="browser.py:_wait_for_real_content",
-                    message="waiting without captcha markers",
-                    data={"manual_verification": self.manual_verification},
-                )
 
             current_html = await page.content()
             if current_html != last_html:
@@ -766,10 +628,4 @@ class BrowserHTMLFetcher:
             await asyncio.sleep(0.5)
 
         await page.wait_for_load_state("domcontentloaded", timeout=5_000)
-        debug_log(
-            hypothesis_id="H5",
-            location="browser.py:_wait_for_real_content",
-            message="wait deadline reached",
-            data={"captcha_attempts": captcha_attempts, "manual_verification": self.manual_verification},
-        )
         return False

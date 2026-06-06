@@ -102,6 +102,8 @@ def test_filter_fields_for_provider_uses_hkcert_fields() -> None:
     assert "cve_code" not in categorical_fields
     assert "cve_code" in text_fields
     assert "details.hkcert.solutions" in text_fields
+    assert "details.hkcert.summary" in text_fields
+    assert "details.hkcert.table.name" in text_fields
     assert dynamic_path is None
 
 
@@ -122,6 +124,16 @@ def test_filter_fields_for_provider_uses_govcert_fields() -> None:
     assert "details.govcert.tags" in categorical_fields
     assert "details.govcert.description" in text_fields
     assert "details.govcert.cve_ids" in text_fields
+    assert dynamic_path is None
+
+
+def test_filter_fields_for_provider_uses_github_advisory_fields() -> None:
+    categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("github_advisory")
+
+    assert "details.github_advisory.severity" in categorical_fields
+    assert "details.github_advisory.vulnerabilities.package.ecosystem" in categorical_fields
+    assert "details.github_advisory.description" in text_fields
+    assert "details.github_advisory.references" in text_fields
     assert dynamic_path is None
 
 
@@ -200,8 +212,11 @@ def test_filter_fields_for_provider_uses_qianxin_fields() -> None:
 
     assert "details.qianxin.level" in categorical_fields
     assert "details.qianxin.threat_status" in categorical_fields
-    assert "details.qianxin.description" in text_fields
+    assert "details.qianxin.description.security_advisory" in text_fields
+    assert "details.qianxin.description.vulnerability_information.affected_versions" in text_fields
+    assert "details.qianxin.description.recommendations" in text_fields
     assert "details.qianxin.reference_links" in text_fields
+    assert "details.qianxin.raw_sections" not in text_fields
     assert dynamic_path is None
 
 

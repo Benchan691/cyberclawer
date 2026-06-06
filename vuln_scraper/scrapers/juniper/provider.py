@@ -5,7 +5,14 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from vuln_scraper.models import ListEntry, ListPage
-from vuln_scraper.scrapers.juniper.config import ARTICLE_URL, DEFAULT_COLLECTION, PAGE_SIZE, SEARCH_URL, SOURCE_URL
+from vuln_scraper.scrapers.juniper.config import (
+    ARTICLE_URL,
+    COVEO_LIST_QUERY,
+    DEFAULT_COLLECTION,
+    PAGE_SIZE,
+    SEARCH_URL,
+    SOURCE_URL,
+)
 from vuln_scraper.scrapers.juniper.coveo import (
     ARTICLE_RAW_FIELDS,
     DEFAULT_FACETS,
@@ -78,6 +85,7 @@ class JuniperProvider:
                 "Content-Type": "application/json",
             },
             "json": coveo_search_body(
+                q=COVEO_LIST_QUERY,
                 first_result=first_result,
                 number_of_results=PAGE_SIZE,
                 facet_filters=list(DEFAULT_FACETS),

@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum time to wait for headed manual verification.",
     )
+    run_parser.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
+    )
 
     subparsers.add_parser(
         "tui",
@@ -94,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int_arg,
         default=None,
         help="Maximum time to wait for headed manual verification.",
+    )
+    catch_up_parser.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
     )
     return parser
 
@@ -136,6 +146,8 @@ def main(argv: list[str] | None = None) -> None:
                     settings,
                     manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
                 )
+            if args.proxy:
+                settings = replace(settings, proxy_url=args.proxy)
             output = asyncio.run(ScraperRunner(settings, provider=provider).run())
         except (KeyError, ValueError) as exc:
             parser.error(str(exc))
@@ -152,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
             f"({completed} with details); "
             f"inserted={mongo.get('inserted', 0)} "
             f"overwritten={mongo.get('overwritten', 0)} "
+            f"deleted={mongo.get('deleted', 0)} "
             f"skipped={mongo.get('skipped', 0)} "
             f"conflicts={mongo.get('conflicts', 0)}"
         )
@@ -176,6 +189,8 @@ def main(argv: list[str] | None = None) -> None:
                     settings,
                     manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
                 )
+            if args.proxy:
+                settings = replace(settings, proxy_url=args.proxy)
             settings = settings.normalized()
         except ValueError as exc:
             parser.error(str(exc))

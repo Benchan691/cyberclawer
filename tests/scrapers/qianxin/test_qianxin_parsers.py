@@ -42,6 +42,82 @@ def test_parse_qianxin_detail_extracts_article_content_links_and_cves() -> None:
     assert detail["updated_date"] == "2026-06-03"
     assert detail["cve_ids"] == ["CVE-2026-23631"]
     assert detail["reference_links"] == ["https://redis.io/security"]
-    assert "第一章_安全通告" in detail["raw_sections"]
+    assert tuple(detail["description"]) == (
+        "security_advisory",
+        "vulnerability_information",
+        "threat_assessment",
+        "affected_assets",
+        "recommendations",
+        "references",
+    )
+    assert detail["description"]["security_advisory"].endswith("已公开。")
+    vulnerability = detail["description"]["vulnerability_information"]
+    assert vulnerability["published_date"] == "2026-06-03"
+    assert vulnerability["affected_versions"] == ["Redis < 7.0", "Redis < 8.0"]
+    assert vulnerability["risk"] == {"qianxin_cert_rating": "高危", "risk_level": "红色"}
+    assert vulnerability["current_threat_status"]["poc_status"] == "已公开"
+    assessment = detail["description"]["threat_assessment"]
+    assert assessment["cvss_3_1_score"] == "8.8"
+    assert assessment["cvss_vector"]["attack_vector"] == "网络"
+    assert assessment["exploitation_conditions"] == ["目标运行受影响版本。", "攻击者可访问服务。"]
+    assert detail["description"]["affected_assets"] == "全球存在受影响资产。"
+    assert detail["description"]["recommendations"] == ["升级至安全版本。", "限制服务访问。"]
+    assert detail["description"]["references"] == [
+        "1.[相关链接] https://redis.io/security"
+    ]
+    assert "奇安信 CERT" not in json.dumps(detail["description"], ensure_ascii=False)
+    assert "raw_sections" not in detail
     assert detail["prev_article"] == {"id": "1864", "title": "Previous advisory"}
     assert "content" not in detail["raw"]
+
+
+def test_parse_qianxin_detail_keeps_exact_six_chapter_defaults_when_sections_are_missing() -> None:
+    detail = parse_article_detail(
+        {"id": 1, "content": "<div><h1>第一章 安全通告</h1><p>Only chapter one.</p></div>"}
+    ).to_dict()
+
+    assert detail["description"] == {
+        "security_advisory": "Only chapter one.",
+        "vulnerability_information": {},
+        "threat_assessment": {},
+        "affected_assets": "",
+        "recommendations": [],
+        "references": [],
+    }
+
+
+def test_parse_qianxin_detail_routes_chapters_by_title_when_chapter_four_is_omitted() -> None:
+    content = """<div id="poc-preview"><div>
+<h1>第一章 安全通告</h1><p>Advisory text.</p>
+<h1>第二章 漏洞信息</h1><p>Summary.</p>
+<h1>第三章 威胁评估</h1><p>Assessment.</p>
+<h1>第四章 处置建议</h1><p>修复解决方案 patch info.</p><p>临时缓解方案.</p>
+<h1>第五章 参考资料</h1><p>1.[相关链接] https://example.test/ref</p>
+<p>奇安信 CERT</p>
+</div></div>"""
+
+    detail = parse_article_detail({"id": 1861, "content": content}).to_dict()["description"]
+
+    assert detail["affected_assets"] == ""
+    assert detail["recommendations"] == ["修复解决方案 patch info.", "临时缓解方案."]
+    assert detail["references"] == ["1.[相关链接] https://example.test/ref"]
+
+
+def test_parse_qianxin_detail_falls_back_to_numeric_mapping_for_unlabeled_chapter_headings() -> None:
+    content = """<div id="poc-preview"><div>
+<h1>第一章 安全通告</h1><p>Advisory.</p>
+<h1>第二章</h1><p>Vulnerability summary.</p>
+<h1>第三章</h1><p>Threat context.</p>
+<h1>第四章</h1><p>Asset exposure summary.</p>
+<h1>第五章</h1><p>Upgrade immediately.</p>
+<h1>第六章</h1><p>1.[相关链接] https://example.test/detail</p>
+</div></div>"""
+
+    detail = parse_article_detail({"id": 2, "content": content}).to_dict()["description"]
+
+    assert detail["security_advisory"] == "Advisory."
+    assert detail["vulnerability_information"]["summary"] == "Vulnerability summary."
+    assert detail["threat_assessment"]["context"] == "Threat context."
+    assert detail["affected_assets"] == "Asset exposure summary."
+    assert detail["recommendations"] == ["Upgrade immediately."]
+    assert detail["references"] == ["1.[相关链接] https://example.test/detail"]

@@ -5,6 +5,7 @@ from vuln_scraper.scrapers.cnnvd import CNNVDProvider
 from vuln_scraper.scrapers.cnvd import CNVDProvider
 from vuln_scraper.scrapers.cve import CVEProvider
 from vuln_scraper.scrapers.govcert import GovCERTProvider
+from vuln_scraper.scrapers.github_advisory import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.hikvision import HikvisionProvider
 from vuln_scraper.scrapers.hkcert import HKCERTProvider
 from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
@@ -23,6 +24,7 @@ __all__ = [
     "CNVDProvider",
     "CVEProvider",
     "GovCERTProvider",
+    "GitHubAdvisoryProvider",
     "HikvisionProvider",
     "HKCERTProvider",
     "HuaweiSAProvider",
