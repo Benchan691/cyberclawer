@@ -19,7 +19,6 @@ class AVDProvider:
     content_type: str = "html"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = False
-    browser_gate_url: str = BASE_URL
 
     def request_headers(self) -> dict[str, str]:
         headers = dict(DEFAULT_HEADERS)

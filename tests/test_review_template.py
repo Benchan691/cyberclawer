@@ -2,12 +2,6 @@ import json
 
 import pytest
 
-from scripts.export_review_templates import (
-    ensure_review_views,
-    export_review_templates,
-    export_review_templates_by_collection,
-    write_collection_exports,
-)
 from vuln_scraper.review_template import (
     REVIEW_TEMPLATE_FIELDS,
     ReviewViewError,
@@ -378,56 +372,6 @@ def test_ensure_review_view_skips_missing_source_and_protects_collection_collisi
     assert not ensure_review_view(missing, provider="avd", collection_name="avd")
     with pytest.raises(ReviewViewError):
         ensure_review_view(collision, provider="avd", collection_name="avd")
-
-
-def test_exporter_ensures_views_and_reads_selected_view() -> None:
-    database = FakeDatabase(
-        {"avd": [document("avd", {"danger_level": "High"})]},
-        types={"avd": "collection"},
-    )
-
-    created = ensure_review_views(database, collections_map={"avd": "avd"}, provider="avd")
-    database.collections["avd_review"] = [{"title": "View title", "impacts": "High"}]
-    templates = export_review_templates(
-        database,
-        collections_map={"avd": "avd"},
-        provider="avd",
-        limit=1,
-    )
-
-    assert created == {"avd": "avd_review"}
-    assert templates == [{"title": "View title", "impacts": "High"}]
-
-
-def test_export_review_templates_by_collection_keeps_views_separate() -> None:
-    database = FakeDatabase(
-        {
-            "avd_review": [{"title": "AVD"}],
-            "hkcert_review": [{"title": "HKCERT"}],
-        }
-    )
-
-    exports = export_review_templates_by_collection(
-        database,
-        collections_map={"avd": "avd", "hkcert": "hkcert"},
-        limit=1,
-    )
-
-    assert exports == {
-        "avd": [{"title": "AVD"}],
-        "hkcert": [{"title": "HKCERT"}],
-    }
-
-
-def test_write_collection_exports_writes_one_json_file_per_collection(tmp_path) -> None:
-    written = write_collection_exports(
-        {"avd": [{"title": "AVD"}], "custom/name": [{"title": "Custom"}]},
-        output_dir=tmp_path / "reviews",
-    )
-
-    assert written["avd"] == tmp_path / "reviews" / "avd.json"
-    assert written["custom/name"] == tmp_path / "reviews" / "custom_name.json"
-    assert json.loads(written["avd"].read_text(encoding="utf-8")) == [{"title": "AVD"}]
 
 
 class FakeCursor:

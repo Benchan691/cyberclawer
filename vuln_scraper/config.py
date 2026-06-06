@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .captcha_solver import resolve_captcha_map_path as _resolve_captcha_map_path_for_settings
 
 
 DEFAULT_DATA_DIR = Path("data")
@@ -224,14 +223,11 @@ class ScraperSettings:
         browser_headless = self.browser_headless
         browser_user_data_dir = self.browser_user_data_dir
         browser_timeout_ms = self.browser_timeout_ms
-        captcha_map_path = _resolve_captcha_map_path_for_settings(data_dir=Path(self.data_dir))
-        if provider_manual_verification and captcha_map_path is None:
+        if provider_manual_verification:
             browser_headless = False
             browser_timeout_ms = max(browser_timeout_ms, self.manual_verification_timeout_ms)
             if browser_user_data_dir is None:
                 browser_user_data_dir = Path(self.data_dir) / "browser_profiles" / provider_key
-        elif provider_manual_verification and captcha_map_path is not None:
-            provider_manual_verification = False
         resolved_browser_fallback = self.browser_fallback if browser_fallback is None else browser_fallback
         if provider_key == "cnvd":
             resolved_browser_fallback = False

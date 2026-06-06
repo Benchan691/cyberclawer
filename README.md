@@ -256,14 +256,6 @@ and store normalized CVE v5 fields under `details.cve`, including descriptions,
 CVSS metrics, affected product/version lines, references, and a complete `raw`
 copy for forward compatibility.
 
-Legacy documents that still have uppercase `type` or `cross_refs` should be
-migrated before relying on filters:
-
-```bash
-PYTHONPATH=. python scripts/migrate_schema_v2.py
-PYTHONPATH=. python scripts/migrate_schema_v2.py --apply
-```
-
 ## Development
 
 Scrapers live under:
@@ -296,25 +288,6 @@ Run tests:
 ```bash
 PYTHONPATH=. uv run pytest -q
 ```
-
-Create read-only MongoDB review views and export their normalized seven-field
-ReviewTemplate JSON schema:
-
-```bash
-uv run python scripts/export_review_templates.py
-uv run python scripts/export_review_templates.py --provider hkcert --output data/hkcert_reviews.json
-```
-
-The default command writes one JSON file per MongoDB collection under
-`data/review_templates/`, for example `avd.json`, `hkcert.json`, and
-`github_advisory.json`. When `--provider` is supplied, `--output` names the
-single output JSON file. Without `--provider`, `--output` names the output
-directory. Before export, the script creates or refreshes one read-only MongoDB
-view per existing provider collection, named `<collection>_review`. Review
-documents contain `title`, `description`, `impacts`, `affected`, `cve`,
-`recommendation`, and `related_link`; `impacts` is the provider severity/risk
-level and `affected` is an array containing only affected products, devices,
-components, or vulnerable versions. `related_link` is an array of source links.
 
 ## Operational Notes
 

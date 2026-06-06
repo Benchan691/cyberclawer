@@ -123,13 +123,6 @@ class ScraperRunner:
                 user_data_dir=self.settings.browser_user_data_dir,
                 manual_verification=self.settings.manual_verification,
                 proxy_url=self.settings.proxy_url,
-                data_dir=self.settings.data_dir,
-                browser_gate_url=getattr(self.provider, "browser_gate_url", None),
-                captcha_update_selector=getattr(
-                    self.provider,
-                    "captcha_update_selector",
-                    "#update",
-                ),
             )
             if self.settings.browser_fallback
             else None
