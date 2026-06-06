@@ -25,8 +25,10 @@ Also add tests and fixtures:
 ```text
 tests/scrapers/<provider>/
   fixtures/
-    list.html
+    list.html          # when content_type is "html"
     detail.html
+    list.json          # when content_type is "json"
+    detail.json
   test_provider.py
   test_parsers.py
 ```
@@ -69,7 +71,8 @@ tests/scrapers/<provider>/
 ### `vuln_scraper/scrapers/__init__.py`
 
 - Import the new provider class.
-- Add provider to `PROVIDERS` map in the sync order you want.
+- Add provider to `PROVIDERS` (dict insertion order controls `catch-up` iteration;
+  `provider_keys()` is sorted alphabetically for CLI/help).
 
 ### `vuln_scraper/providers.py`
 
@@ -100,9 +103,10 @@ tests/scrapers/<provider>/
 ### Test files (where relevant)
 
 - `tests/test_config.py`
-  - Update expected collections map assertions.
-- `tests/test_sync.py`
-  - Update expected provider run order and collection mapping.
+  - Update expected collections map assertions (for example
+    `test_mongo_collection_for_provider_uses_collections_table`).
+- `tests/test_catch_up.py`
+  - Add catch-up behavior tests if the provider has special stop/progress rules.
 - `tests/test_runner.py`
   - Add provider-specific run behavior tests if needed (for example stop-on-known logic).
 - `tests/test_mongo_filter.py`
