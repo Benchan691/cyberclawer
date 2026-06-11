@@ -175,17 +175,19 @@ Interactive scrape, choosing scraper and amount:
 python scrape.py tui
 ```
 
-Catch up every provider: scrape and sync in batches until MongoDB overlap or the
-per-provider `--limit` is reached, then move to the next provider (no sleep between
-providers):
+Catch up every provider: scrape newest-first from each collection and stop when the
+newest stored record matches the live source content (title, severity, details, etc.;
+not ID alone and not scrape metadata like `scraped_at`). Updated source records are
+re-scraped and overwritten before advancing. Each catch-up run fetches at most 5
+records (configurable with `--batch-size`), then re-checks overlap before continuing:
 
 ```bash
 python scrape.py catch-up
-python scrape.py catch-up --limit 200 --max-runs-per-provider 50
+python scrape.py catch-up --batch-size 5 --limit 200 --max-runs-per-provider 50
 ```
 
-With `--limit 200`, each provider/collection scrapes at most 200 records total
-across all catch-up runs for that provider before advancing.
+`--limit` caps total new records per provider across all catch-up runs; `--batch-size`
+controls how many are fetched per run (default 5).
 
 Run one scraper once, for example AVD (browser extra recommended) or CNVD (requires the `cnvd` extra):
 

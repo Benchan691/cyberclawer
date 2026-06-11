@@ -5,7 +5,7 @@ import asyncio
 import logging
 from dataclasses import replace
 
-from .catch_up import DEFAULT_MAX_RUNS_PER_PROVIDER
+from .catch_up import CATCH_UP_BATCH_SIZE, CATCH_UP_DEFAULT_LIMIT, DEFAULT_MAX_RUNS_PER_PROVIDER
 from .config import MAX_RESULT_LIMIT, default_scrape_settings
 from .filters import validate_limit
 
@@ -75,11 +75,17 @@ def build_parser() -> argparse.ArgumentParser:
     catch_up_parser.add_argument(
         "--limit",
         type=int,
-        default=MAX_RESULT_LIMIT,
+        default=CATCH_UP_DEFAULT_LIMIT,
         help=(
-            f"Maximum records to scrape per provider/collection across catch-up "
-            f"(1-{MAX_RESULT_LIMIT})."
+            f"Maximum new records to scrape per provider/collection across all catch-up "
+            f"runs (1-{MAX_RESULT_LIMIT})."
         ),
+    )
+    catch_up_parser.add_argument(
+        "--batch-size",
+        type=_positive_int_arg,
+        default=CATCH_UP_BATCH_SIZE,
+        help="Records to scrape per catch-up run before re-checking overlap (default 5).",
     )
     catch_up_parser.add_argument(
         "--max-runs-per-provider",
@@ -209,6 +215,7 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             limit = validate_limit(args.limit)
+            batch_size = validate_limit(args.batch_size)
             settings = default_scrape_settings(limit=limit)
             if args.browser_headed:
                 settings = replace(settings, browser_headless=False)
@@ -226,6 +233,7 @@ def main(argv: list[str] | None = None) -> None:
             settings,
             include_manual_verification=args.include_manual_verification,
             max_runs_per_provider=args.max_runs_per_provider,
+            batch_size=batch_size,
         )
         return
 

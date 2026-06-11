@@ -105,14 +105,44 @@ def collection_from_settings(
 
 
 def existing_identity_keys(collection: Any) -> set[str]:
-    ids: set[str] = set()
-    for document in collection.find({}, {"_id": 1, "type": 1, "code": 1}):
+    return set(existing_documents_by_id(collection))
+
+
+def existing_documents_by_id(collection: Any) -> dict[str, dict[str, Any]]:
+    documents: dict[str, dict[str, Any]] = {}
+    for document in collection.find({}):
         identity = document.get("_id")
         if not identity and document.get("type") and document.get("code"):
             identity = f"{str(document['type']).lower()}:{document['code']}"
         if identity:
-            ids.add(_canonical_identity_key(str(identity)))
-    return ids
+            documents[_canonical_identity_key(str(identity))] = document
+    return documents
+
+
+def documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool:
+    return _documents_match(existing, document)
+
+
+def documents_content_match(existing: dict[str, Any], document: dict[str, Any]) -> bool:
+    return document_content_payload(existing) == document_content_payload(document)
+
+
+def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
+    raw_cve = document.get("cve_code")
+    if raw_cve is None:
+        cve_code = None
+    else:
+        cve_code = normalize_cve_code(str(raw_cve))
+        if cve_code is None:
+            cve_code = raw_cve
+    return {
+        "title": document.get("title"),
+        "cve_code": cve_code,
+        "disclosure_date": document.get("disclosure_date"),
+        "status": document.get("status"),
+        "severity": document.get("severity") or "",
+        "details": copy.deepcopy(document.get("details") or {}),
+    }
 
 
 def _ensure_indexes(collection: Any) -> None:

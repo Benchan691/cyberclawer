@@ -121,15 +121,18 @@ def _first_cnvd_id(fields: dict[str, str], text: str) -> str | None:
 
 def _title(parsed: BeautifulSoup, fields: dict[str, str]) -> str | None:
     field_title = _field_value(fields, ("漏洞名称", "标题"))
-    if field_title:
+    if field_title and field_title != "相关漏洞":
         return field_title
     for selector in ("h1", "h2", ".title", ".flaw-title", ".blkContainerSblk h1"):
         text = _clean_text(parsed.select_one(selector))
-        if text and "CNVD" not in text.upper():
+        if text and text != "相关漏洞" and "CNVD" not in text.upper():
             return text
+    patch_title = _field_value(fields, ("厂商补丁",))
+    if patch_title and patch_title.endswith("的补丁"):
+        return patch_title.removesuffix("的补丁").strip() or None
     title_node = parsed.find("title")
     title = _clean_text(title_node)
-    return title or None
+    return title if title and title != "相关漏洞" else None
 
 
 def _cvss_score(fields: dict[str, str]) -> str | None:

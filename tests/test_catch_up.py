@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
-from vuln_scraper.catch_up import no_progress, provider_caught_up, run_catch_up_cycle
+from vuln_scraper.catch_up import (
+    CATCH_UP_BATCH_SIZE,
+    CATCH_UP_DEFAULT_LIMIT,
+    no_progress,
+    provider_caught_up,
+    run_catch_up_cycle,
+)
 from vuln_scraper.config import default_scrape_settings
 from vuln_scraper.providers import HKCERTProvider, ZeroDayProvider
 
@@ -31,6 +38,51 @@ def test_no_progress_on_empty_result() -> None:
     assert not no_progress({"stop_reason": "overlap", "result_count": 0})
 
 
+def test_catch_up_default_limit_is_one_thousand() -> None:
+    assert CATCH_UP_DEFAULT_LIMIT == 1000
+
+
+def test_catch_up_default_batch_size_is_five() -> None:
+    assert CATCH_UP_BATCH_SIZE == 5
+
+
+def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
+    conflicts: list[str] = []
+    unchanged_flags: list[bool] = []
+
+    class FakeScraper:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+            conflicts.append(settings.mongo_conflict)
+            unchanged_flags.append(stop_on_unchanged_content)
+            self.provider = provider or HKCERTProvider()
+
+        async def run(self):
+            return {
+                "stop_reason": "overlap",
+                "result_count": 0,
+                "vulnerabilities": [],
+                "mongo_sync": {"inserted": 0},
+            }
+
+    def fake_asyncio_run(coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
+    monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
+
+    run_catch_up_cycle(
+        replace(default_scrape_settings(limit=20), mongo_conflict="overwrite").normalized()
+    )
+
+    assert conflicts == ["overwrite"]
+    assert unchanged_flags == [True]
+
+
 def test_run_catch_up_cycle_stops_on_overlap(monkeypatch) -> None:
     calls: list[str] = []
     outputs = [
@@ -49,9 +101,9 @@ def test_run_catch_up_cycle_stops_on_overlap(monkeypatch) -> None:
     ]
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
             self.provider = provider or HKCERTProvider()
-            assert stop_on_first_known is True
+            assert stop_on_unchanged_content is True
 
         async def run(self):
             output = outputs[min(len(calls), len(outputs) - 1)]
@@ -78,7 +130,7 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
             self.provider = provider
 
         async def run(self):
@@ -114,7 +166,7 @@ def test_run_catch_up_cycle_respects_max_runs(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
             self.provider = provider or HKCERTProvider()
 
         async def run(self):
@@ -146,7 +198,7 @@ def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
     limits_seen: list[int] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
             limits_seen.append(settings.limit)
             self.settings = settings
             self.provider = provider or HKCERTProvider()
@@ -171,6 +223,6 @@ def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
-    run_catch_up_cycle(default_scrape_settings(limit=25), max_runs_per_provider=10)
+    run_catch_up_cycle(default_scrape_settings(limit=25), max_runs_per_provider=10, batch_size=5)
 
-    assert limits_seen == [25, 15, 5]
+    assert limits_seen == [5, 5, 5, 5, 5]

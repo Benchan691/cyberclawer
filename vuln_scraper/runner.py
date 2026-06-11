@@ -18,7 +18,10 @@ from .models import ListEntry
 from .mongo import (
     MongoClientFactory,
     MongoSyncResult,
+    build_mongo_document,
     collection_from_settings,
+    documents_content_match,
+    existing_documents_by_id,
     existing_identity_keys,
     sync_records_to_collection,
 )
@@ -82,6 +85,7 @@ class ScraperRunner:
         provider: ScraperProvider | None = None,
         cnvd_session: object | None = None,
         stop_on_first_known: bool | None = None,
+        stop_on_unchanged_content: bool = False,
     ) -> None:
         self.progress_callback = progress_callback
         self.mongo_client_factory = mongo_client_factory
@@ -90,6 +94,8 @@ class ScraperRunner:
         self.provider = provider
         self._cnvd_session = cnvd_session
         self._stop_on_first_known_override = stop_on_first_known
+        self._stop_on_unchanged_content = stop_on_unchanged_content
+        self._existing_documents: dict[str, dict[str, Any]] = {}
         self.stop_reason: str | None = None
         self.settings = settings.for_provider(
             self.provider.key,
@@ -177,7 +183,12 @@ class ScraperRunner:
             client_factory=self.mongo_client_factory,
         )
         try:
-            known_ids = existing_identity_keys(collection)
+            if self._stop_on_unchanged_content:
+                self._existing_documents = existing_documents_by_id(collection)
+                known_ids = set(self._existing_documents)
+            else:
+                self._existing_documents = {}
+                known_ids = existing_identity_keys(collection)
             await self._scrape_newest_records(client, known_ids=known_ids)
             output = self._build_output()
             self.checkpoint.save(self.settings.checkpoint_file)
@@ -200,6 +211,10 @@ class ScraperRunner:
                 close()
 
     async def _scrape_newest_records(self, client: ScraperClient, *, known_ids: set[str]) -> None:
+        if self._stop_on_unchanged_content:
+            await self._scrape_newest_records_compare_content(client, known_ids=known_ids)
+            return
+
         self.stop_reason = None
         page = 1
         total_pages: int | None = None
@@ -282,6 +297,82 @@ class ScraperRunner:
         self.selected_ids = selected_ids[: self.settings.limit]
         self.selection_finalized = True
 
+    async def _scrape_newest_records_compare_content(
+        self,
+        client: ScraperClient,
+        *,
+        known_ids: set[str],
+    ) -> None:
+        self.stop_reason = None
+        page = 1
+        total_pages: int | None = None
+        selected_ids: list[str] = []
+
+        while len(selected_ids) < self.settings.limit:
+            if total_pages is not None and page > total_pages:
+                self.stop_reason = "limit"
+                break
+
+            url = self.provider.list_url(page, checkpoint=self.checkpoint)
+            logger.info("Fetching newest-update list page %s", page)
+            self._emit(phase="list", page=page)
+            try:
+                list_page = await self._fetch_list_page(client, url, page)
+            except FetchError as exc:
+                self._record_failure(self._list_failure_identity(), url, exc, phase="list")
+                self.stop_reason = "error"
+                break
+
+            if not list_page.entries:
+                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
+                self.stop_reason = "no_rows"
+                break
+
+            self._clear_list_failures(page=page)
+            self._merge_list_entries(list_page.entries)
+            self.checkpoint.last_list_page = page
+            if list_page.total_pages is not None:
+                total_pages = list_page.total_pages
+                self.checkpoint.total_pages = list_page.total_pages
+            if list_page.total_records is not None:
+                self.checkpoint.total_records = list_page.total_records
+
+            for entry in list_page.entries:
+                if len(selected_ids) >= self.settings.limit:
+                    self.stop_reason = "limit"
+                    break
+
+                if self._detail_url_for_entry(entry) is not None and not self._has_detail(entry.key):
+                    await self._scrape_detail(client, entry)
+
+                record = self.records_by_id.get(entry.key)
+                if not record:
+                    continue
+
+                if entry.key in known_ids:
+                    if self._record_matches_existing_mongo(record):
+                        self.stop_reason = "overlap"
+                        break
+                    self._existing_documents[entry.key] = build_mongo_document(
+                        record,
+                        self._mongo_compare_output(),
+                    )
+
+                selected_ids.append(entry.key)
+
+            self.selected_ids = selected_ids.copy()
+            self.checkpoint.save(self.settings.checkpoint_file)
+            self._emit(phase="page-complete", page=page)
+            if self.stop_reason in {"overlap", "limit"}:
+                break
+            page += 1
+
+        if self.stop_reason is None and len(selected_ids) >= self.settings.limit:
+            self.stop_reason = "limit"
+
+        self.selected_ids = selected_ids[: self.settings.limit]
+        self.selection_finalized = True
+
     def _should_refresh_existing_before_stop(self) -> bool:
         return self.settings.mongo_conflict == "overwrite" or (
             self.settings.mongo_conflict == "prompt" and self.settings.mongo_interactive
@@ -312,6 +403,26 @@ class ScraperRunner:
             remaining -= 1
             saw_new = True
         return targets, hit_overlap_boundary
+
+    def _mongo_compare_output(self) -> dict[str, Any]:
+        return {
+            "scraped_at": datetime.now(UTC).isoformat(),
+            "source": {"provider": self.provider.key, "url": self.provider.source_url},
+        }
+
+    def _record_matches_existing_mongo(self, record: dict[str, Any]) -> bool:
+        if not self._stop_on_unchanged_content:
+            return False
+        id_type = str(record.get("type") or "").strip().lower()
+        code = str(record.get("code") or "").strip()
+        if not id_type or not code:
+            return False
+        key = f"{id_type}:{code}"
+        existing = self._existing_documents.get(key)
+        if existing is None:
+            return False
+        document = build_mongo_document(record, self._mongo_compare_output())
+        return documents_content_match(existing, document)
 
     def _stop_on_first_known(self) -> bool:
         if self._stop_on_first_known_override is not None:

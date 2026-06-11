@@ -77,3 +77,17 @@ def test_parse_cnvd_detail_extracts_labeled_fields_links_and_cves() -> None:
     assert detail["solution"] == "升级至安全版本。"
     assert detail["published_date"] == "2026-06-01"
     assert "https://example.test/advisory/CNVD-2026-21550" in detail["reference_links"]
+
+
+def test_parse_cnvd_detail_uses_vendor_patch_when_page_title_is_generic() -> None:
+    detail = parse_detail_page("""
+    <html><head><title>相关漏洞</title></head><body>
+      <h1>相关漏洞</h1>
+      <table>
+        <tr><td>CNVD-ID</td><td>CNVD-2026-23640</td></tr>
+        <tr><td>厂商补丁</td><td>Mozilla Firefox存在未明漏洞（CNVD-2026-23640）的补丁</td></tr>
+      </table>
+    </body></html>
+    """).to_dict()
+
+    assert detail["title"] == "Mozilla Firefox存在未明漏洞（CNVD-2026-23640）"

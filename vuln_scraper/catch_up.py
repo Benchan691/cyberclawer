@@ -4,13 +4,15 @@ import asyncio
 import logging
 from dataclasses import replace
 
-from .config import ScraperSettings
+from .config import MAX_RESULT_LIMIT, ScraperSettings
 from .error_log import log_uncaught_provider_error
 from .providers import all_providers
 from .runner import ScraperRunner
 
 logger = logging.getLogger(__name__)
 
+CATCH_UP_BATCH_SIZE = 5
+CATCH_UP_DEFAULT_LIMIT = MAX_RESULT_LIMIT
 DEFAULT_MAX_RUNS_PER_PROVIDER = 100
 
 
@@ -51,6 +53,7 @@ def run_catch_up_cycle(
     *,
     include_manual_verification: bool = False,
     max_runs_per_provider: int = DEFAULT_MAX_RUNS_PER_PROVIDER,
+    batch_size: int = CATCH_UP_BATCH_SIZE,
 ) -> None:
     for provider in all_providers():
         if getattr(provider, "manual_verification", False) and not include_manual_verification:
@@ -76,7 +79,8 @@ def run_catch_up_cycle(
 
         while runs < max_runs_per_provider:
             remaining = per_provider_limit - scraped_total
-            if remaining <= 0:
+            run_limit = min(batch_size, remaining)
+            if run_limit <= 0:
                 logger.info(
                     "Provider %s reached per-provider limit=%s after %s run(s)",
                     provider.key,
@@ -86,13 +90,18 @@ def run_catch_up_cycle(
                 break
 
             runs += 1
-            run_settings = replace(provider_settings, limit=remaining).normalized()
+            run_settings = replace(
+                provider_settings,
+                limit=run_limit,
+                mongo_conflict=provider_settings.mongo_conflict or "overwrite",
+            ).normalized()
             logger.info(
-                "Catch-up run %s for provider %s collection %s (remaining=%s/%s)",
+                "Catch-up run %s for provider %s collection %s (batch=%s, provider_total=%s/%s)",
                 runs,
                 provider.key,
                 normalized.mongo_collection,
-                remaining,
+                run_limit,
+                scraped_total,
                 per_provider_limit,
             )
             try:
@@ -100,7 +109,7 @@ def run_catch_up_cycle(
                     ScraperRunner(
                         run_settings,
                         provider=provider,
-                        stop_on_first_known=True,
+                        stop_on_unchanged_content=True,
                     ).run()
                 )
             except Exception as exc:

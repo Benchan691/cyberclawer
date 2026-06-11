@@ -5,6 +5,8 @@ import pytest
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.mongo import (
     build_mongo_document,
+    documents_content_match,
+    documents_match,
     redact_mongo_uri,
     sync_output_to_mongo,
 )
@@ -119,6 +121,24 @@ def test_sync_prompt_can_overwrite_conflict(monkeypatch) -> None:
     assert result.conflicts == 1
     assert result.overwritten == 1
     assert collection.documents["avd:2026-10001"]["title"] == "new"
+
+
+def test_documents_content_match_ignores_scrape_metadata() -> None:
+    existing = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
+    existing["scraped_at"] = "2026-01-01T00:00:00+00:00"
+    existing["source"] = {"provider": "avd", "url": "https://old.example.test"}
+    existing["detail_url"] = "https://old.example.test/detail"
+    incoming = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
+
+    assert not documents_match(existing, incoming)
+    assert documents_content_match(existing, incoming)
+
+
+def test_documents_content_match_detects_detail_changes() -> None:
+    existing = build_mongo_document(record("2026-10001"), output_payload())
+    incoming = build_mongo_document(record("2026-10001", title="updated"), output_payload())
+
+    assert not documents_content_match(existing, incoming)
 
 
 def test_sync_skips_unchanged_documents() -> None:

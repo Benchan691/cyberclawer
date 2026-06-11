@@ -64,7 +64,7 @@ class CNVDProvider:
         if not merged.get("cnvd_id"):
             merged["cnvd_id"] = f"CNVD-{entry.identity.code}"
         for key in ("title", "severity", "published_date"):
-            if merged.get(key) in (None, "", []):
+            if merged.get(key) in (None, "", []) or (key == "title" and merged.get(key) == "相关漏洞"):
                 merged[key] = list_detail.get(key)
         for key in ("click_count", "comment_count", "follow_count"):
             if merged.get(key) is None:

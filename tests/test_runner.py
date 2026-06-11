@@ -145,6 +145,104 @@ def test_mongo_update_stops_when_newest_page_already_known(tmp_path) -> None:
     assert client.list_pages_seen == [1]
 
 
+def test_stop_on_unchanged_content_fetches_and_stops_when_document_matches(tmp_path) -> None:
+    client = FakeClient()
+    collection = FakeMongoCollection()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=5,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+
+    seed_output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
+    from vuln_scraper.mongo import build_mongo_document
+
+    collection.documents["avd:2026-10001"] = build_mongo_document(
+        seed_output["vulnerabilities"][0],
+        seed_output,
+    )
+    client.list_pages_seen.clear()
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            stop_on_unchanged_content=True,
+        )._run_with_client(client)
+    )
+
+    assert output["vulnerabilities"] == []
+    assert output["stop_reason"] == "overlap"
+    assert client.list_pages_seen == [1]
+
+
+def test_stop_on_unchanged_content_overwrites_when_document_changed(tmp_path) -> None:
+    client = FakeClient()
+    collection = FakeMongoCollection()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=5,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+
+    seed_output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+        )._run_with_client(client)
+    )
+    from vuln_scraper.mongo import build_mongo_document
+
+    stale = build_mongo_document(seed_output["vulnerabilities"][0], seed_output)
+    stale["title"] = "stale title"
+    collection.documents["avd:2026-10001"] = stale
+    client.list_pages_seen.clear()
+    changed_settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "changed_checkpoint.json",
+        limit=1,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            changed_settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            stop_on_unchanged_content=True,
+        )._run_with_client(client)
+    )
+
+    assert identities(output["vulnerabilities"]) == ["avd:2026-10001"]
+    assert output["mongo_sync"]["overwritten"] == 1
+    assert collection.documents["avd:2026-10001"]["title"] != "stale title"
+
+
 def test_mongo_update_stop_on_first_known_override_sets_overlap(tmp_path) -> None:
     client = FakeClient()
     collection = FakeMongoCollection(
