@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
 
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.cnnvd.config import (
+    BASE_URL,
     DEFAULT_COLLECTION,
     DEFAULT_PAGE_SIZE,
     DETAIL_API_URL,
     LIST_API_URL,
     SOURCE_URL,
 )
-from vuln_scraper.scrapers.cnnvd.parsers.detail import CNNVDDetailRecord, parse_warn_detail
-from vuln_scraper.scrapers.cnnvd.parsers.list import parse_warn_list
+from vuln_scraper.scrapers.cnnvd.parsers.detail import CNNVDDetailRecord, parse_vulnerability_detail
+from vuln_scraper.scrapers.cnnvd.parsers.list import parse_vulnerability_list
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,13 +32,14 @@ class CNNVDProvider:
     def detail_url(self, identity_display: str) -> str:
         code = identity_display.removeprefix("CNNVD-").strip()
         if not code:
-            raise ValueError(f"invalid CNNVD warning identifier: {identity_display!r}")
-        return f"{SOURCE_URL}?{urlencode({'warnId': code})}"
+            raise ValueError(f"invalid CNNVD vulnerability identifier: {identity_display!r}")
+        return SOURCE_URL
 
     def request_headers(self) -> dict[str, str]:
         return {
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json;charset=UTF-8",
+            "Origin": BASE_URL,
             "Referer": SOURCE_URL,
         }
 
@@ -51,41 +52,35 @@ class CNNVDProvider:
                 "pageIndex": max(1, page),
                 "pageSize": DEFAULT_PAGE_SIZE,
                 "keyword": "",
-                "reportType": 1,
-                "beginTime": "",
-                "endTime": "",
-                "dateType": [],
+                "hazardLevel": "",
+                "vulType": "",
             },
         }
 
-    def detail_json_request(self, entry: ListEntry, *, detail_url: str) -> dict[str, Any]:
-        return {
-            "method": "POST",
-            "url": DETAIL_API_URL,
-            "headers": {
-                "Accept": "application/json",
-                "Referer": detail_url,
-            },
-            "data": {"warnId": entry.identity.code},
-        }
+    def detail_json_requests(self, entry: ListEntry, *, detail_url: str) -> list[dict[str, Any]]:
+        list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
+        record_id = list_detail.get("id")
+        cnnvd_code = list_detail.get("cnnvdCode") or entry.display_id
+        cve_code = list_detail.get("cveCode")
+        vul_type = list_detail.get("vulType") or "0"
+        payloads = [
+            {"id": record_id, "cnnvdCode": cnnvd_code, "cveCode": cve_code, "vulType": vul_type},
+            {"id": record_id, "vulType": vul_type},
+            {"cnnvdCode": cnnvd_code, "vulType": vul_type},
+        ]
+        headers = self.request_headers()
+        return [
+            {
+                "method": "POST",
+                "url": DETAIL_API_URL,
+                "headers": headers,
+                "json": {key: value for key, value in payload.items() if value is not None},
+            }
+            for payload in payloads
+        ]
 
     def parse_list(self, data: Any, *, page: int) -> ListPage:
-        return parse_warn_list(data, page=page, provider=self.key, source_url=self.source_url)
+        return parse_vulnerability_list(data, page=page, provider=self.key, source_url=self.source_url)
 
     def parse_detail(self, data: Any) -> CNNVDDetailRecord:
-        return parse_warn_detail(data)
-
-    def finalize_detail(self, detail: dict[str, Any], *, entry: ListEntry, detail_url: str) -> dict[str, Any]:
-        merged = dict(detail)
-        list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
-        if not merged.get("warn_id"):
-            merged["warn_id"] = entry.identity.code
-        if not merged.get("published_date"):
-            merged["published_date"] = list_detail.get("published_date")
-        if not merged.get("summary"):
-            merged["summary"] = list_detail.get("summary")
-        links = list(merged.get("reference_links") or [])
-        if detail_url not in links:
-            links.insert(0, detail_url)
-        merged["reference_links"] = links
-        return merged
+        return parse_vulnerability_detail(data)

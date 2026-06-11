@@ -148,6 +148,10 @@ def _iter_cve_ids(detail: dict[str, Any]) -> Iterable[str]:
     if cve_id:
         yield str(cve_id)
 
+    cve_code = detail.get("cveCode")
+    if cve_code:
+        yield str(cve_code)
+
     cve_ids = detail.get("cve_ids")
     if isinstance(cve_ids, list):
         for item in cve_ids:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 
 from .config import ScraperSettings
 from .error_log import log_uncaught_provider_error
@@ -69,20 +70,35 @@ def run_catch_up_cycle(
         )
         normalized = provider_settings.normalized()
         runs = 0
+        scraped_total = 0
         last_stop_reason: str | None = None
+        per_provider_limit = settings.limit
 
         while runs < max_runs_per_provider:
+            remaining = per_provider_limit - scraped_total
+            if remaining <= 0:
+                logger.info(
+                    "Provider %s reached per-provider limit=%s after %s run(s)",
+                    provider.key,
+                    per_provider_limit,
+                    runs,
+                )
+                break
+
             runs += 1
+            run_settings = replace(provider_settings, limit=remaining).normalized()
             logger.info(
-                "Catch-up run %s for provider %s collection %s",
+                "Catch-up run %s for provider %s collection %s (remaining=%s/%s)",
                 runs,
                 provider.key,
                 normalized.mongo_collection,
+                remaining,
+                per_provider_limit,
             )
             try:
                 output = asyncio.run(
                     ScraperRunner(
-                        provider_settings,
+                        run_settings,
                         provider=provider,
                         stop_on_first_known=True,
                     ).run()
@@ -98,6 +114,8 @@ def run_catch_up_cycle(
                 break
             last_stop_reason = output.get("stop_reason")
             vulnerabilities = output.get("vulnerabilities", [])
+            run_count = output.get("result_count", len(vulnerabilities))
+            scraped_total += run_count
             completed = sum(
                 1
                 for item in vulnerabilities
@@ -106,19 +124,29 @@ def run_catch_up_cycle(
             )
             mongo = output.get("mongo_sync") or {}
             logger.info(
-                "Provider %s run %s: fetched %s records (%s with details, stop_reason=%s); "
-                "inserted=%s overwritten=%s deleted=%s skipped=%s",
+                "Provider %s run %s: fetched %s records (%s with details, stop_reason=%s, "
+                "provider_total=%s/%s); inserted=%s overwritten=%s deleted=%s skipped=%s",
                 provider.key,
                 runs,
                 len(vulnerabilities),
                 completed,
                 last_stop_reason,
+                scraped_total,
+                per_provider_limit,
                 mongo.get("inserted", 0),
                 mongo.get("overwritten", 0),
                 mongo.get("deleted", 0),
                 mongo.get("skipped", 0),
             )
 
+            if scraped_total >= per_provider_limit:
+                logger.info(
+                    "Provider %s reached per-provider limit=%s after %s run(s)",
+                    provider.key,
+                    per_provider_limit,
+                    runs,
+                )
+                break
             if provider_caught_up(output):
                 logger.info("Provider %s caught up after %s run(s)", provider.key, runs)
                 break

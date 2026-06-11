@@ -3,6 +3,10 @@ import pytest
 from vuln_scraper.models import ListEntry, VulnerabilityId, normalize_cve_code, primary_cve_code
 
 
+def test_primary_cve_code_reads_raw_camel_case_code() -> None:
+    assert primary_cve_code({"cveCode": "CVE-2026-11628"}) == "2026-11628"
+
+
 def test_vulnerability_id_parses_type_and_code() -> None:
     identity = VulnerabilityId.parse("CVE-2026-42945")
 

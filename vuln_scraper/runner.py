@@ -23,6 +23,7 @@ from .mongo import (
     sync_records_to_collection,
 )
 from .providers import ScraperProvider
+from .table_extractor import extract_raw_tables
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,8 @@ class ScraperRunner:
             manual_verification=getattr(self.provider, "manual_verification", None),
         ).normalized()
         self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
+        self._prune_stale_provider_failures()
+        self.run_failed: dict[str, dict[str, Any]] = {}
         self.records_by_id: dict[str, dict[str, Any]] = {}
         self.list_order: list[str] = []
         self.selected_ids: list[str] = []
@@ -214,15 +217,16 @@ class ScraperRunner:
             try:
                 list_page = await self._fetch_list_page(client, url, page)
             except FetchError as exc:
-                self._record_failure("LIST", url, exc, phase="list")
+                self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 self.stop_reason = "error"
                 break
 
             if not list_page.entries:
-                self._record_failure(f"LIST-PAGE-{page}", url, "No rows parsed", phase="list")
+                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
                 self.stop_reason = "no_rows"
                 break
 
+            self._clear_list_failures(page=page)
             self._merge_list_entries(list_page.entries)
             self.checkpoint.last_list_page = page
             if list_page.total_pages is not None:
@@ -406,6 +410,8 @@ class ScraperRunner:
         return cookies
 
     async def _fetch_avd_html(self, client: ScraperClient, url: str) -> FetchResult:
+        import requests
+
         from vuln_scraper.scrapers.avd.h import AVDSigchlError, fetch_via_redirect
 
         await client.rate_limiter.wait()
@@ -418,6 +424,7 @@ class ScraperRunner:
             fetch_kwargs: dict[str, Any] = {
                 "headers": headers,
                 "cookies": self._client_cookies_snapshot(client),
+                "timeout": self.settings.timeout,
             }
             if self.settings.proxy_url:
                 # Only pass proxy_url when configured; this keeps test mocks simple.
@@ -439,6 +446,9 @@ class ScraperRunner:
         except AVDSigchlError as exc:
             logger.warning("AVD sigchl solve failed for %s: %s", url, exc)
             return await client.get_html(url)
+        except requests.RequestException as exc:
+            logger.warning("AVD redirect fetch failed for %s: %s; using standard fetch", url, exc)
+            return await client.get_html(url)
 
     async def _scrape_matching_records(self, client: ScraperClient) -> None:
         page = 1
@@ -455,13 +465,14 @@ class ScraperRunner:
             try:
                 list_page = await self._fetch_list_page(client, url, page)
             except FetchError as exc:
-                self._record_failure("LIST", url, exc, phase="list")
+                self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 break
 
             if not list_page.entries:
-                self._record_failure(f"LIST-PAGE-{page}", url, "No rows parsed", phase="list")
+                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
                 break
 
+            self._clear_list_failures(page=page)
             self._merge_list_entries(list_page.entries)
             self.checkpoint.last_list_page = page
             if list_page.total_pages is not None:
@@ -593,19 +604,18 @@ class ScraperRunner:
         self._emit(phase="detail", identity=entry.key, type=entry.identity.type, code=entry.identity.code)
         try:
             if getattr(self.provider, "content_type", "html") == "json":
-                request_factory = getattr(self.provider, "detail_json_request", None)
-                if request_factory is not None:
-                    request = request_factory(entry, detail_url=url)
-                    result = await self._fetch_json_request(client, request)
-                else:
-                    result = await client.get_json(url, headers=await self._provider_request_headers())
-                detail = self.provider.parse_detail(result.data).to_dict()
+                result, detail = await self._fetch_json_detail(client, entry, url)
+                raw_detail_content = result.data
             else:
                 result = await self._fetch_provider_html(client, url)
+                raw_detail_content = result.html
                 detail = self.provider.parse_detail(result.html).to_dict()
             finalize_detail = getattr(self.provider, "finalize_detail", None)
             if finalize_detail is not None:
                 detail = finalize_detail(detail, entry=entry, detail_url=url)
+            raw_tables = extract_raw_tables(raw_detail_content)
+            if raw_tables:
+                detail["raw_tables"] = raw_tables
             self.records_by_id[entry.key] = entry.to_record(detail, detail_url=url)
             self.checkpoint.completed_identity_keys.add(entry.key)
             self.checkpoint.failed.pop(entry.key, None)
@@ -615,6 +625,33 @@ class ScraperRunner:
         finally:
             self.checkpoint.save(self.settings.checkpoint_file)
             self._emit(phase="detail-complete", identity=entry.key, type=entry.identity.type, code=entry.identity.code)
+
+    async def _fetch_json_detail(
+        self,
+        client: ScraperClient,
+        entry: ListEntry,
+        detail_url: str,
+    ) -> tuple[Any, dict[str, Any]]:
+        requests_factory = getattr(self.provider, "detail_json_requests", None)
+        if requests_factory is not None:
+            requests = list(requests_factory(entry, detail_url=detail_url))
+            if not requests:
+                raise FetchError("provider JSON detail requests did not include any requests")
+            last_error: Exception | None = None
+            for request in requests:
+                try:
+                    result = await self._fetch_json_request(client, request)
+                    return result, self.provider.parse_detail(result.data).to_dict()
+                except Exception as exc:
+                    last_error = exc
+            raise FetchError(f"all provider JSON detail requests failed: {last_error}") from last_error
+
+        request_factory = getattr(self.provider, "detail_json_request", None)
+        if request_factory is not None:
+            result = await self._fetch_json_request(client, request_factory(entry, detail_url=detail_url))
+        else:
+            result = await client.get_json(detail_url, headers=await self._provider_request_headers())
+        return result, self.provider.parse_detail(result.data).to_dict()
 
     def _merge_list_entries(self, entries: list[ListEntry]) -> None:
         for entry in entries:
@@ -646,9 +683,33 @@ class ScraperRunner:
             "result_count": len(vulnerabilities),
             "raw_limit": self.settings.limit,
             "stop_reason": self.stop_reason,
-            "failed": sorted(self.checkpoint.failed.values(), key=lambda item: item.get("identity", "")),
+            "failed": sorted(self.run_failed.values(), key=lambda item: item.get("identity", "")),
             "vulnerabilities": vulnerabilities,
         }
+
+    def _list_failure_identity(self) -> str:
+        return f"{self.provider.key}:LIST"
+
+    def _list_page_failure_identity(self, page: int) -> str:
+        return f"{self.provider.key}:LIST-PAGE-{page}"
+
+    def _prune_stale_provider_failures(self) -> None:
+        prefix = f"{self.provider.key}:"
+        current_list_url = self.provider.list_url(1)
+        for key in list(self.checkpoint.failed):
+            if key.startswith(prefix):
+                self.checkpoint.failed.pop(key, None)
+                continue
+            if key in ("LIST",) or key.startswith("LIST-PAGE-"):
+                item = self.checkpoint.failed.get(key)
+                if isinstance(item, dict) and item.get("url") != current_list_url:
+                    self.checkpoint.failed.pop(key, None)
+
+    def _clear_list_failures(self, *, page: int) -> None:
+        self.checkpoint.failed.pop(self._list_failure_identity(), None)
+        self.checkpoint.failed.pop(self._list_page_failure_identity(page), None)
+        self.checkpoint.failed.pop("LIST", None)
+        self.checkpoint.failed.pop(f"LIST-PAGE-{page}", None)
 
     def _has_detail(self, identity: str) -> bool:
         details = self.records_by_id.get(identity, {}).get("details")
@@ -671,7 +732,7 @@ class ScraperRunner:
             id_type, _, code = identity.partition(":")
         message = str(error)
         logger.warning("%s failed for %s: %s", phase, identity_key, message)
-        self.checkpoint.failed[identity_key] = {
+        failure = {
             "identity": identity_key,
             "type": id_type,
             "code": code,
@@ -680,6 +741,8 @@ class ScraperRunner:
             "error": message,
             "updated_at": datetime.now(UTC).isoformat(),
         }
+        self.checkpoint.failed[identity_key] = failure
+        self.run_failed[identity_key] = failure
         self._emit(phase=f"{phase}-failed", identity=identity_key, type=id_type, code=code, error=message)
         self._error_log.append(
             provider=self.provider.key,
@@ -692,7 +755,7 @@ class ScraperRunner:
     async def _finalize_run_output(self, output: dict[str, Any]) -> dict[str, Any]:
         stop_reason = output.get("stop_reason")
         if stop_reason in ("error", "no_rows"):
-            failed_count = len(output.get("failed", []))
+            failed_count = len(self.run_failed)
             self._error_log.append(
                 provider=self.provider.key,
                 phase="run-summary",
@@ -712,7 +775,7 @@ class ScraperRunner:
         payload = {
             "selected_count": len(self.selected_ids),
             "completed_count": len(self.checkpoint.completed_identity_keys),
-            "failed_count": len(self.checkpoint.failed),
+            "failed_count": len(self.run_failed),
             **event,
         }
         self.progress_callback(payload)

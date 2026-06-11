@@ -1,12 +1,29 @@
 {
   "code": 200,
   "success": true,
-  "message": "ok",
+  "message": "操作成功",
   "data": {
-    "createUname": "zhangdan",
-    "publishTime": "2026-05-20 14:27:51",
-    "warnName": "【漏洞通报】人工智能重要安全漏洞通报-OpenClaw多个安全漏洞",
-    "warnId": "0f9ea9d7144547dcaf6374acae1c7b97",
-    "enclosureContent": "<p>OpenClaw 2026.5.19之前多个版本均受到漏洞影响，包含CVE-2026-12345和CVE-2026-12346。</p><p><strong>一、 漏洞介绍</strong></p><p>OpenClaw是一个开源智能助理。</p><p><strong>二、漏洞详情</strong></p><p>超危漏洞7个、高危漏洞33个、中危漏洞27个、低危漏洞2个。参考链接：https://github.com/openclaw/openclaw/releases</p><p><strong>三、修复建议</strong></p><p>请升级至OpenClaw 2026.5.19或之后版本。</p>"
+    "cnnvdDetail": {
+      "id": "record-1911",
+      "vulName": "Google Chrome 安全漏洞",
+      "cnnvdCode": "CNNVD-202606-1911",
+      "cveCode": "CVE-2026-11628",
+      "publishTime": "2026-06-08 00:00:00",
+      "isOfficial": 1,
+      "vendor": "Google",
+      "hazardLevel": 2,
+      "vulType": "其他",
+      "vulTypeName": "其他",
+      "vulDesc": "Google Chrome是一款Web浏览器。\r\n该漏洞源于释放后重用。",
+      "affectedProduct": "Chrome Desktop\r\nChromium",
+      "affectedVendor": "Google",
+      "productDesc": "Web browser",
+      "affectedSystem": "Windows\r\nmacOS",
+      "referUrl": "来源: Google\r\n链接:https://example.test/advisory",
+      "patch": "https://example.test/patch",
+      "createTime": "2026-06-08 00:00:00",
+      "updateTime": "2026-06-09 00:00:00"
+    },
+    "receviceVulDetail": null
   }
 }

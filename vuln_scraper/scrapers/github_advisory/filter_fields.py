@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = (
     "type",
     "status",
+    "severity",
     "cve_code",
     "details.github_advisory.advisory_type",
     "details.github_advisory.severity",

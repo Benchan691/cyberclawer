@@ -180,6 +180,7 @@ def test_filter_fields_for_provider_uses_infosec_fields() -> None:
 def test_filter_fields_for_provider_uses_splunk_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("splunk")
 
+    assert "severity" in categorical_fields
     assert "details.splunk.severity" in categorical_fields
     assert "details.splunk.cve_ids" in categorical_fields
     assert "details.splunk.description" in text_fields
@@ -190,6 +191,7 @@ def test_filter_fields_for_provider_uses_splunk_fields() -> None:
 def test_filter_fields_for_provider_uses_hikvision_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("hikvision")
 
+    assert "severity" in categorical_fields
     assert "details.hikvision.severity" in categorical_fields
     assert "details.hikvision.affected_products" in categorical_fields
     assert "details.hikvision.description" in text_fields
@@ -200,10 +202,12 @@ def test_filter_fields_for_provider_uses_hikvision_fields() -> None:
 def test_filter_fields_for_provider_uses_cnnvd_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("cnnvd")
 
-    assert "details.cnnvd.created_by" in categorical_fields
-    assert "details.cnnvd.cve_ids" in categorical_fields
-    assert "details.cnnvd.description" in text_fields
-    assert "details.cnnvd.reference_links" in text_fields
+    assert "severity" in categorical_fields
+    assert "details.cnnvd.hazardLevel" in categorical_fields
+    assert "details.cnnvd.cveCode" in categorical_fields
+    assert "details.cnnvd.vulDesc" in text_fields
+    assert "details.cnnvd.affectedProduct" in text_fields
+    assert "details.cnnvd.referUrl" in text_fields
     assert dynamic_path is None
 
 
@@ -223,6 +227,7 @@ def test_filter_fields_for_provider_uses_qianxin_fields() -> None:
 def test_filter_fields_for_provider_uses_cnvd_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("cnvd")
 
+    assert "severity" in categorical_fields
     assert "details.cnvd.severity" in categorical_fields
     assert "details.cnvd.affected_products" in categorical_fields
     assert "details.cnvd.description" in text_fields

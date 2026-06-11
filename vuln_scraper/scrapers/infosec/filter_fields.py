@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = (
     "type",
     "status",
+    "severity",
     "vuln_type",
     "details.infosec.alert_type",
     "details.infosec.alert_code",

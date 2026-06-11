@@ -43,5 +43,8 @@ def test_parse_splunk_detail_extracts_sections_and_tables() -> None:
     assert detail["cve_ids"] == ["CVE-2025-68161", "CVE-2025-48924"]
     assert detail["cve_id"] == "CVE-2025-68161"
     assert "Several package updates" in detail["description"]
+    assert len(detail["description_tables"]) == 1
+    assert detail["description_tables"][0]["headers"] == ["package", "remediation", "cve", "severity"]
+    assert detail["description_tables"][0]["rows"][0]["package"] == "commons-lang3"
     assert detail["packages"][0]["package"] == "commons-lang3"
     assert detail["product_status"][0]["fix_version"] == "4.0.1"

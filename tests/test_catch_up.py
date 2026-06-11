@@ -140,3 +140,37 @@ def test_run_catch_up_cycle_respects_max_runs(monkeypatch) -> None:
     run_catch_up_cycle(default_scrape_settings(), max_runs_per_provider=2)
 
     assert calls == ["hkcert", "hkcert"]
+
+
+def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
+    limits_seen: list[int] = []
+
+    class FakeScraper:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None) -> None:
+            limits_seen.append(settings.limit)
+            self.settings = settings
+            self.provider = provider or HKCERTProvider()
+
+        async def run(self):
+            count = min(self.settings.limit, 10)
+            return {
+                "stop_reason": "limit",
+                "result_count": count,
+                "vulnerabilities": [{"details": {"hkcert": {}}}] * count,
+                "mongo_sync": {"inserted": count},
+            }
+
+    def fake_asyncio_run(coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
+    monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
+
+    run_catch_up_cycle(default_scrape_settings(limit=25), max_runs_per_provider=10)
+
+    assert limits_seen == [25, 15, 5]

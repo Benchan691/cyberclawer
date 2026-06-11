@@ -1,0 +1,33 @@
+<article>
+  <div class="common-title aem-GridColumn aem-GridColumn--default--12">
+    <h1>Security Vulnerabilities in HikCentral Product Series</h1>
+  </div>
+  <div class="rte fixed-width-container aem-GridColumn aem-GridColumn--default--12">
+    <p>SN No. HSRC-202410-01</p>
+    <p>Edit: Hikvision Security Response Center (HSRC)</p>
+    <p>Initial Release Date: 2024-10-18</p>
+    <p><strong>Summary</strong></p>
+    <p>(1) There is a CSV injection vulnerability in some HikCentral Master Lite versions. If exploited, an attacker could build malicious data to generate executable commands in the CSV file.</p>
+    <p>(2) There is an XSS vulnerability in some HikCentral Master Lite versions. If exploited, an attacker could inject scripts into certain pages by building malicious data.</p>
+    <p>(3) There is a SQL injection vulnerability in some HikCentral Professional versions. This could allow an authenticated user to execute arbitrary SQL queries.</p>
+    <p><strong>CVE ID</strong></p>
+    <p>CVE-2024-47485</p>
+    <p>CVE-2024-47486</p>
+    <p>CVE-2024-47487</p>
+    <p><strong>Scoring</strong></p>
+    <p>CVSS v4.0 is adopted in scoring these vulnerabilities</p>
+    <p>CVE-2024-47485</p>
+    <p>Base score: 5.5 (CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H)</p>
+    <p>CVE-2024-47486</p>
+    <p>Base score: 2.1 (CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N)</p>
+    <p>CVE-2024-47487</p>
+    <p>Base score: 7.2 (CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:L/VA:L/SC:L/SI:L/SA:L)</p>
+    <p><strong>Affected Versions and Fix</strong></p>
+    <table>
+      <tr><th>Product Name</th><th>CVE ID</th><th>Affected Versions</th><th>Fixed Version</th></tr>
+      <tr><td>HikCentral Master Lite</td><td>CVE-2024-47485</td><td>Versions between V2.0.0 and V2.2.1</td><td>V2.3.0</td></tr>
+      <tr><td>HikCentral Master Lite</td><td>CVE-2024-47486</td><td>Versions below V2.2.1 (including V2.2.1)</td><td>V2.3.0</td></tr>
+      <tr><td>HikCentral Professional</td><td>CVE-2024-47487</td><td>Versions between V2.0.0 and V2.6.0</td><td>V2.6.1</td></tr>
+    </table>
+  </div>
+</article>

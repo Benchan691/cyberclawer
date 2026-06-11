@@ -9,10 +9,10 @@ from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
 from vuln_scraper.scrapers.cnnvd.config import DEFAULT_PAGE_SIZE, SOURCE_URL
 
 
-TITLE_TYPE_RE = re.compile(r"^【(?P<type>[^】]+)】(?P<title>.+)$")
+HAZARD_LEVELS = {"1": "超危", "2": "高危", "3": "中危", "4": "低危"}
 
 
-def parse_warn_list(
+def parse_vulnerability_list(
     data: Any,
     *,
     page: int,
@@ -38,42 +38,34 @@ def parse_warn_list(
 
 
 def _entry_from_item(item: dict[str, Any], *, provider: str, source_url: str | None) -> ListEntry | None:
-    code = _optional_str(item.get("warnId") or item.get("id"))
-    title = _optional_str(item.get("warnName") or item.get("title"))
-    if not code or not title:
+    cnnvd_code = _optional_str(item.get("cnnvdCode"))
+    title = _optional_str(item.get("vulName"))
+    if not cnnvd_code or not title:
         return None
 
-    alert_type, clean_title = _title_parts(title)
-    published_date = _iso_date(_optional_str(item.get("publishTime") or item.get("published")))
-    summary = _optional_str(item.get("contentStr") or item.get("summary"))
-    detail_url = f"{SOURCE_URL}?warnId={code}"
+    code = cnnvd_code.removeprefix("CNNVD-")
+    hazard_level = _hazard_level(item.get("hazardLevel"))
+    vuln_type = _optional_str(item.get("typeName")) or _optional_str(item.get("vulType"))
+    embedded_detail = dict(item)
+    embedded_detail["_list_summary"] = True
 
     return ListEntry(
         identity=VulnerabilityId(type="CNNVD", code=code),
-        title=clean_title,
-        vuln_type=alert_type,
-        disclosure_date=published_date,
-        status=alert_type,
+        title=title,
+        vuln_type=vuln_type,
+        disclosure_date=_iso_date(_optional_str(item.get("publishTime"))),
+        status=hazard_level,
         provider=provider,
         source_url=source_url,
-        embedded_detail={
-            "_list_summary": True,
-            "warn_id": code,
-            "alert_type": alert_type,
-            "published_date": published_date,
-            "created_by": _optional_str(item.get("createUname")),
-            "summary": summary,
-            "reference_links": [detail_url],
-            "raw": dict(item),
-        },
+        embedded_detail=embedded_detail,
     )
 
 
-def _title_parts(title: str) -> tuple[str | None, str]:
-    match = TITLE_TYPE_RE.match(title.strip())
-    if not match:
-        return None, title.strip()
-    return match.group("type").strip() or None, match.group("title").strip() or title.strip()
+def _hazard_level(value: Any) -> str | None:
+    text = _optional_str(value)
+    if text in (None, "0"):
+        return None
+    return HAZARD_LEVELS.get(text, text)
 
 
 def _iso_date(value: str | None) -> str | None:

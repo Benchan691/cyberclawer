@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS: tuple[str, ...] = (
     "type",
     "status",
+    "severity",
     "vuln_type",
     "disclosure_date",
     "details.cisco.sir",

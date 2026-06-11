@@ -76,7 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=MAX_RESULT_LIMIT,
-        help=f"Maximum records per run (1-{MAX_RESULT_LIMIT}).",
+        help=(
+            f"Maximum records to scrape per provider/collection across catch-up "
+            f"(1-{MAX_RESULT_LIMIT})."
+        ),
     )
     catch_up_parser.add_argument(
         "--max-runs-per-provider",
@@ -104,6 +107,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--proxy",
         default=None,
         help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
+    )
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Create or refresh MongoDB review views for one or more providers.",
+    )
+    review_parser.add_argument(
+        "providers",
+        nargs="*",
+        help="Provider key(s) to refresh. Omit to refresh all configured providers.",
+    )
+
+    backfill_parser = subparsers.add_parser(
+        "backfill-severity",
+        help="Set top-level severity on existing MongoDB vulnerability documents.",
+    )
+    backfill_parser.add_argument(
+        "providers",
+        nargs="*",
+        help="Provider key(s) to backfill. Omit to backfill all configured providers.",
+    )
+    backfill_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report how many documents would change without writing to MongoDB.",
     )
     return parser
 
@@ -198,6 +226,117 @@ def main(argv: list[str] | None = None) -> None:
             settings,
             include_manual_verification=args.include_manual_verification,
             max_runs_per_provider=args.max_runs_per_provider,
+        )
+        return
+
+    if args.command == "review":
+        from .mongo import create_mongo_client
+        from .providers import get_provider
+        from .review_template import refresh_review_views
+
+        providers = list(args.providers)
+        try:
+            for key in providers:
+                get_provider(key)
+        except KeyError as exc:
+            parser.error(str(exc))
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[settings.mongo_database]
+            results = refresh_review_views(
+                database,
+                providers=providers or None,
+                mongo_config_file=settings.mongo_config_file,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+
+        refreshed = 0
+        skipped = 0
+        failed = 0
+        for result in results:
+            if result.refreshed:
+                refreshed += 1
+                print(
+                    f"{result.provider}: refreshed {result.view_name} "
+                    f"(viewOn={result.collection_name})"
+                )
+                continue
+            if result.message != "source collection missing":
+                failed += 1
+                print(f"{result.provider}: failed {result.view_name} ({result.message})")
+                continue
+            skipped += 1
+            print(
+                f"{result.provider}: skipped {result.view_name} "
+                f"(missing source collection {result.collection_name})"
+            )
+
+        print(
+            f"review: refreshed={refreshed} skipped={skipped} failed={failed} "
+            f"total={len(results)}"
+        )
+        if failed:
+            raise SystemExit(1)
+        return
+
+    if args.command == "backfill-severity":
+        from .backfill_severity import backfill_severity
+        from .mongo import create_mongo_client
+        from .providers import get_provider
+
+        providers = list(args.providers)
+        try:
+            for key in providers:
+                get_provider(key)
+        except KeyError as exc:
+            parser.error(str(exc))
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[settings.mongo_database]
+            results = backfill_severity(
+                database,
+                providers=providers or None,
+                mongo_config_file=settings.mongo_config_file,
+                dry_run=args.dry_run,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+
+        scanned = 0
+        updated = 0
+        unchanged = 0
+        skipped = 0
+        for result in results:
+            if result.skipped:
+                skipped += 1
+                print(
+                    f"{result.provider}: skipped {result.collection_name} ({result.message})"
+                )
+                continue
+            scanned += result.scanned
+            updated += result.updated
+            unchanged += result.unchanged
+            action = "would update" if args.dry_run else "updated"
+            print(
+                f"{result.provider}: scanned={result.scanned} "
+                f"{action}={result.updated} unchanged={result.unchanged} "
+                f"(collection={result.collection_name})"
+            )
+
+        prefix = "backfill-severity (dry-run)" if args.dry_run else "backfill-severity"
+        print(
+            f"{prefix}: scanned={scanned} "
+            f"{'would_update' if args.dry_run else 'updated'}={updated} "
+            f"unchanged={unchanged} skipped={skipped} total={len(results)}"
         )
         return
 

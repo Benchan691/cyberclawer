@@ -24,6 +24,21 @@ def test_build_mongo_document_sets_lowercase_identity_and_cve_code() -> None:
     assert document["cve_code"] == "2026-10001"
     assert "cross_refs" not in document
     assert document["source"] == "test-source"
+    assert document["severity"] == ""
+
+
+def test_build_mongo_document_sets_normalized_severity() -> None:
+    document = build_mongo_document(
+        {
+            "type": "cnnvd",
+            "code": "CNNVD-2026-001",
+            "status": "高危",
+            "details": {"cnnvd": {"hazardLevel": 2}},
+        },
+        output_payload(),
+    )
+
+    assert document["severity"] == "High"
 
 
 def test_sync_inserts_records_and_creates_indexes() -> None:
@@ -42,6 +57,7 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
         ("cve_code", False),
         ("disclosure_date", False),
         ("status", False),
+        ("severity", False),
     ]
     assert collection.documents["avd:2026-10001"]["type"] == "avd"
 

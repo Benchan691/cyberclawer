@@ -24,7 +24,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-REQUEST_TIMEOUT = 20.0
+REQUEST_TIMEOUT = 30.0
 
 
 class AVDSigchlError(Exception):
@@ -119,14 +119,21 @@ def _run_inline_script(code: str, base_url: str, user_agent: str) -> str | None:
     return href if isinstance(href, str) and href.strip() else None
 
 
-def _iter_inline_scripts(html: str, page_url: str, session: requests.Session, headers: Mapping[str, str]):
+def _iter_inline_scripts(
+    html: str,
+    page_url: str,
+    session: requests.Session,
+    headers: Mapping[str, str],
+    *,
+    timeout: float = REQUEST_TIMEOUT,
+):
     soup = BeautifulSoup(html, "lxml")
     for idx, tag in enumerate(soup.find_all("script"), start=1):
         src = (tag.get("src") or "").strip()
         if src:
             full_url = urljoin(page_url, src)
             try:
-                resp = session.get(full_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                resp = session.get(full_url, headers=headers, timeout=timeout)
                 resp.raise_for_status()
                 code = resp.text.strip()
                 if code:
@@ -146,11 +153,12 @@ def solve_redirect_url(
     user_agent: str,
     headers: Mapping[str, str] | None = None,
     proxy_url: str | None = None,
+    timeout: float = REQUEST_TIMEOUT,
 ) -> str:
     hdrs = dict(headers or HEADERS)
     with requests.Session() as session:
         configure_requests_session_proxy(session, proxy_url)
-        for script_url, code in _iter_inline_scripts(html, url, session, hdrs):
+        for script_url, code in _iter_inline_scripts(html, url, session, hdrs, timeout=timeout):
             redirect = _run_inline_script(code, script_url, user_agent)
             if redirect:
                 return redirect
@@ -193,6 +201,7 @@ def fetch_via_redirect(
     headers: Mapping[str, str] | None = None,
     cookies: list[dict[str, Any]] | None = None,
     proxy_url: str | None = None,
+    timeout: float = REQUEST_TIMEOUT,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """
     GET url (challenge), solve sigchl redirect, GET redirect URL.
@@ -204,7 +213,7 @@ def fetch_via_redirect(
     with requests.Session() as session:
         configure_requests_session_proxy(session, proxy_url)
         _apply_cookies(session, cookies)
-        challenge = session.get(url, headers=hdrs, timeout=REQUEST_TIMEOUT)
+        challenge = session.get(url, headers=hdrs, timeout=timeout)
         challenge.raise_for_status()
         redirect_url = solve_redirect_url(
             url,
@@ -212,8 +221,9 @@ def fetch_via_redirect(
             user_agent=user_agent,
             headers=hdrs,
             proxy_url=proxy_url,
+            timeout=timeout,
         )
-        cleared = session.get(redirect_url, headers=hdrs, timeout=REQUEST_TIMEOUT)
+        cleared = session.get(redirect_url, headers=hdrs, timeout=timeout)
         cleared.raise_for_status()
         return cleared.text, str(cleared.url), _cookies_from_session(session)
 

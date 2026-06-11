@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = (
     "type",
     "status",
+    "severity",
     "vuln_type",
     "disclosure_date",
     "details.juniper.article_type",

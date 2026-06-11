@@ -3,10 +3,17 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from vuln_scraper.config import DEFAULT_MONGO_CONFIG_FILE, mongo_collection_for_provider
+from vuln_scraper.providers import get_provider, provider_keys
+from vuln_scraper.severity import normalize_severity
 
 
 _CISCO_PARAGRAPH_TAG_RE = re.compile(r"</?p(?:\s[^>]*)?>", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
 
 REVIEW_TEMPLATE_FIELDS = (
@@ -19,6 +26,8 @@ REVIEW_TEMPLATE_FIELDS = (
     "related_link",
 )
 
+_REVIEW_ARRAY_FIELDS = {"affected", "related_link"}
+
 
 def review_template_from_document(document: dict[str, Any]) -> dict[str, Any]:
     provider = _text(document.get("type")).lower()
@@ -26,10 +35,12 @@ def review_template_from_document(document: dict[str, Any]) -> dict[str, Any]:
     mapper = _MAPPERS.get(provider, _generic)
     mapped = mapper(document, detail)
     title = _text(mapped.get("title") or document.get("title"))
+    raw_impacts = _string(mapped.get("impacts"))
+    impacts = normalize_severity(raw_impacts) if raw_impacts else ""
     return {
         "title": title,
         "description": _string(mapped.get("description")),
-        "impacts": _string(mapped.get("impacts")),
+        "impacts": impacts,
         "affected": _string_array(mapped.get("affected")),
         "cve": _string(mapped.get("cve")),
         "recommendation": _string(mapped.get("recommendation")),
@@ -252,6 +263,35 @@ def _ransomwarelive(document: dict[str, Any], detail: dict[str, Any]) -> dict[st
     )
 
 
+def _format_description_table(table: dict[str, Any]) -> str:
+    headers = [_text(header) for header in (table.get("headers") or []) if _text(header)]
+    rows = _dicts(table.get("rows"))
+    if not headers and not rows:
+        return ""
+    lines: list[str] = []
+    if headers:
+        lines.append(" | ".join(headers))
+    for row in rows:
+        cells = [_text(row.get(header)) for header in headers]
+        if any(cells):
+            lines.append(" | ".join(cells))
+    return "\n".join(lines)
+
+
+def _format_description_tables(tables: Any) -> str:
+    return "\n\n".join(
+        text for table in _dicts(tables) if (text := _format_description_table(table))
+    )
+
+
+def _splunk_description(detail: dict[str, Any]) -> str:
+    text = _text(detail.get("description") or "")
+    table_text = _format_description_tables(detail.get("description_tables"))
+    if table_text and text:
+        return f"{text}\n\n{table_text}"
+    return table_text or text
+
+
 def _splunk(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     status_versions = _join_dicts(
         detail.get("product_status"),
@@ -268,7 +308,7 @@ def _splunk(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     )
     return _base(
         document,
-        description=detail.get("description"),
+        description=_splunk_description(detail),
         impacts=detail.get("severity") or detail.get("severity_summary") or detail.get("severity_detail"),
         affected=_string(affected),
         cve=document.get("cve_code") or _first(detail.get("cve_ids")),
@@ -280,7 +320,7 @@ def _splunk(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
 def _hikvision(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     return _base(
         document,
-        description=detail.get("description") or detail.get("summary"),
+        description=detail.get("summary") or detail.get("description"),
         impacts=detail.get("severity"),
         affected=_join(detail.get("affected_products")),
         cve=document.get("cve_code") or _first(detail.get("cve_ids")),
@@ -292,12 +332,12 @@ def _hikvision(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, An
 def _cnnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     return _base(
         document,
-        description=detail.get("description") or detail.get("summary"),
-        impacts="",
-        affected="",
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
-        recommendation="",
-        related_link=_join(detail.get("reference_links")),
+        description=detail.get("vulDesc") or detail.get("productDesc"),
+        impacts=detail.get("hazardLevel"),
+        affected=_join([detail.get("affectedProduct"), detail.get("affectedVendor")]),
+        cve=document.get("cve_code") or detail.get("cveCode"),
+        recommendation=detail.get("patch"),
+        related_link=_extract_urls(detail.get("referUrl")),
     )
 
 
@@ -305,7 +345,7 @@ def _cnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     return _base(
         document,
         description=detail.get("description"),
-        impacts=detail.get("severity"),
+        impacts=document.get("status") or detail.get("severity"),
         affected=_join(detail.get("affected_products")),
         cve=document.get("cve_code") or _first(detail.get("cve_ids")),
         recommendation=detail.get("solution"),
@@ -386,6 +426,16 @@ def _string(value: Any) -> str:
     if isinstance(value, dict):
         return _json(value)
     return str(value).strip()
+
+
+def _extract_urls(value: Any) -> list[str]:
+    links: list[str] = []
+    for text in _string_array(value):
+        for match in _URL_RE.findall(text):
+            url = match.rstrip(").,;，。")
+            if url and url not in links:
+                links.append(url)
+    return links
 
 
 def _string_array(value: Any) -> list[str]:
@@ -538,7 +588,93 @@ def ensure_review_view(database: Any, *, provider: str, collection_name: str) ->
             "pipeline": review_view_pipeline(provider),
         }
     )
+    _validate_review_view(database, view_name)
     return True
+
+
+def _validate_review_view(database: Any, view_name: str, *, sample_size: int = 100) -> None:
+    for index, document in enumerate(database[view_name].find({}).limit(sample_size), start=1):
+        errors = _review_document_errors(document)
+        if errors:
+            raise ReviewViewError(
+                f"review view {view_name!r} has invalid document {index}: {', '.join(errors)}"
+            )
+
+
+def _review_document_errors(document: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    fields = tuple(document)
+    if fields != REVIEW_TEMPLATE_FIELDS:
+        missing = [field for field in REVIEW_TEMPLATE_FIELDS if field not in document]
+        extra = [field for field in document if field not in REVIEW_TEMPLATE_FIELDS]
+        if missing:
+            errors.append(f"missing fields {missing!r}")
+        if extra:
+            errors.append(f"extra fields {extra!r}")
+
+    for field in REVIEW_TEMPLATE_FIELDS:
+        value = document.get(field)
+        if field in _REVIEW_ARRAY_FIELDS:
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                errors.append(f"{field} must be an array of strings")
+        elif not isinstance(value, str):
+            errors.append(f"{field} must be a string")
+    return errors
+
+
+@dataclass(slots=True)
+class ReviewViewRefreshResult:
+    provider: str
+    collection_name: str
+    view_name: str
+    refreshed: bool
+    message: str = ""
+
+
+def refresh_review_views(
+    database: Any,
+    *,
+    providers: list[str] | None = None,
+    mongo_config_file: Path | str | None = DEFAULT_MONGO_CONFIG_FILE,
+) -> list[ReviewViewRefreshResult]:
+    keys = list(providers) if providers else list(provider_keys())
+    results: list[ReviewViewRefreshResult] = []
+    for key in keys:
+        provider = get_provider(key)
+        collection_name = mongo_collection_for_provider(
+            key,
+            mongo_config_file,
+            default=provider.default_mongo_collection,
+        )
+        view_name = review_view_name(collection_name)
+        try:
+            refreshed = ensure_review_view(
+                database,
+                provider=key,
+                collection_name=collection_name,
+            )
+        except ReviewViewError as exc:
+            results.append(
+                ReviewViewRefreshResult(
+                    provider=key,
+                    collection_name=collection_name,
+                    view_name=view_name,
+                    refreshed=False,
+                    message=str(exc),
+                )
+            )
+            continue
+        message = "refreshed" if refreshed else "source collection missing"
+        results.append(
+            ReviewViewRefreshResult(
+                provider=key,
+                collection_name=collection_name,
+                view_name=view_name,
+                refreshed=refreshed,
+                message=message,
+            )
+        )
+    return results
 
 
 def review_view_pipeline(provider: str) -> list[dict[str, Any]]:
@@ -580,9 +716,9 @@ def _mongo_description(provider: str, detail: str) -> dict[str, Any]:
             )
         ],
         "ransomwarelive": [f"{detail}.press"],
-        "splunk": [f"{detail}.description"],
-        "hikvision": [f"{detail}.description", f"{detail}.summary"],
-        "cnnvd": [f"{detail}.description", f"{detail}.summary"],
+        "splunk": [_mongo_splunk_description(detail)],
+        "hikvision": [f"{detail}.summary", f"{detail}.description"],
+        "cnnvd": [f"{detail}.vulDesc", f"{detail}.productDesc"],
         "cnvd": [f"{detail}.description"],
         "juniper": [f"{detail}.description", f"{detail}.summary"],
     }
@@ -611,10 +747,39 @@ def _mongo_impacts(provider: str, detail: str) -> dict[str, Any]:
         ],
         "splunk": [f"{detail}.severity", f"{detail}.severity_summary", f"{detail}.severity_detail"],
         "hikvision": [f"{detail}.severity"],
-        "cnvd": [f"{detail}.severity"],
+        "cnnvd": [f"{detail}.hazardLevel"],
+        "cnvd": ["$status", f"{detail}.severity"],
         "juniper": [f"{detail}.raw_fields.severity"],
     }
-    return _mfirst(sources.get(provider, []))
+    return _mnormalize_severity(_mfirst(sources.get(provider, [])))
+
+
+def _mnormalize_severity(value_expr: Any) -> dict[str, Any]:
+    text = {"$trim": {"input": _mstr(value_expr)}}
+    lower = {"$toLower": text}
+    return {
+        "$switch": {
+            "branches": [
+                {"case": {"$in": [text, ["1", "超危", "严重"]]}, "then": "Critical"},
+                {"case": {"$in": [lower, ["critical", "crit"]]}, "then": "Critical"},
+                {"case": {"$in": [text, ["2", "高危", "高"]]}, "then": "High"},
+                {"case": {"$regexMatch": {"input": lower, "regex": "^high"}}, "then": "High"},
+                {"case": {"$in": [text, ["3", "中危", "中"]]}, "then": "Medium"},
+                {"case": {"$in": [lower, ["medium", "moderate", "med"]]}, "then": "Medium"},
+                {"case": {"$regexMatch": {"input": lower, "regex": "^medium|^moderate"}}, "then": "Medium"},
+                {"case": {"$in": [text, ["4", "低危", "低"]]}, "then": "Low"},
+                {"case": {"$in": [lower, ["low", "informational", "info", "none"]]}, "then": "Low"},
+                {"case": {"$regexMatch": {"input": lower, "regex": "^low"}}, "then": "Low"},
+            ],
+            "default": {
+                "$cond": [
+                    {"$eq": [text, ""]},
+                    "",
+                    "Unknown",
+                ]
+            },
+        }
+    }
 
 
 def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
@@ -716,6 +881,8 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
         )
     if provider == "hikvision":
         return _mjoin(f"{detail}.affected_products")
+    if provider == "cnnvd":
+        return _mjoin_many([f"{detail}.affectedProduct", f"{detail}.affectedVendor"])
     if provider == "cnvd":
         return _mjoin(f"{detail}.affected_products")
     if provider == "juniper":
@@ -749,7 +916,7 @@ def _mongo_cve(provider: str, detail: str) -> dict[str, Any]:
         "ransomwarelive": ["$cve_code"],
         "splunk": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
         "hikvision": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "cnnvd": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
+        "cnnvd": ["$cve_code", f"{detail}.cveCode"],
         "cnvd": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
         "juniper": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
     }
@@ -770,6 +937,7 @@ def _mongo_recommendation(provider: str, detail: str) -> dict[str, Any]:
         "qianxin": [_mjoin(f"{detail}.description.recommendations")],
         "splunk": [_mjoin_many([f"{detail}.solution", f"{detail}.mitigations"])],
         "hikvision": [f"{detail}.solution"],
+        "cnnvd": [f"{detail}.patch"],
         "cnvd": [f"{detail}.solution"],
         "juniper": [_mjoin_many([f"{detail}.solution", f"{detail}.workaround"])],
     }
@@ -777,6 +945,8 @@ def _mongo_recommendation(provider: str, detail: str) -> dict[str, Any]:
 
 
 def _mongo_related_link(provider: str, detail: str) -> dict[str, Any]:
+    if provider == "cnnvd":
+        return _mjoin(_mextract_urls(f"{detail}.referUrl"))
     if provider == "cve":
         return _mjoin_values(f"{detail}.references", "url")
     if provider == "cisco":
@@ -801,7 +971,6 @@ def _mongo_related_link(provider: str, detail: str) -> dict[str, Any]:
         "qianxin": [f"{detail}.reference_links"],
         "splunk": [f"{detail}.reference_links"],
         "hikvision": [f"{detail}.reference_links"],
-        "cnnvd": [f"{detail}.reference_links"],
         "cnvd": [f"{detail}.reference_links"],
         "juniper": [f"{detail}.reference_links"],
     }
@@ -902,6 +1071,164 @@ def _mjoin(value: Any) -> dict[str, Any]:
     return _mjoin_mapped(value, _mstr("$$item"))
 
 
+def _mextract_urls(value: Any) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {
+                "matches": {
+                    "$regexFindAll": {
+                        "input": _mstr(value),
+                        "regex": r"https?://[^\s<>\"]+",
+                    }
+                }
+            },
+            "in": {
+                "$map": {
+                    "input": {"$ifNull": ["$$matches", []]},
+                    "as": "match",
+                    "in": "$$match.match",
+                }
+            },
+        }
+    }
+
+
+def _mongo_splunk_description(detail: str) -> dict[str, Any]:
+    tables_field = f"{detail}.description_tables"
+    desc_field = f"{detail}.description"
+
+    table_strings = {
+        "$map": {
+            "input": {"$cond": [{"$isArray": tables_field}, tables_field, []]},
+            "as": "table",
+            "in": {
+                "$let": {
+                    "vars": {
+                        "header_line": _mjoin_mapped(
+                            {"$ifNull": ["$$table.headers", []]},
+                            _mstr("$$item"),
+                            separator=" | ",
+                        ),
+                        "row_lines": {
+                            "$map": {
+                                "input": {"$ifNull": ["$$table.rows", []]},
+                                "as": "row",
+                                "in": _mjoin_mapped(
+                                    {"$ifNull": ["$$table.headers", []]},
+                                    {
+                                        "$toString": {
+                                            "$ifNull": [
+                                                {
+                                                    "$getField": {
+                                                        "field": "$$item",
+                                                        "input": "$$row",
+                                                    }
+                                                },
+                                                "",
+                                            ]
+                                        }
+                                    },
+                                    separator=" | ",
+                                ),
+                            }
+                        },
+                    },
+                    "in": {
+                        "$let": {
+                            "vars": {
+                                "body": _mreduce_join("$$row_lines", separator="\n"),
+                            },
+                            "in": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$ne": [{"$trim": {"input": "$$header_line"}}, ""]},
+                                            {"$ne": [{"$trim": {"input": "$$body"}}, ""]},
+                                        ]
+                                    },
+                                    {"$concat": ["$$header_line", "\n", "$$body"]},
+                                    {
+                                        "$cond": [
+                                            {"$ne": [{"$trim": {"input": "$$header_line"}}, ""]},
+                                            "$$header_line",
+                                            "$$body",
+                                        ]
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    }
+    tables_text = _mreduce_join(
+        {
+            "$filter": {
+                "input": table_strings,
+                "as": "table_text",
+                "cond": {"$ne": [{"$trim": {"input": "$$table_text"}}, ""]},
+            }
+        },
+        separator="\n\n",
+    )
+    return {
+        "$let": {
+            "vars": {
+                "text": _mstr(desc_field),
+                "tables": tables_text,
+            },
+            "in": {
+                "$cond": [
+                    {
+                        "$and": [
+                            {"$ne": [{"$trim": {"input": "$$text"}}, ""]},
+                            {"$ne": [{"$trim": {"input": "$$tables"}}, ""]},
+                        ]
+                    },
+                    {"$concat": ["$$text", "\n\n", "$$tables"]},
+                    {
+                        "$cond": [
+                            {"$ne": [{"$trim": {"input": "$$tables"}}, ""]},
+                            "$$tables",
+                            "$$text",
+                        ]
+                    },
+                ]
+            },
+        }
+    }
+
+
+def _mreduce_join(items: Any, *, separator: str = "\n") -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {
+                "lines": {
+                    "$filter": {
+                        "input": {"$ifNull": [items, []]},
+                        "as": "line",
+                        "cond": {"$ne": [{"$trim": {"input": {"$toString": "$$line"}}}, ""]},
+                    }
+                }
+            },
+            "in": {
+                "$reduce": {
+                    "input": "$$lines",
+                    "initialValue": "",
+                    "in": {
+                        "$concat": [
+                            "$$value",
+                            {"$cond": [{"$eq": ["$$value", ""]}, "", separator]},
+                            {"$toString": "$$this"},
+                        ]
+                    },
+                }
+            },
+        }
+    }
+
+
 def _mjoin_many(values: list[Any]) -> dict[str, Any]:
     return _mjoin_mapped(
         {"$concatArrays": [[value] for value in values]},
@@ -913,7 +1240,12 @@ def _mjoin_values(value: Any, field: str) -> dict[str, Any]:
     return _mjoin_mapped(value, _mstr(f"$$item.{field}"))
 
 
-def _mjoin_mapped(value: Any, mapped_expression: Any) -> dict[str, Any]:
+def _mjoin_mapped(
+    value: Any,
+    mapped_expression: Any,
+    *,
+    separator: str = "\n",
+) -> dict[str, Any]:
     return {
         "$let": {
             "vars": {
@@ -938,7 +1270,7 @@ def _mjoin_mapped(value: Any, mapped_expression: Any) -> dict[str, Any]:
                     "in": {
                         "$concat": [
                             "$$value",
-                            {"$cond": [{"$eq": ["$$value", ""]}, "", "\n"]},
+                            {"$cond": [{"$eq": ["$$value", ""]}, "", separator]},
                             "$$this",
                         ]
                     },

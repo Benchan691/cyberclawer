@@ -1,5 +1,6 @@
 CATEGORICAL_FIELDS: tuple[str, ...] = (
     "type",
+    "severity",
     "disclosure_date",
     "details.cve.vuln_status",
     "details.cve.metrics.cvss_v40.cvssData.baseSeverity",

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .config import ScraperSettings
 from .models import normalize_cve_code
+from .severity import severity_from_record
 
 
 MongoClientFactory = Callable[[str], Any]
@@ -119,6 +120,7 @@ def _ensure_indexes(collection: Any) -> None:
     collection.create_index("cve_code")
     collection.create_index("disclosure_date")
     collection.create_index("status")
+    collection.create_index("severity")
 
 
 def _sync_records(
@@ -160,6 +162,7 @@ def build_mongo_document(record: dict[str, Any], output: dict[str, Any]) -> dict
     document["cve_code"] = cve_code
     document.pop("cross_refs", None)
     document.setdefault("details", {})
+    document["severity"] = severity_from_record(document) or ""
     document["scraped_at"] = output.get("scraped_at")
     if isinstance(record.get("source"), dict):
         document["source"] = record["source"]

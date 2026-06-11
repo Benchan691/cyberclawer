@@ -44,6 +44,7 @@ class SplunkDetailRecord:
     all_affected_versions: str | None = None
     affected_components: str | None = None
     description: str | None = None
+    description_tables: list[dict[str, Any]] = field(default_factory=list)
     solution: str | None = None
     mitigations: str | None = None
     severity_summary: str | None = None
@@ -67,6 +68,7 @@ def parse_detail_page(html: str) -> SplunkDetailRecord:
     fields = _label_fields(parsed)
     sections = _sections(parsed)
     tables = _tables(parsed)
+    section_tables = _section_tables(parsed)
     cve_ids = cve_ids_from_text("\n".join((text, "\n".join(_flatten_table_values(tables)))))
 
     return SplunkDetailRecord(
@@ -86,6 +88,7 @@ def parse_detail_page(html: str) -> SplunkDetailRecord:
         all_affected_versions=fields.get("all_affected_versions"),
         affected_components=fields.get("affected_components"),
         description=sections.get("description"),
+        description_tables=section_tables.get("description", []),
         solution=sections.get("solution"),
         mitigations=sections.get("mitigations"),
         severity_summary=fields.get("severity_summary"),
@@ -150,28 +153,60 @@ def _sections(parsed) -> dict[str, str]:
     return sections
 
 
+def _section_tables(parsed) -> dict[str, list[dict[str, Any]]]:
+    section_tables: dict[str, list[dict[str, Any]]] = {}
+    for heading in parsed.find_all(["h2", "h3", "h4"]):
+        key = SECTION_KEYS.get(normalize_key(clean_text(heading)))
+        if key is None:
+            continue
+        tables: list[dict[str, Any]] = []
+        for sibling in heading.next_siblings:
+            if isinstance(sibling, Tag):
+                if sibling.name in {"h2", "h3", "h4"}:
+                    break
+                if sibling.name == "table":
+                    parsed_table = _parse_table(sibling)
+                    if parsed_table is not None:
+                        tables.append(parsed_table)
+                    continue
+                for nested in sibling.find_all("table"):
+                    parsed_table = _parse_table(nested)
+                    if parsed_table is not None:
+                        tables.append(parsed_table)
+        if tables:
+            section_tables[key] = tables
+    return section_tables
+
+
 def _tables(parsed) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
     for table in parsed.find_all("table"):
-        headers = [normalize_key(clean_text(cell)) for cell in table.find_all("th")]
-        if not headers:
-            first_row = table.find("tr")
-            headers = [normalize_key(clean_text(cell)) for cell in first_row.find_all("td")] if first_row else []
-        rows: list[dict[str, str | None]] = []
-        for row in table.find_all("tr"):
-            cells = row.find_all("td", recursive=False)
-            if not cells:
-                continue
-            item: dict[str, str | None] = {}
-            for index, cell in enumerate(cells):
-                key = headers[index] if index < len(headers) and headers[index] else f"column_{index + 1}"
-                text = clean_multiline(cell) or clean_text(cell)
-                item[key] = text or None
-            if any(value for value in item.values()):
-                rows.append(item)
-        if rows:
-            tables.append({"headers": headers, "rows": rows})
+        parsed_table = _parse_table(table)
+        if parsed_table is not None:
+            tables.append(parsed_table)
     return tables
+
+
+def _parse_table(table: Tag) -> dict[str, Any] | None:
+    headers = [normalize_key(clean_text(cell)) for cell in table.find_all("th")]
+    if not headers:
+        first_row = table.find("tr")
+        headers = [normalize_key(clean_text(cell)) for cell in first_row.find_all("td")] if first_row else []
+    rows: list[dict[str, str | None]] = []
+    for row in table.find_all("tr"):
+        cells = row.find_all("td", recursive=False)
+        if not cells:
+            continue
+        item: dict[str, str | None] = {}
+        for index, cell in enumerate(cells):
+            key = headers[index] if index < len(headers) and headers[index] else f"column_{index + 1}"
+            text = clean_multiline(cell) or clean_text(cell)
+            item[key] = text or None
+        if any(value for value in item.values()):
+            rows.append(item)
+    if not rows:
+        return None
+    return {"headers": headers, "rows": rows}
 
 
 def _classified_rows(tables: list[dict[str, Any]], required_headers: set[str]) -> list[dict[str, str | None]]:

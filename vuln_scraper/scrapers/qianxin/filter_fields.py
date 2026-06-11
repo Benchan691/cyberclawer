@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = (
     "type",
     "status",
+    "severity",
     "cve_code",
     "details.qianxin.category",
     "details.qianxin.level",

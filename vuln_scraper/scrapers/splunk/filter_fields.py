@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = [
     "type",
     "status",
+    "severity",
     "disclosure_date",
     "cve_code",
     "details.splunk.severity",

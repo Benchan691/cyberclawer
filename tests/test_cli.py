@@ -10,6 +10,28 @@ def test_cli_without_subcommand_has_no_command() -> None:
     assert args.command is None
 
 
+def test_cli_parses_review_subcommand() -> None:
+    parser = build_parser()
+    all_args = parser.parse_args(["review"])
+    one_args = parser.parse_args(["review", "hikvision", "avd"])
+
+    assert all_args.command == "review"
+    assert all_args.providers == []
+    assert one_args.providers == ["hikvision", "avd"]
+
+
+def test_cli_parses_backfill_severity_subcommand() -> None:
+    parser = build_parser()
+    all_args = parser.parse_args(["backfill-severity"])
+    one_args = parser.parse_args(["backfill-severity", "cnnvd", "--dry-run"])
+
+    assert all_args.command == "backfill-severity"
+    assert all_args.providers == []
+    assert all_args.dry_run is False
+    assert one_args.providers == ["cnnvd"]
+    assert one_args.dry_run is True
+
+
 def test_cli_parses_tui_subcommand() -> None:
     parser = build_parser()
     args = parser.parse_args(["tui"])
@@ -101,6 +123,48 @@ def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:
     assert captured["settings"].browser_headless is False
     assert captured["settings"].manual_verification_timeout_ms == 7000
     assert "cnvd: fetched 1 records" in capsys.readouterr().out
+
+
+def test_main_review_refreshes_selected_providers(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDatabase:
+        def __getitem__(self, name: str) -> object:
+            return object()
+
+    class FakeClient:
+        def __getitem__(self, name: str) -> FakeDatabase:
+            return FakeDatabase()
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    def fake_refresh_review_views(database, *, providers=None, mongo_config_file=None):
+        captured["providers"] = providers
+        captured["database"] = database
+        from vuln_scraper.review_template import ReviewViewRefreshResult
+
+        return [
+            ReviewViewRefreshResult("hikvision", "hikvision", "hikvision_review", True),
+            ReviewViewRefreshResult("avd", "avd", "avd_review", False, "source collection missing"),
+        ]
+
+    monkeypatch.setattr("vuln_scraper.mongo.create_mongo_client", lambda uri: FakeClient())
+    monkeypatch.setattr("vuln_scraper.review_template.refresh_review_views", fake_refresh_review_views)
+
+    main(["review", "hikvision", "avd"])
+
+    assert captured["providers"] == ["hikvision", "avd"]
+    assert captured["closed"] is True
+    output = capsys.readouterr().out
+    assert "hikvision: refreshed hikvision_review" in output
+    assert "avd: skipped avd_review" in output
+    assert "review: refreshed=1 skipped=1 failed=0 total=2" in output
+
+
+def test_main_review_rejects_unknown_provider() -> None:
+    with pytest.raises(SystemExit):
+        main(["review", "not-a-provider"])
 
 
 def test_main_run_can_disable_provider_browser_fallback(monkeypatch, capsys) -> None:

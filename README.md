@@ -121,6 +121,28 @@ Precedence for connection settings is CLI flags, environment variables
 work), `mongodb.toml`, then built-in defaults. The `[mongodb.collections]` table
 maps each scraper to its collection inside the configured database.
 
+For MongoDB Atlas, set `MONGO_URI` to your `mongodb+srv://` connection string
+(do not commit credentials into `mongodb.toml`):
+
+```bash
+export MONGO_URI='mongodb+srv://user:password@cluster.example.mongodb.net'
+```
+
+Each synced vulnerability document includes a top-level `severity` field with
+normalized English labels (`Critical`, `High`, `Medium`, `Low`, `Unknown`, or
+empty when unavailable). Provider-specific severity values remain under
+`details.<provider>`. The filter TUI exposes `severity` as a shared categorical
+field across collections; review views store the same normalized value in
+`impacts`. To backfill existing source collections without re-scraping:
+
+```bash
+python scrape.py backfill-severity
+python scrape.py backfill-severity cnnvd hikvision --dry-run
+```
+
+Then refresh review views with `python scrape.py review`. Alternatively,
+re-scrape with `--mongo-conflict overwrite`.
+
 `scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
 the combined run log filename. Precedence is explicit `ScraperSettings` values,
 then `[scrapers.<provider>]`, then `[scrapers.defaults]`, then built-in defaults.
@@ -153,13 +175,17 @@ Interactive scrape, choosing scraper and amount:
 python scrape.py tui
 ```
 
-Catch up every provider: scrape and sync once per iteration until MongoDB overlap,
-then move to the next provider (no sleep between providers):
+Catch up every provider: scrape and sync in batches until MongoDB overlap or the
+per-provider `--limit` is reached, then move to the next provider (no sleep between
+providers):
 
 ```bash
 python scrape.py catch-up
 python scrape.py catch-up --limit 200 --max-runs-per-provider 50
 ```
+
+With `--limit 200`, each provider/collection scrapes at most 200 records total
+across all catch-up runs for that provider before advancing.
 
 Run one scraper once, for example AVD (browser extra recommended) or CNVD (requires the `cnvd` extra):
 
@@ -192,11 +218,17 @@ Each document is keyed by unique lowercase scraper `type` + provider-native
 `hkcert:suse-linux-kernel-multiple-vulnerabilities_20260601`,
 `huawei_sa:huawei-sa-LKEiSHPVtLPEDF-60937345`, or `cve:2024-3094`. Common fields live at the top level:
 
-- `type`, `code`, `cve_code`, `title`, `disclosure_date`, `status`
+- `type`, `code`, `cve_code`, `title`, `disclosure_date`, `status`, `severity`
 - `source`
 - `details`
 
 Provider-specific fields live under `details.<provider>`.
+
+When a detail response contains HTML tables, every table is also preserved under
+`details.<provider>.raw_tables` as a rectangular 2D array of cleaned cell text.
+The outer array contains tables in response order, and each table includes its
+header and data rows. This field is written to both JSON scrape output and
+MongoDB alongside existing provider-specific semantic table fields.
 
 Aliyun AVD detail fields include `danger_level`, `exploitability`, `patch_status`,
 `description`, `impact_range`, `security_versions`, `solution`, `reference_links`,
@@ -247,6 +279,10 @@ Splunk detail fields include `advisory_id`, `cve_ids`, `published_date`,
 CVEs from HKCERT/zero-day.cz/GovCERT.HK/Cisco/Huawei SA/Palo Alto Networks/
 InfoSec/Splunk details are stored as top-level `cve_code` using the normalized
 `YYYY-NNNN` form. Non-CVE bulletins use `cve_code = null`.
+CNNVD stores the inner detail API object unchanged under `details.cnnvd`, using
+the source field names such as `id`, `vulName`, `cnnvdCode`, `cveCode`,
+`hazardLevel`, `vulDesc`, `affectedProduct`, `affectedSystem`, `referUrl`, and
+`patch`.
 CNVD detail fields include `cnvd_id`, `severity`, `cvss_score`,
 `cvss_vector`, `affected_products`, `cve_ids`, `description`, `solution`,
 `reference_links`, `published_date`, and `raw_fields`.
@@ -332,10 +368,13 @@ redirect URL (`timestamp__1384=...`), and parses that HTML. Detail pages use the
 `tbody` row link href when present. Playwright remains a fallback when redirect
 clearance fails. Optional env cookie: `AVD_COOKIE` / `AVD_COOKIES` /
 `ALIYUN_AVD_COOKIE`.
-CNNVD vulnerability notices are ingested from the JSON endpoints behind
-[漏洞通报](https://www.cnnvd.org.cn/home/warn): `homePage/vulWarnList` for newest-first
-lists and `homePage/vulWarnDetail` for advisory bodies. Mongo sync stops at the
-first stored notice.
+CNNVD vulnerabilities are ingested from the JSON endpoints behind
+[漏洞信息](https://www.cnnvd.org.cn/home/loophole): `homePage/cnnvdVulList` for
+newest-first lists and `cnnvdVul/getCnnnvdDetailOnDatasource` for details.
+Detail requests use the list record ID, CNNVD code, CVE code, and vulnerability
+type, with reduced compatibility payloads as fallbacks. The runner consumes
+every ID from each fetched list page before requesting the next page.
+Mongo sync stops at the first stored vulnerability.
 CNVD flaws are scraped from [漏洞列表](https://www.cnvd.org.cn/flaw/list) over HTTP.
 Install the CNVD gate dependencies with `pip install -e '.[cnvd]'`. On each run
 the scraper refreshes session cookies in memory (Jiasule clearance + captcha OCR)

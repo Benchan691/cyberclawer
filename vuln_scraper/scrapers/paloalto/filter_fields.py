@@ -1,6 +1,7 @@
 CATEGORICAL_FIELDS = (
     "type",
     "status",
+    "severity",
     "vuln_type",
     "details.paloalto.severity",
     "details.paloalto.urgency",

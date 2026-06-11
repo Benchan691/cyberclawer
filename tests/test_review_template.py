@@ -5,7 +5,9 @@ import pytest
 from vuln_scraper.review_template import (
     REVIEW_TEMPLATE_FIELDS,
     ReviewViewError,
+    _review_document_errors,
     ensure_review_view,
+    refresh_review_views,
     review_template_from_document,
     review_view_name,
     review_view_pipeline,
@@ -64,7 +66,7 @@ def test_avd_uses_danger_level_and_software_without_impact_text() -> None:
         )
     )
 
-    assert template["impacts"] == "高危"
+    assert template["impacts"] == "High"
     assert template["affected"] == ["Acme Widget 1.0"]
     assert template["related_link"] == ["https://one"]
 
@@ -84,7 +86,7 @@ def test_hkcert_uses_risk_level_and_product_table_then_system_fallback() -> None
         document("hkcert", {"table": [], "systems_affected": ["Windows Server"]})
     )
 
-    assert table_template["impacts"] == "High Risk"
+    assert table_template["impacts"] == "High"
     assert table_template["affected"] == ["Product < 2.0"]
     assert fallback_template["affected"] == ["Windows Server"]
 
@@ -117,7 +119,7 @@ def test_cve_uses_cvss_severity_and_vulnerable_cpe_version_bounds() -> None:
         )
     )
 
-    assert template["impacts"] == "HIGH"
+    assert template["impacts"] == "High"
     assert template["affected"] == ["cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:* >=1.0 <2.0"]
 
 
@@ -135,7 +137,7 @@ def test_cve_v5_uses_normalized_affected_product_versions() -> None:
         )
     )
 
-    assert template["impacts"] == "CRITICAL"
+    assert template["impacts"] == "Critical"
     assert template["affected"] == ["Acme Widget 1.0 <2.0 (semver)"]
     assert template["related_link"] == ["https://example.test/advisory"]
     assert "affected_products" in json.dumps(review_view_pipeline("cve"))
@@ -158,7 +160,7 @@ def test_github_advisory_maps_severity_packages_and_patch_versions() -> None:
         )
     )
 
-    assert template["impacts"] == "high"
+    assert template["impacts"] == "High"
     assert template["affected"] == ["npm:example < 2.0"]
     assert template["recommendation"] == "2.0"
 
@@ -172,6 +174,103 @@ def test_cisco_description_strips_paragraph_html_tags() -> None:
     )
 
     assert template["description"] == "First paragraph.Second paragraph."
+
+
+def test_hikvision_prefers_summary_for_review_description() -> None:
+    template = review_template_from_document(
+        document(
+            "hikvision",
+            {
+                "summary": "AEM rte advisory body",
+                "description": "Parsed Description section only",
+                "severity": "High",
+                "affected_products": ["Camera A"],
+                "solution": "Upgrade firmware",
+                "cve_ids": ["CVE-2026-1234"],
+                "reference_links": ["https://www.hikvision.com/advisory"],
+            },
+            cve_code="CVE-2026-1234",
+        )
+    )
+
+    assert template["description"] == "AEM rte advisory body"
+    assert template["impacts"] == "High"
+    assert template["affected"] == ["Camera A"]
+    assert template["cve"] == "CVE-2026-1234"
+    assert template["recommendation"] == "Upgrade firmware"
+    assert template["related_link"] == ["https://www.hikvision.com/advisory"]
+
+    pipeline = json.dumps(review_view_pipeline("hikvision"))
+    assert "$details.hikvision.summary" in pipeline
+    assert pipeline.index("$details.hikvision.summary") < pipeline.index(
+        "$details.hikvision.description"
+    )
+
+
+def test_cnvd_review_impacts_uses_document_status() -> None:
+    template = review_template_from_document(
+        {
+            **document("cnvd", {"severity": "低", "affected_products": ["Product A"]}),
+            "status": "中",
+        }
+    )
+
+    assert template["impacts"] == "Medium"
+
+    pipeline = json.dumps(review_view_pipeline("cnvd"))
+    assert '"$status"' in pipeline
+    assert pipeline.index('"$status"') < pipeline.index("$details.cnvd.severity")
+
+
+def test_splunk_review_description_includes_description_tables() -> None:
+    template = review_template_from_document(
+        document(
+            "splunk",
+            {
+                "description": "Several package updates address CVEs.",
+                "description_tables": [
+                    {
+                        "headers": ["package", "remediation", "cve", "severity"],
+                        "rows": [
+                            {
+                                "package": "commons-lang3",
+                                "remediation": "Upgrade to 3.18.0",
+                                "cve": "CVE-2025-48924",
+                                "severity": "Medium",
+                            }
+                        ],
+                    }
+                ],
+                "severity": "Medium",
+            },
+        )
+    )
+
+    assert template["description"].startswith("Several package updates address CVEs.")
+    assert "package | remediation | cve | severity" in template["description"]
+    assert "commons-lang3 | Upgrade to 3.18.0 | CVE-2025-48924 | Medium" in template["description"]
+
+    pipeline = json.dumps(review_view_pipeline("splunk"))
+    assert "description_tables" in pipeline
+
+
+def test_cnnvd_related_link_extracts_urls_from_refer_url() -> None:
+    template = review_template_from_document(
+        document(
+            "cnnvd",
+            {
+                "referUrl": "来源: Google\r\n链接:https://example.test/advisory",
+                "patch": "https://example.test/patch",
+            },
+        )
+    )
+
+    assert template["related_link"] == ["https://example.test/advisory"]
+    assert "https://example.test/patch" not in template["related_link"]
+
+    pipeline = json.dumps(review_view_pipeline("cnnvd"))
+    assert "$details.cnnvd.referUrl" in pipeline
+    assert "regexFindAll" in pipeline
 
 
 def test_related_link_is_an_array_of_non_empty_links() -> None:
@@ -220,7 +319,7 @@ def test_qianxin_maps_structured_chapters_into_the_seven_review_fields() -> None
     assert template["description"] == (
         "Security advisory\nSummary\nVulnerability description\nImpact description\nAffected asset summary"
     )
-    assert template["impacts"] == "高危"
+    assert template["impacts"] == "High"
     assert template["affected"] == ["Acme Widget", "Widget < 2.0", "Widget 3.0"]
     assert template["cve"] == "CVE-2026-12345"
     assert template["recommendation"] == "Upgrade\nRestrict access"
@@ -238,7 +337,7 @@ def test_cisco_review_view_strips_paragraph_html_tags_with_supported_operators()
     assert json.dumps(description).count("$replaceAll") == 4
 
 
-@pytest.mark.parametrize("provider", ["zeroday", "govcert", "infosec", "ransomwarelive", "cnnvd"])
+@pytest.mark.parametrize("provider", ["zeroday", "govcert", "infosec", "ransomwarelive"])
 def test_providers_without_reliable_severity_have_blank_impacts(provider: str) -> None:
     template = review_template_from_document(
         document(provider, {"impact": "Impact prose", "activity": "Healthcare", "severity_counts": {"High": 2}})
@@ -247,7 +346,7 @@ def test_providers_without_reliable_severity_have_blank_impacts(provider: str) -
     assert template["impacts"] == ""
 
 
-@pytest.mark.parametrize("provider", ["huawei_sa", "ransomwarelive", "cnnvd"])
+@pytest.mark.parametrize("provider", ["huawei_sa", "ransomwarelive"])
 def test_providers_without_normalized_products_have_blank_affected(provider: str) -> None:
     template = review_template_from_document(
         document(provider, {"raw_sections": {"affected": "raw"}, "victim": "Company", "vul": [{"cveId": "x"}]})
@@ -261,7 +360,7 @@ def test_providers_without_normalized_products_have_blank_affected(provider: str
     [
         ("cisco", {"sir": "Critical", "product_names": ["IOS XE"]}, "Critical", "IOS XE"),
         ("huawei_sa", {"severity": "High", "vul": [{"cveId": "CVE-1"}]}, "High", ""),
-        ("paloalto", {"severity": "HIGH", "products": ["PAN-OS"]}, "HIGH", "PAN-OS"),
+        ("paloalto", {"severity": "HIGH", "products": ["PAN-OS"]}, "High", "PAN-OS"),
         ("qianxin", {"level": "Critical", "description": {}}, "Critical", ""),
         (
             "splunk",
@@ -275,7 +374,17 @@ def test_providers_without_normalized_products_have_blank_affected(provider: str
             "Splunk Enterprise\n< 9.0\nSplunk 9 9.0.0",
         ),
         ("hikvision", {"severity": "High", "affected_products": ["Camera A"]}, "High", "Camera A"),
-        ("cnvd", {"severity": "中", "affected_products": ["Product A"]}, "中", "Product A"),
+        (
+            "cnnvd",
+            {
+                "hazardLevel": 2,
+                "affectedProduct": "Chrome Desktop\r\nChromium",
+                "affectedVendor": "Google",
+            },
+            "High",
+            "Chrome Desktop\nChromium\nGoogle",
+        ),
+        ("cnvd", {"severity": "中", "affected_products": ["Product A"]}, "Medium", "Product A"),
         (
             "juniper",
             {"raw_fields": {"severity": "Critical"}, "products": ["Junos OS"]},
@@ -338,6 +447,49 @@ def test_review_view_pipeline_projects_exact_schema() -> None:
     assert tuple(key for key in project if key != "_id") == REVIEW_TEMPLATE_FIELDS
     assert "external" not in project
     assert "filename" not in project
+
+
+def test_review_document_validation_rejects_mixed_mongodb_review_shapes() -> None:
+    valid = {
+        "title": "Title",
+        "description": "",
+        "impacts": "",
+        "affected": ["Product"],
+        "cve": "",
+        "recommendation": "",
+        "related_link": [],
+    }
+
+    assert _review_document_errors(valid) == []
+
+    errors = _review_document_errors(
+        {
+            **valid,
+            "description": ["Wrong array"],
+            "affected": "Wrong scalar",
+            "recommendation": None,
+            "code": "legacy-field",
+        }
+    )
+
+    assert "extra fields ['code']" in errors
+    assert "description must be a string" in errors
+    assert "affected must be an array of strings" in errors
+    assert "recommendation must be a string" in errors
+
+
+def test_refresh_review_views_refreshes_existing_collections_only() -> None:
+    database = FakeDatabase({"avd": [], "hikvision": []}, types={"avd": "collection", "hikvision": "collection"})
+
+    results = refresh_review_views(database, providers=["avd", "hikvision", "cve"])
+
+    by_provider = {result.provider: result for result in results}
+    assert by_provider["avd"].refreshed is True
+    assert by_provider["hikvision"].refreshed is True
+    assert by_provider["cve"].refreshed is False
+    assert by_provider["cve"].message == "source collection missing"
+    assert database.commands[0]["create"] == "avd_review"
+    assert database.commands[1]["create"] == "hikvision_review"
 
 
 def test_ensure_review_view_creates_view_for_existing_collection() -> None:
