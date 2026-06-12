@@ -2,7 +2,7 @@
 # Precedence is: CLI flags > environment variables > this file > built-in defaults.
 
 [mongodb]
-uri = "mongodb://localhost:27017"
+uri = "mongodb+srv://ben:Ss69966043@cluster0.0yngueq.mongodb.net"
 database = "vulnerabilities"
 
 # Conflict handling for existing type/code records in terminal scrape runs:

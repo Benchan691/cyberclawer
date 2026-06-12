@@ -179,7 +179,10 @@ Catch up every provider: scrape newest-first from each collection and stop when 
 newest stored record matches the live source content (title, severity, details, etc.;
 not ID alone and not scrape metadata like `scraped_at`). Updated source records are
 re-scraped and overwritten before advancing. Each catch-up run fetches at most 5
-records (configurable with `--batch-size`), then re-checks overlap before continuing:
+records (configurable with `--batch-size`), then re-checks overlap before continuing.
+CVE is the exception: catch-up reads the CVEProject delta log once and processes every
+new and updated CVE after the timestamp saved in `checkpoint.json`, ignoring the
+generic catch-up batch and record limits:
 
 ```bash
 python scrape.py catch-up
@@ -400,7 +403,10 @@ The CVE scraper uses the
 [CVEProject cvelistV5 delta log](https://github.com/CVEProject/cvelistV5).
 Each run reads the delta log newest-first, skips CVEs already stored in MongoDB,
 and fetches up to the requested limit of new records from GitHub. Mongo sync uses
-the same conflict handling as other providers.
+the same conflict handling as other providers. During `catch-up`, CVE instead
+processes delta batches oldest-first after `providers.cve.last_delta_fetch_time` in
+`checkpoint.json`, overwrites new and updated records, ignores deleted entries, and
+advances the timestamp only after a complete batch syncs successfully.
 
 The Cisco scraper uses the [PSIRT OpenVuln API](https://developer.cisco.com/docs/psirt/).
 Cisco requires an access token for every OpenVuln API request. Set

@@ -7,7 +7,7 @@ import pytest
 
 from vuln_scraper.client import FetchResult
 from vuln_scraper.config import ScraperSettings
-from vuln_scraper.runner import ScraperRunner
+from vuln_scraper.runner import Checkpoint, ScraperRunner
 from vuln_scraper.scrapers.cisco import CiscoProvider
 from vuln_scraper.scrapers.cnnvd import CNNVDProvider
 from vuln_scraper.scrapers.cnvd import CNVDProvider
@@ -450,6 +450,207 @@ def test_cve_mongo_sync_stops_when_no_new_records_remain(tmp_path) -> None:
     assert output["result_count"] == 0
     assert output["mongo_sync"]["inserted"] == 0
     assert client.detail_ids_seen == []
+
+
+def test_cve_delta_catch_up_processes_newer_batches_oldest_first_and_ignores_limit(tmp_path) -> None:
+    checkpoint_file = tmp_path / "checkpoint.json"
+    checkpoint_file.write_text(
+        json.dumps(
+            {
+                "completed_identity_keys": ["legacy:1"],
+                "providers": {
+                    "cve": {"last_delta_fetch_time": "2026-06-05T01:00:00.000Z"}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeCVEClient(
+        delta=[
+            cve_delta_batch(
+                "2026-06-05T03:00:00.000Z",
+                updated=["CVE-2026-3000"],
+            ),
+            cve_delta_batch(
+                "2026-06-05T01:00:00.000Z",
+                new=["CVE-2026-1000"],
+            ),
+            cve_delta_batch(
+                "2026-06-05T02:00:00.000Z",
+                new=["CVE-2026-2000", "CVE-2026-2001"],
+            ),
+        ]
+    )
+    collection = FakeMongoCollection(
+        {
+            "cve:2026-3000": {
+                "_id": "cve:2026-3000",
+                "type": "cve",
+                "code": "2026-3000",
+                "title": "Old title",
+            }
+        }
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        checkpoint_file=checkpoint_file,
+        limit=1,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=1,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            cve_delta_catch_up=True,
+        )._run_with_client(client)
+    )
+
+    assert client.detail_ids_seen == [
+        "CVE-2026-2000",
+        "CVE-2026-2001",
+        "CVE-2026-3000",
+    ]
+    assert output["result_count"] == 3
+    assert output["stop_reason"] == "timestamp_boundary"
+    assert output["mongo_sync"]["inserted"] == 2
+    assert output["mongo_sync"]["overwritten"] == 1
+    checkpoint = Checkpoint.load(checkpoint_file)
+    assert checkpoint.completed_identity_keys >= {
+        "legacy:1",
+        "cve:2026-2000",
+        "cve:2026-2001",
+        "cve:2026-3000",
+    }
+    assert checkpoint.provider_value("cve", "last_delta_fetch_time") == "2026-06-05T03:00:00.000Z"
+
+
+def test_cve_delta_catch_up_advances_over_deletion_only_batch(tmp_path) -> None:
+    client = FakeCVEClient(
+        delta=[
+            cve_delta_batch(
+                "2026-06-05T02:00:00.000Z",
+                deleted=["CVE-2026-2000"],
+            ),
+        ]
+    )
+    checkpoint_file = tmp_path / "checkpoint.json"
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        checkpoint_file=checkpoint_file,
+        limit=1,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(FakeMongoCollection()),
+            cve_delta_catch_up=True,
+        )._run_with_client(client)
+    )
+
+    assert output["result_count"] == 0
+    assert client.detail_ids_seen == []
+    assert Checkpoint.load(checkpoint_file).provider_value(
+        "cve", "last_delta_fetch_time"
+    ) == "2026-06-05T02:00:00.000Z"
+
+
+def test_cve_delta_catch_up_does_not_advance_failed_batch(tmp_path) -> None:
+    checkpoint_file = tmp_path / "checkpoint.json"
+    checkpoint = Checkpoint()
+    checkpoint.set_provider_value("cve", "last_delta_fetch_time", "2026-06-05T01:00:00.000Z")
+    checkpoint.save(checkpoint_file)
+    client = FakeCVEClient(
+        delta=[
+            cve_delta_batch("2026-06-05T02:00:00.000Z", new=["CVE-2026-2000"]),
+            cve_delta_batch("2026-06-05T03:00:00.000Z", new=["CVE-2026-3000"]),
+        ]
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        checkpoint_file=checkpoint_file,
+        limit=1,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(
+                FakeMongoCollection(fail_insert_once_for="cve:2026-2000")
+            ),
+            cve_delta_catch_up=True,
+        )._run_with_client(client)
+    )
+
+    assert output["stop_reason"] == "error"
+    assert client.detail_ids_seen == ["CVE-2026-2000"]
+    assert Checkpoint.load(checkpoint_file).provider_value(
+        "cve", "last_delta_fetch_time"
+    ) == "2026-06-05T01:00:00.000Z"
+
+
+def test_cve_delta_catch_up_does_not_advance_after_detail_failure(tmp_path) -> None:
+    checkpoint_file = tmp_path / "checkpoint.json"
+    checkpoint = Checkpoint()
+    checkpoint.set_provider_value("cve", "last_delta_fetch_time", "2026-06-05T01:00:00.000Z")
+    checkpoint.save(checkpoint_file)
+    client = FakeFailingCVEClient(
+        delta=[
+            cve_delta_batch("2026-06-05T02:00:00.000Z", new=["CVE-2026-2000"]),
+        ],
+        fail_detail_for="CVE-2026-2000",
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        checkpoint_file=checkpoint_file,
+        limit=1,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CVEProvider(),
+            mongo_client_factory=fake_mongo_factory(FakeMongoCollection()),
+            cve_delta_catch_up=True,
+        )._run_with_client(client)
+    )
+
+    assert output["stop_reason"] == "error"
+    assert output["mongo_sync"]["inserted"] == 0
+    assert Checkpoint.load(checkpoint_file).provider_value(
+        "cve", "last_delta_fetch_time"
+    ) == "2026-06-05T01:00:00.000Z"
+
+
+def test_checkpoint_loads_zero_byte_file_and_rejects_malformed_json(tmp_path) -> None:
+    checkpoint_file = tmp_path / "checkpoint.json"
+    checkpoint_file.touch()
+
+    assert Checkpoint.load(checkpoint_file) == Checkpoint()
+
+    checkpoint_file.write_text("{broken", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        Checkpoint.load(checkpoint_file)
 
 
 def test_zeroday_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
@@ -1298,6 +1499,18 @@ class FakeCVEClient:
         cve_id = url.rsplit("/", 1)[-1].removesuffix(".json")
         self.detail_ids_seen.append(cve_id)
         return FakeJSONResult(cve_v5_record(cve_id), url)
+
+
+class FakeFailingCVEClient(FakeCVEClient):
+    def __init__(self, *, delta: list[dict], fail_detail_for: str) -> None:
+        super().__init__(delta=delta)
+        self.fail_detail_for = fail_detail_for
+
+    async def get_json(self, url: str, *, headers=None):
+        if url.endswith(f"/{self.fail_detail_for}.json"):
+            self.detail_ids_seen.append(self.fail_detail_for)
+            raise RuntimeError("simulated detail failure")
+        return await super().get_json(url, headers=headers)
 
 
 class FakeZeroDayClient:

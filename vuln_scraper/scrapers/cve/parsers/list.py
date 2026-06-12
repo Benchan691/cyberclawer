@@ -49,19 +49,10 @@ def parse_cve_list(
             if delta_entry.action == "deleted":
                 continue
             entries.append(
-                ListEntry(
-                    identity=VulnerabilityId(type="CVE", code=delta_entry.code),
-                    title=delta_entry.cve_id,
-                    vuln_type=None,
-                    disclosure_date=delta_entry.date_updated,
-                    status=delta_entry.action,
+                cve_delta_entry_to_list_entry(
+                    delta_entry,
                     provider=provider,
                     source_url=source_url,
-                    embedded_detail={
-                        "_list_summary": True,
-                        "_delta_action": delta_entry.action,
-                        "_github_link": delta_entry.github_link,
-                    },
                 )
             )
 
@@ -72,6 +63,28 @@ def parse_cve_list(
         total_records=len(entries),
         start_index=0,
         results_per_page=len(entries),
+    )
+
+
+def cve_delta_entry_to_list_entry(
+    delta_entry: CVEDeltaEntry,
+    *,
+    provider: str = "cve",
+    source_url: str | None = SOURCE_URL,
+) -> ListEntry:
+    return ListEntry(
+        identity=VulnerabilityId(type="CVE", code=delta_entry.code),
+        title=delta_entry.cve_id,
+        vuln_type=None,
+        disclosure_date=delta_entry.date_updated,
+        status=delta_entry.action,
+        provider=provider,
+        source_url=source_url,
+        embedded_detail={
+            "_list_summary": True,
+            "_delta_action": delta_entry.action,
+            "_github_link": delta_entry.github_link,
+        },
     )
 
 

@@ -13,7 +13,7 @@ from vuln_scraper.catch_up import (
     run_catch_up_cycle,
 )
 from vuln_scraper.config import default_scrape_settings
-from vuln_scraper.providers import HKCERTProvider, ZeroDayProvider
+from vuln_scraper.providers import CVEProvider, HKCERTProvider, ZeroDayProvider
 
 
 def test_provider_caught_up_on_overlap() -> None:
@@ -21,15 +21,8 @@ def test_provider_caught_up_on_overlap() -> None:
     assert not provider_caught_up({"stop_reason": "limit", "result_count": 10})
 
 
-def test_provider_caught_up_cve_empty_run() -> None:
-    assert provider_caught_up(
-        {
-            "source": {"provider": "cve"},
-            "result_count": 0,
-            "mongo_sync": {"inserted": 0},
-            "stop_reason": "limit",
-        }
-    )
+def test_provider_caught_up_on_timestamp_boundary() -> None:
+    assert provider_caught_up({"stop_reason": "timestamp_boundary"})
 
 
 def test_no_progress_on_empty_result() -> None:
@@ -226,3 +219,53 @@ def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
     run_catch_up_cycle(default_scrape_settings(limit=25), max_runs_per_provider=10, batch_size=5)
 
     assert limits_seen == [5, 5, 5, 5, 5]
+
+
+def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> None:
+    calls: list[tuple[int, str, bool, bool]] = []
+
+    class FakeScraper:
+        def __init__(
+            self,
+            settings,
+            *,
+            provider=None,
+            stop_on_first_known=None,
+            stop_on_unchanged_content=False,
+            cve_delta_catch_up=False,
+        ) -> None:
+            calls.append(
+                (
+                    settings.limit,
+                    settings.mongo_conflict,
+                    stop_on_unchanged_content,
+                    cve_delta_catch_up,
+                )
+            )
+
+        async def run(self):
+            return {
+                "stop_reason": "timestamp_boundary",
+                "result_count": 500,
+                "vulnerabilities": [],
+                "mongo_sync": {"inserted": 500},
+            }
+
+    def fake_asyncio_run(coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [CVEProvider()])
+    monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
+    monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
+
+    run_catch_up_cycle(
+        default_scrape_settings(limit=2),
+        max_runs_per_provider=1,
+        batch_size=1,
+    )
+
+    assert calls == [(2, "overwrite", False, True)]

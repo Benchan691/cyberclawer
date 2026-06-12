@@ -40,19 +40,31 @@ class Checkpoint:
     total_pages: int | None = None
     total_records: int | None = None
     failed: dict[str, dict[str, Any]] = field(default_factory=dict)
+    providers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Checkpoint":
         if not path.exists():
             return cls()
 
-        data = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            return cls()
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("checkpoint JSON must be an object")
         failed_items = data.get("failed", [])
         failed = {
             item["identity"]: item
             for item in failed_items
             if isinstance(item, dict) and item.get("identity")
         }
+        raw_providers = data.get("providers", {})
+        providers = {
+            str(key): dict(value)
+            for key, value in raw_providers.items()
+            if isinstance(value, dict)
+        } if isinstance(raw_providers, dict) else {}
         return cls(
             completed_identity_keys=set(
                 data.get("completed_identity_keys", data.get("completed_avd_ids", []))
@@ -61,7 +73,14 @@ class Checkpoint:
             total_pages=data.get("total_pages"),
             total_records=data.get("total_records"),
             failed=failed,
+            providers=providers,
         )
+
+    def provider_value(self, provider: str, key: str) -> Any:
+        return self.providers.get(provider, {}).get(key)
+
+    def set_provider_value(self, provider: str, key: str, value: Any) -> None:
+        self.providers.setdefault(provider, {})[key] = value
 
     def save(self, path: Path) -> None:
         payload = {
@@ -71,6 +90,7 @@ class Checkpoint:
             "total_pages": self.total_pages,
             "total_records": self.total_records,
             "failed": sorted(self.failed.values(), key=lambda item: item.get("identity", "")),
+            "providers": self.providers,
         }
         _write_json_atomic(path, payload)
 
@@ -86,6 +106,7 @@ class ScraperRunner:
         cnvd_session: object | None = None,
         stop_on_first_known: bool | None = None,
         stop_on_unchanged_content: bool = False,
+        cve_delta_catch_up: bool = False,
     ) -> None:
         self.progress_callback = progress_callback
         self.mongo_client_factory = mongo_client_factory
@@ -95,6 +116,7 @@ class ScraperRunner:
         self._cnvd_session = cnvd_session
         self._stop_on_first_known_override = stop_on_first_known
         self._stop_on_unchanged_content = stop_on_unchanged_content
+        self._cve_delta_catch_up = cve_delta_catch_up
         self._existing_documents: dict[str, dict[str, Any]] = {}
         self.stop_reason: str | None = None
         self.settings = settings.for_provider(
@@ -178,6 +200,9 @@ class ScraperRunner:
         return output
 
     async def _run_mongo_update_with_client(self, client: ScraperClient) -> dict[str, Any]:
+        if self._cve_delta_catch_up:
+            return await self._run_cve_delta_catch_up_with_client(client)
+
         mongo_client, collection = collection_from_settings(
             self.settings,
             client_factory=self.mongo_client_factory,
@@ -209,6 +234,114 @@ class ScraperRunner:
             close = getattr(mongo_client, "close", None)
             if close is not None:
                 close()
+
+    async def _run_cve_delta_catch_up_with_client(self, client: ScraperClient) -> dict[str, Any]:
+        if self.provider.key != "cve":
+            raise ValueError("CVE delta catch-up mode requires the cve provider")
+
+        from .scrapers.cve.parsers.list import cve_delta_entry_to_list_entry, parse_cve_delta_log
+
+        mongo_client, collection = collection_from_settings(
+            self.settings,
+            client_factory=self.mongo_client_factory,
+        )
+        all_records: list[dict[str, Any]] = []
+        aggregate = MongoSyncResult()
+        try:
+            cutoff = self.checkpoint.provider_value("cve", "last_delta_fetch_time")
+            after = str(cutoff) if cutoff else "1970-01-01T00:00:00Z"
+            self._emit(phase="list", page=1)
+            result = await client.get_json(
+                self.provider.list_url(1, checkpoint=self.checkpoint),
+                headers=await self._provider_request_headers(),
+            )
+            batches = parse_cve_delta_log(result.data, after=after)
+
+            for batch in batches:
+                entries = [
+                    cve_delta_entry_to_list_entry(
+                        entry,
+                        provider=self.provider.key,
+                        source_url=self.provider.source_url,
+                    )
+                    for entry in batch.entries
+                    if entry.action != "deleted"
+                ]
+                batch_records: list[dict[str, Any]] = []
+                if entries:
+                    await self._fetch_all_details(client, entries)
+                    failed_identities = {
+                        entry.key
+                        for entry in entries
+                        if not self._has_detail(entry.key)
+                    }
+                    if failed_identities:
+                        self.stop_reason = "error"
+                        break
+                    batch_records = [self.records_by_id[entry.key] for entry in entries]
+
+                    scraped_at = datetime.now(UTC).isoformat()
+                    batch_result = sync_records_to_collection(
+                        batch_records,
+                        self.settings,
+                        collection,
+                        scraped_at=scraped_at,
+                        source={"provider": self.provider.key, "url": self.provider.source_url},
+                    )
+                    self._merge_mongo_result(aggregate, batch_result)
+                    if batch_result.errors:
+                        self.stop_reason = "error"
+                        break
+                    all_records.extend(batch_records)
+
+                self.checkpoint.set_provider_value(
+                    "cve",
+                    "last_delta_fetch_time",
+                    batch.fetch_time,
+                )
+                self.checkpoint.save(self.settings.checkpoint_file)
+
+            if self.stop_reason is None:
+                self.stop_reason = "timestamp_boundary"
+
+            self.mongo_result = aggregate
+            output = {
+                "scraped_at": datetime.now(UTC).isoformat(),
+                "source": {"provider": self.provider.key, "url": self.provider.source_url},
+                "total": len(all_records),
+                "result_count": len(all_records),
+                "raw_limit": self.settings.limit,
+                "stop_reason": self.stop_reason,
+                "failed": sorted(self.run_failed.values(), key=lambda item: item.get("identity", "")),
+                "vulnerabilities": all_records,
+                "mongo_sync": aggregate.to_dict(),
+            }
+            self._emit(phase="mongo-complete", mongo_sync=output["mongo_sync"])
+            self._emit(phase="completed")
+            return output
+        finally:
+            close = getattr(mongo_client, "close", None)
+            if close is not None:
+                close()
+
+    async def _fetch_all_details(self, client: ScraperClient, entries: list[ListEntry]) -> None:
+        semaphore = asyncio.Semaphore(max(1, self.settings.concurrency))
+
+        async def scrape_one(entry: ListEntry) -> None:
+            async with semaphore:
+                await self._scrape_detail(client, entry)
+
+        await asyncio.gather(*(scrape_one(entry) for entry in entries))
+
+    @staticmethod
+    def _merge_mongo_result(target: MongoSyncResult, source: MongoSyncResult) -> None:
+        target.inserted += source.inserted
+        target.overwritten += source.overwritten
+        target.deleted += source.deleted
+        target.skipped += source.skipped
+        target.conflicts += source.conflicts
+        target.unchanged += source.unchanged
+        target.errors.extend(source.errors)
 
     async def _scrape_newest_records(self, client: ScraperClient, *, known_ids: set[str]) -> None:
         if self._stop_on_unchanged_content:

@@ -18,13 +18,8 @@ DEFAULT_MAX_RUNS_PER_PROVIDER = 100
 
 def provider_caught_up(output: dict) -> bool:
     stop_reason = output.get("stop_reason")
-    if stop_reason == "overlap":
+    if stop_reason in {"overlap", "timestamp_boundary"}:
         return True
-    source = output.get("source") or {}
-    if source.get("provider") == "cve" and output.get("result_count", 0) == 0:
-        mongo = output.get("mongo_sync") or {}
-        if mongo.get("inserted", 0) == 0:
-            return True
     return False
 
 
@@ -76,6 +71,45 @@ def run_catch_up_cycle(
         scraped_total = 0
         last_stop_reason: str | None = None
         per_provider_limit = settings.limit
+
+        if provider.key == "cve":
+            run_settings = replace(
+                provider_settings,
+                mongo_conflict="overwrite",
+            ).normalized()
+            logger.info(
+                "CVE timestamp catch-up for collection %s",
+                normalized.mongo_collection,
+            )
+            try:
+                output = asyncio.run(
+                    ScraperRunner(
+                        run_settings,
+                        provider=provider,
+                        cve_delta_catch_up=True,
+                    ).run()
+                )
+            except Exception as exc:
+                logger.exception("CVE timestamp catch-up failed")
+                log_uncaught_provider_error(
+                    data_dir=normalized.data_dir,
+                    error_log_name=normalized.error_log,
+                    provider=provider.key,
+                    error=exc,
+                )
+                continue
+            mongo = output.get("mongo_sync") or {}
+            logger.info(
+                "CVE timestamp catch-up: fetched=%s stop_reason=%s; "
+                "inserted=%s overwritten=%s skipped=%s errors=%s",
+                output.get("result_count", 0),
+                output.get("stop_reason"),
+                mongo.get("inserted", 0),
+                mongo.get("overwritten", 0),
+                mongo.get("skipped", 0),
+                len(mongo.get("errors", [])),
+            )
+            continue
 
         while runs < max_runs_per_provider:
             remaining = per_provider_limit - scraped_total
