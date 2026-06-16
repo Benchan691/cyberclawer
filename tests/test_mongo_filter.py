@@ -245,6 +245,17 @@ def test_filter_fields_for_provider_uses_juniper_fields() -> None:
     assert dynamic_path is None
 
 
+def test_filter_fields_for_provider_uses_msrc_fields() -> None:
+    categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("msrc")
+
+    assert "details.msrc.document_id" in categorical_fields
+    assert "details.msrc.product_statuses.product_names" in categorical_fields
+    assert "details.msrc.threats.description" in categorical_fields
+    assert "details.msrc.description" in text_fields
+    assert "details.msrc.remediations.description" in text_fields
+    assert dynamic_path is None
+
+
 def test_sanitize_curses_text_strips_control_characters() -> None:
     assert _sanitize_curses_text("line\x00with\x07controls") == "line with controls"
     assert _sanitize_curses_text("【漏洞通报】CNNVD") == "【漏洞通报】CNNVD"

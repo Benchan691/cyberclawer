@@ -91,6 +91,9 @@ tests/scrapers/<provider>/
 
 - Add `[scrapers.<provider>]` to tune `retries`, `backoff_base`, `backoff_max`,
   `backoff_jitter`, and CNVD-only `session_max_retries` / `session_retry_delay`.
+- Add `[scrapers.catch_up]` with `providers = ["all"]` or a provider list such as
+  `providers = ["hkcert", "cve"]` to control which scrapers `python scrape.py catch-up`
+  runs. Omit the section to run all scrapers.
 - Failures append to the combined log configured by `[scrapers.defaults] error_log`.
 
 ### `README.md`

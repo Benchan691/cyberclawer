@@ -141,6 +141,87 @@ def test_documents_content_match_detects_detail_changes() -> None:
     assert not documents_content_match(existing, incoming)
 
 
+def test_documents_content_match_ignores_hkcert_views() -> None:
+    details = {
+        "hkcert": {
+            "summary": "Example bulletin",
+            "risk_level": "High",
+            "views": "1004",
+        }
+    }
+    existing = build_mongo_document(hkcert_record("example-bulletin", details=details), output_payload())
+    incoming_details = copy.deepcopy(details)
+    incoming_details["hkcert"]["views"] = "1005"
+    incoming = build_mongo_document(hkcert_record("example-bulletin", details=incoming_details), output_payload())
+
+    assert documents_content_match(existing, incoming)
+    assert documents_match(existing, incoming)
+
+
+def test_sync_skips_unchanged_hkcert_when_only_views_change() -> None:
+    collection = FakeCollection()
+    details = {"hkcert": {"summary": "Example bulletin", "views": "1004"}}
+    existing = build_mongo_document(hkcert_record("example-bulletin", details=details), output_payload())
+    collection.documents["hkcert:example-bulletin"] = existing
+    settings = ScraperSettings(mongo_enabled=True, mongo_conflict="overwrite")
+
+    incoming_details = copy.deepcopy(details)
+    incoming_details["hkcert"]["views"] = "1005"
+    result = sync_output_to_mongo(
+        output_payload([hkcert_record("example-bulletin", details=incoming_details)]),
+        settings,
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.unchanged == 1
+    assert result.skipped == 1
+    assert result.overwritten == 0
+
+
+def test_documents_content_match_ignores_qianxin_read_num_and_navigation() -> None:
+    details = {
+        "qianxin": {
+            "article_id": "1868",
+            "title": "Redis advisory",
+            "digest": "Redis Lua advisory summary.",
+            "read_num": 24,
+            "prev_article": {"id": "1864", "title": "Previous advisory"},
+            "next_article": {"id": "1869", "title": "Next advisory"},
+            "raw": {"read_num": 24, "prev": {"id": 1864}},
+        }
+    }
+    existing = build_mongo_document(qianxin_record("1868", details=details), output_payload())
+    incoming_details = copy.deepcopy(details)
+    incoming_details["qianxin"]["read_num"] = 25
+    incoming_details["qianxin"]["prev_article"] = {"id": "1865", "title": "Different previous"}
+    incoming_details["qianxin"]["next_article"] = {"id": "1870", "title": "Different next"}
+    incoming_details["qianxin"]["raw"] = {"read_num": 25, "prev": {"id": 1865}}
+    incoming = build_mongo_document(qianxin_record("1868", details=incoming_details), output_payload())
+
+    assert documents_content_match(existing, incoming)
+    assert documents_match(existing, incoming)
+
+
+def test_sync_skips_unchanged_qianxin_when_only_read_num_changes() -> None:
+    collection = FakeCollection()
+    details = {"qianxin": {"title": "Redis advisory", "read_num": 24}}
+    existing = build_mongo_document(qianxin_record("1868", details=details), output_payload())
+    collection.documents["qianxin:1868"] = existing
+    settings = ScraperSettings(mongo_enabled=True, mongo_conflict="overwrite")
+
+    incoming_details = copy.deepcopy(details)
+    incoming_details["qianxin"]["read_num"] = 25
+    result = sync_output_to_mongo(
+        output_payload([qianxin_record("1868", details=incoming_details)]),
+        settings,
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.unchanged == 1
+    assert result.skipped == 1
+    assert result.overwritten == 0
+
+
 def test_sync_skips_unchanged_documents() -> None:
     collection = FakeCollection()
     existing = build_mongo_document(record("2026-10001"), output_payload())
@@ -174,6 +255,26 @@ def record(code: str, *, cve_code: str | None = None, title: str = "title") -> d
         "status": "CVE PoC",
         "cve_code": cve_code,
         "details": {"avd": {"cve_id": f"CVE-{cve_code}" if cve_code else None}},
+    }
+
+
+def hkcert_record(code: str, *, details: dict[str, dict] | None = None, title: str = "title") -> dict:
+    return {
+        "type": "hkcert",
+        "code": code,
+        "title": title,
+        "status": "Published",
+        "details": details or {"hkcert": {"summary": title}},
+    }
+
+
+def qianxin_record(code: str, *, details: dict[str, dict] | None = None, title: str = "title") -> dict:
+    return {
+        "type": "qianxin",
+        "code": code,
+        "title": title,
+        "status": "Published",
+        "details": details or {"qianxin": {"title": title, "digest": title}},
     }
 
 

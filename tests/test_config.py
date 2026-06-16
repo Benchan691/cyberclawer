@@ -11,6 +11,7 @@ from vuln_scraper.config import (
     default_scrape_settings,
     load_mongo_config,
     load_scrapers_config,
+    catch_up_provider_keys,
     mongo_collection_for_provider,
     mongo_collections_from_config,
     resolve_mongo_export_path,
@@ -132,6 +133,7 @@ def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
         "cnnvd": "cnnvd",
         "cnvd": "cnvd",
         "juniper": "juniper",
+        "msrc": "msrc",
     }
     assert mongo_collection_for_provider("hkcert", config_file) == "hkcert"
 
@@ -365,3 +367,70 @@ def test_scraper_settings_for_provider_uses_defaults_when_unset() -> None:
     assert settings.backoff_base == DEFAULT_BACKOFF_BASE
     assert settings.backoff_max == DEFAULT_BACKOFF_MAX
     assert settings.backoff_jitter == DEFAULT_BACKOFF_JITTER
+
+
+def test_catch_up_provider_keys_returns_none_when_unconfigured(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.defaults]
+        retries = 2
+        """,
+        encoding="utf-8",
+    )
+
+    assert catch_up_provider_keys(config_file) is None
+
+
+def test_catch_up_provider_keys_reads_provider_list(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["hkcert", "cve", "hkcert"]
+        """,
+        encoding="utf-8",
+    )
+
+    assert catch_up_provider_keys(config_file) == ("hkcert", "cve")
+
+
+def test_catch_up_provider_keys_all_runs_every_provider(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["all"]
+        """,
+        encoding="utf-8",
+    )
+
+    assert catch_up_provider_keys(config_file) is None
+
+
+def test_catch_up_provider_keys_rejects_all_mixed_with_specific_providers(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["all", "hkcert"]
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cannot mix 'all'"):
+        catch_up_provider_keys(config_file)
+
+
+def test_catch_up_provider_keys_rejects_non_list(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = "hkcert"
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="providers must be a list"):
+        catch_up_provider_keys(config_file)

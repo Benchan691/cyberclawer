@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -18,6 +19,7 @@ from vuln_scraper.scrapers.hikvision import HikvisionProvider
 from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
 from vuln_scraper.scrapers.infosec import InfoSecProvider
 from vuln_scraper.scrapers.juniper import JuniperProvider
+from vuln_scraper.scrapers.msrc import MSRCProvider
 from vuln_scraper.scrapers.paloalto import PaloAltoProvider
 from vuln_scraper.scrapers.qianxin import QianxinProvider
 from vuln_scraper.scrapers.ransomwarelive import RansomwareLiveProvider
@@ -364,6 +366,31 @@ def test_non_mongo_scrape_still_writes_json(tmp_path) -> None:
 
     assert settings.output_file.exists()
     assert "raw_tables" not in output["vulnerabilities"][0]["details"]["avd"]
+
+
+def test_msrc_monthly_detail_expands_to_cve_records(tmp_path) -> None:
+    client = FakeMSRCClient()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "msrc.json",
+        checkpoint_file=tmp_path / "msrc_checkpoint.json",
+        limit=2,
+        request_delay=0,
+        retries=0,
+        concurrency=1,
+    )
+
+    output = asyncio.run(ScraperRunner(settings, provider=MSRCProvider())._run_with_client(client))
+
+    assert identities(output["vulnerabilities"]) == ["msrc:2026-41108", "msrc:2026-50001"]
+    assert output["result_count"] == 2
+    assert output["vulnerabilities"][0]["source"]["detail_url"].endswith("/2026-Jun")
+    assert output["vulnerabilities"][0]["details"]["msrc"]["document_id"] == "2026-Jun"
+    assert client.headers_seen == [
+        {"Accept": "application/json"},
+        {"Accept": "application/json"},
+        {"Accept": "application/json"},
+    ]
 
 
 def test_cve_mongo_sync_fetches_limit_of_new_records_skipping_known(tmp_path) -> None:
@@ -1499,6 +1526,21 @@ class FakeCVEClient:
         cve_id = url.rsplit("/", 1)[-1].removesuffix(".json")
         self.detail_ids_seen.append(cve_id)
         return FakeJSONResult(cve_v5_record(cve_id), url)
+
+
+class FakeMSRCClient:
+    def __init__(self) -> None:
+        self.headers_seen: list[dict] = []
+
+    async def get_json(self, url: str, *, headers=None):
+        self.headers_seen.append(dict(headers or {}))
+        fixture = "list.json" if "/Updates" in url else "detail.json"
+        payload = json.loads(
+            (Path(__file__).parent / "scrapers" / "msrc" / "fixtures" / fixture).read_text(
+                encoding="utf-8"
+            )
+        )
+        return FakeJSONResult(payload, url)
 
 
 class FakeFailingCVEClient(FakeCVEClient):

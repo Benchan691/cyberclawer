@@ -87,6 +87,7 @@ All scrapers use one MongoDB database, with one collection per scraper.
 | `vuln_scraper/scrapers/cnnvd/` | `cnnvd` | same |
 | `vuln_scraper/scrapers/cnvd/` | `cnvd` | `pip install -e '.[cnvd]'` then `python scrape.py run cnvd --limit 100` |
 | `vuln_scraper/scrapers/juniper/` | `juniper` | same |
+| `vuln_scraper/scrapers/msrc/` | `msrc` | same |
 
 `mongodb.toml`:
 
@@ -114,6 +115,7 @@ hikvision = "hikvision"
 cnnvd = "cnnvd"
 cnvd = "cnvd"
 juniper = "juniper"
+msrc = "msrc"
 ```
 
 Precedence for connection settings is CLI flags, environment variables
@@ -166,6 +168,25 @@ During a scrape, INFO-or-higher logger messages are appended as JSON lines to
 `{data_dir}/scraper-errors.log` (or the configured name). Explicit scrape
 failures also append structured `record_type="failure"` JSON lines.
 Set `error_log = ""` under `[scrapers.defaults]` to disable file logging.
+
+To limit which scrapers `catch-up` runs, add a provider list under `[scrapers.catch_up]` in
+`scrapers.toml`. Omit that section to run every scraper, or set `providers = ["all"]`.
+
+```toml
+[scrapers.catch_up]
+providers = ["all"]
+```
+
+Or list only the scrapers you want:
+
+```toml
+[scrapers.catch_up]
+providers = ["hkcert", "cve", "cnvd"]
+```
+
+Available provider keys: `avd`, `cisco`, `cnnvd`, `cnvd`, `cve`, `github_advisory`,
+`govcert`, `hikvision`, `hkcert`, `huawei_sa`, `infosec`, `juniper`, `msrc`, `paloalto`,
+`qianxin`, `ransomwarelive`, `splunk`, `zeroday`.
 
 ## Usage
 
@@ -315,6 +336,7 @@ vuln_scraper/scrapers/
   huawei_sa/
   infosec/
   juniper/
+  msrc/
   cnvd/
   qianxin/
   ransomwarelive/
@@ -391,6 +413,10 @@ Juniper advisories are ingested from the Coveo search API behind the
 [Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories).
 List and detail requests POST to Coveo; HTML parsers remain as a fallback when
 JSON is unavailable. Mongo sync stops at the first stored advisory.
+MSRC vulnerabilities are ingested from the
+[Microsoft Security Response Center update guide](https://msrc.microsoft.com/update-guide/vulnerability)
+through the CVRF API. The scraper lists monthly updates from `/Updates`, fetches
+each `/cvrf/{id}` document as JSON, and stores one MongoDB record per CVE.
 Ransomware.live victims are ingested from the
 [API PRO](https://api-pro.ransomware.live/) `/victims/recent` endpoint. Set
 `RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY`; the scraper sends it as

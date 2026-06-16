@@ -135,6 +135,7 @@ class ScraperRunner:
         self.selected_ids: list[str] = []
         self.selection_finalized = False
         self.detail_fetch_count = 0
+        self.expanded_entry_ids: dict[str, list[str]] = {}
         self.mongo_result = MongoSyncResult()
         self._cnvd_session_refreshed_urls: set[str] = set()
         self._error_log = ScraperErrorLog.for_settings(
@@ -393,14 +394,17 @@ class ScraperRunner:
             await self._fetch_details_for_page(client, candidates, len(selected_ids))
 
             for entry in candidates:
-                if entry.key in selected_ids:
-                    continue
-                record = self.records_by_id.get(entry.key)
-                if record:
-                    selected_ids.append(entry.key)
-                    if len(selected_ids) >= self.settings.limit:
-                        self.stop_reason = "limit"
-                        break
+                for record_id in self._record_ids_for_entry(entry):
+                    if record_id in selected_ids:
+                        continue
+                    record = self.records_by_id.get(record_id)
+                    if record:
+                        selected_ids.append(record_id)
+                        if len(selected_ids) >= self.settings.limit:
+                            self.stop_reason = "limit"
+                            break
+                if len(selected_ids) >= self.settings.limit:
+                    break
 
             self.selected_ids = selected_ids.copy()
             self.checkpoint.save(self.settings.checkpoint_file)
@@ -478,7 +482,8 @@ class ScraperRunner:
                 if self._detail_url_for_entry(entry) is not None and not self._has_detail(entry.key):
                     await self._scrape_detail(client, entry)
 
-                record = self.records_by_id.get(entry.key)
+                entry_record_ids = self._record_ids_for_entry(entry)
+                record = self.records_by_id.get(entry_record_ids[0]) if entry_record_ids else None
                 if not record:
                     continue
 
@@ -491,7 +496,12 @@ class ScraperRunner:
                         self._mongo_compare_output(),
                     )
 
-                selected_ids.append(entry.key)
+                for record_id in entry_record_ids:
+                    if record_id not in selected_ids and self.records_by_id.get(record_id):
+                        selected_ids.append(record_id)
+                        if len(selected_ids) >= self.settings.limit:
+                            self.stop_reason = "limit"
+                            break
 
             self.selected_ids = selected_ids.copy()
             self.checkpoint.save(self.settings.checkpoint_file)
@@ -728,13 +738,16 @@ class ScraperRunner:
             await self._fetch_details_for_page(client, list_page.entries, len(selected_ids))
 
             for entry in list_page.entries:
-                if entry.key in selected_ids:
-                    continue
-                record = self.records_by_id.get(entry.key)
-                if record:
-                    selected_ids.append(entry.key)
-                    if len(selected_ids) >= self.settings.limit:
-                        break
+                for record_id in self._record_ids_for_entry(entry):
+                    if record_id in selected_ids:
+                        continue
+                    record = self.records_by_id.get(record_id)
+                    if record:
+                        selected_ids.append(record_id)
+                        if len(selected_ids) >= self.settings.limit:
+                            break
+                if len(selected_ids) >= self.settings.limit:
+                    break
 
             self.selected_ids = selected_ids.copy()
             _write_json_atomic(self.settings.output_file, self._build_output())
@@ -857,6 +870,28 @@ class ScraperRunner:
             finalize_detail = getattr(self.provider, "finalize_detail", None)
             if finalize_detail is not None:
                 detail = finalize_detail(detail, entry=entry, detail_url=url)
+            expand_detail_records = getattr(self.provider, "expand_detail_records", None)
+            if expand_detail_records is not None:
+                expanded_records = list(expand_detail_records(entry, detail, detail_url=url))
+                expanded_ids: list[str] = []
+                for record in expanded_records:
+                    record_type = str(record.get("type") or "").strip().lower()
+                    code = str(record.get("code") or "").strip()
+                    if not record_type or not code:
+                        continue
+                    record_id = f"{record_type}:{code}"
+                    if record_id not in self.records_by_id:
+                        self.records_by_id[record_id] = record
+                    if record_id not in self.list_order:
+                        self.list_order.append(record_id)
+                    expanded_ids.append(record_id)
+                    self.checkpoint.completed_identity_keys.add(record_id)
+                    self.checkpoint.failed.pop(record_id, None)
+                self.expanded_entry_ids[entry.key] = expanded_ids
+                if expanded_ids:
+                    self.checkpoint.completed_identity_keys.add(entry.key)
+                    self.checkpoint.failed.pop(entry.key, None)
+                    return
             raw_tables = extract_raw_tables(raw_detail_content)
             if raw_tables:
                 detail["raw_tables"] = raw_tables
@@ -956,9 +991,17 @@ class ScraperRunner:
         self.checkpoint.failed.pop(f"LIST-PAGE-{page}", None)
 
     def _has_detail(self, identity: str) -> bool:
+        if identity in self.expanded_entry_ids:
+            return bool(self.expanded_entry_ids[identity])
         details = self.records_by_id.get(identity, {}).get("details")
         detail = details.get(self.provider.key) if isinstance(details, dict) else None
         return isinstance(detail, dict) and not detail.get("_list_summary")
+
+    def _record_ids_for_entry(self, entry: ListEntry) -> list[str]:
+        expanded_ids = self.expanded_entry_ids.get(entry.key)
+        if expanded_ids is not None:
+            return expanded_ids
+        return [entry.key]
 
     def _detail_url_for_entry(self, entry: ListEntry) -> str | None:
         detail_url_for_entry = getattr(self.provider, "detail_url_for_entry", None)

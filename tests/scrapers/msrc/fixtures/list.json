@@ -1,0 +1,23 @@
+{
+  "@odata.context": "https://api.msrc.microsoft.com/$metadata#Updates",
+  "value": [
+    {
+      "ID": "2026-Jun",
+      "Alias": "2026-Jun",
+      "DocumentTitle": "June 2026 Security Updates",
+      "Severity": null,
+      "InitialReleaseDate": "2026-06-09T07:00:00Z",
+      "CurrentReleaseDate": "2026-06-17T07:00:00Z",
+      "CvrfUrl": "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jun"
+    },
+    {
+      "ID": "2026-May",
+      "Alias": "2026-May",
+      "DocumentTitle": "May 2026 Security Updates",
+      "Severity": "Critical",
+      "InitialReleaseDate": "2026-05-12T07:00:00Z",
+      "CurrentReleaseDate": "2026-06-10T07:00:00Z",
+      "CvrfUrl": "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-May"
+    }
+  ]
+}

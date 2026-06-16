@@ -4,9 +4,9 @@ import asyncio
 import logging
 from dataclasses import replace
 
-from .config import MAX_RESULT_LIMIT, ScraperSettings
+from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
 from .error_log import log_uncaught_provider_error
-from .providers import all_providers
+from .providers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,24 @@ logger = logging.getLogger(__name__)
 CATCH_UP_BATCH_SIZE = 5
 CATCH_UP_DEFAULT_LIMIT = MAX_RESULT_LIMIT
 DEFAULT_MAX_RUNS_PER_PROVIDER = 100
+
+
+def providers_for_catch_up(settings: ScraperSettings) -> list[ScraperProvider]:
+    configured = catch_up_provider_keys(settings.scrapers_config_file)
+    if configured is None:
+        return all_providers()
+    if not configured:
+        return []
+
+    known = set(provider_keys())
+    unknown = [key for key in configured if key not in known]
+    if unknown:
+        choices = ", ".join(provider_keys())
+        bad = ", ".join(unknown)
+        raise ValueError(f"unknown catch-up provider(s): {bad}; choose from: {choices}")
+
+    by_key = {provider.key: provider for provider in all_providers()}
+    return [by_key[key] for key in configured]
 
 
 def provider_caught_up(output: dict) -> bool:
@@ -50,7 +68,14 @@ def run_catch_up_cycle(
     max_runs_per_provider: int = DEFAULT_MAX_RUNS_PER_PROVIDER,
     batch_size: int = CATCH_UP_BATCH_SIZE,
 ) -> None:
-    for provider in all_providers():
+    selected_providers = providers_for_catch_up(settings)
+    selected_keys = [provider.key for provider in selected_providers]
+    logger.info(
+        "Catch-up provider selection from %s: %s",
+        settings.scrapers_config_file,
+        ", ".join(selected_keys) if selected_keys else "(none)",
+    )
+    for provider in selected_providers:
         if getattr(provider, "manual_verification", False) and not include_manual_verification:
             logger.info(
                 "Skipping provider %s because it requires manual browser verification",
@@ -78,7 +103,7 @@ def run_catch_up_cycle(
                 mongo_conflict="overwrite",
             ).normalized()
             logger.info(
-                "CVE timestamp catch-up for collection %s",
+                "CVE timestamp catch-up for collection %s (fetches CVEProject data from raw.githubusercontent.com, not github_advisory)",
                 normalized.mongo_collection,
             )
             try:

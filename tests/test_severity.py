@@ -80,3 +80,34 @@ def test_severity_from_record_hikvision() -> None:
     }
 
     assert severity_from_record(record) == "High"
+
+
+def test_severity_from_record_msrc_uses_cvss_when_threat_is_not_severity() -> None:
+    record = {
+        "type": "msrc",
+        "details": {
+            "msrc": {
+                "threats": [{"description": "Elevation of Privilege"}],
+                "cvss": [{"base_score": "9.8"}],
+            }
+        },
+    }
+
+    assert severity_from_record(record) == "Critical"
+
+
+def test_severity_from_record_msrc_uses_microsoft_severity_threat() -> None:
+    record = {
+        "type": "msrc",
+        "details": {
+            "msrc": {
+                "threats": [
+                    {"description": "Remote Code Execution"},
+                    {"description": "Important"},
+                ],
+                "cvss": [{"base_score": "9.8"}],
+            }
+        },
+    }
+
+    assert severity_from_record(record) == "High"

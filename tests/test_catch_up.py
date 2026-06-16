@@ -10,10 +10,11 @@ from vuln_scraper.catch_up import (
     CATCH_UP_DEFAULT_LIMIT,
     no_progress,
     provider_caught_up,
+    providers_for_catch_up,
     run_catch_up_cycle,
 )
 from vuln_scraper.config import default_scrape_settings
-from vuln_scraper.providers import CVEProvider, HKCERTProvider, ZeroDayProvider
+from vuln_scraper.providers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
 
 
 def test_provider_caught_up_on_overlap() -> None:
@@ -64,7 +65,10 @@ def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
         finally:
             loop.close()
 
-    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider()],
+    )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
@@ -110,7 +114,10 @@ def test_run_catch_up_cycle_stops_on_overlap(monkeypatch) -> None:
         finally:
             loop.close()
 
-    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider()],
+    )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
@@ -144,8 +151,8 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
             loop.close()
 
     monkeypatch.setattr(
-        "vuln_scraper.catch_up.all_providers",
-        lambda: [HKCERTProvider(), ZeroDayProvider()],
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider(), ZeroDayProvider()],
     )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
@@ -178,7 +185,10 @@ def test_run_catch_up_cycle_respects_max_runs(monkeypatch) -> None:
         finally:
             loop.close()
 
-    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider()],
+    )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
@@ -212,7 +222,10 @@ def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
         finally:
             loop.close()
 
-    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [HKCERTProvider()])
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider()],
+    )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
@@ -258,7 +271,10 @@ def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> N
         finally:
             loop.close()
 
-    monkeypatch.setattr("vuln_scraper.catch_up.all_providers", lambda: [CVEProvider()])
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [CVEProvider()],
+    )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
@@ -269,3 +285,97 @@ def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> N
     )
 
     assert calls == [(2, "overwrite", False, True)]
+
+
+def test_providers_for_catch_up_returns_all_when_unconfigured(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.defaults]
+        retries = 2
+        """,
+        encoding="utf-8",
+    )
+
+    settings = default_scrape_settings().normalized()
+    settings = replace(settings, scrapers_config_file=config_file)
+
+    keys = [provider.key for provider in providers_for_catch_up(settings)]
+
+    assert keys == [provider.key for provider in all_providers()]
+
+
+def test_providers_for_catch_up_respects_configured_list(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["zeroday", "hkcert", "zeroday"]
+        """,
+        encoding="utf-8",
+    )
+
+    settings = default_scrape_settings().normalized()
+    settings = replace(settings, scrapers_config_file=config_file)
+
+    keys = [provider.key for provider in providers_for_catch_up(settings)]
+
+    assert keys == ["zeroday", "hkcert"]
+
+
+def test_providers_for_catch_up_rejects_unknown_provider(tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["hkcert", "not-a-provider"]
+        """,
+        encoding="utf-8",
+    )
+
+    settings = default_scrape_settings().normalized()
+    settings = replace(settings, scrapers_config_file=config_file)
+
+    with pytest.raises(ValueError, match="unknown catch-up provider"):
+        providers_for_catch_up(settings)
+
+
+def test_run_catch_up_cycle_uses_configured_providers(monkeypatch, tmp_path) -> None:
+    config_file = tmp_path / "scrapers.toml"
+    config_file.write_text(
+        """
+        [scrapers.catch_up]
+        providers = ["hkcert"]
+        """,
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    class FakeScraper:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+            self.provider = provider or HKCERTProvider()
+
+        async def run(self):
+            calls.append(self.provider.key)
+            return {
+                "stop_reason": "overlap",
+                "result_count": 0,
+                "vulnerabilities": [],
+                "mongo_sync": {"inserted": 0},
+            }
+
+    def fake_asyncio_run(coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
+    monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
+
+    settings = default_scrape_settings().normalized()
+    settings = replace(settings, scrapers_config_file=config_file)
+    run_catch_up_cycle(settings)
+
+    assert calls == ["hkcert"]

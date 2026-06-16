@@ -14,6 +14,7 @@ _SEVERITY_ALIASES: dict[str, str] = {
     "高危": "High",
     "高": "High",
     "high": "High",
+    "important": "High",
     "3": "Medium",
     "中危": "Medium",
     "中": "Medium",
@@ -116,6 +117,7 @@ def _raw_severity_for_provider(provider: str, document: dict[str, Any], detail: 
         "cnnvd": lambda: _first_non_empty(detail.get("hazardLevel"), document.get("status")),
         "cnvd": lambda: _first_non_empty(document.get("status"), detail.get("severity")),
         "juniper": lambda: _path(detail, "raw_fields", "severity"),
+        "msrc": lambda: _msrc_severity(detail),
     }
     extractor = extractors.get(provider)
     if extractor is None:
@@ -149,6 +151,61 @@ def _first_nested(values: Any, field: str) -> Any:
             value = item.get(field)
             if _has_text(value):
                 return value
+    return None
+
+
+def _msrc_severity(detail: dict[str, Any]) -> Any:
+    for severity in _values_at_paths(
+        detail,
+        (
+            ("threats", "description"),
+            ("raw", "Threats", "Description", "Value"),
+        ),
+    ):
+        normalized = normalize_severity(severity)
+        if normalized and normalized != "Unknown":
+            return normalized
+
+    score = _first_available(
+        detail,
+        (
+            ("cvss", "base_score"),
+            ("raw", "CVSSScoreSets", "BaseScore"),
+        ),
+    )
+    return _severity_from_cvss_score(score)
+
+
+def _values_at_paths(value: Any, paths: tuple[tuple[str, ...], ...]) -> list[Any]:
+    values: list[Any] = []
+    for path in paths:
+        found = _path(value, *path)
+        if isinstance(found, list):
+            values.extend(found)
+        elif found is not None:
+            values.append(found)
+    return values
+
+
+def _severity_from_cvss_score(value: Any) -> str | None:
+    if isinstance(value, list):
+        for item in value:
+            severity = _severity_from_cvss_score(item)
+            if severity:
+                return severity
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score >= 9.0:
+        return "Critical"
+    if score >= 7.0:
+        return "High"
+    if score >= 4.0:
+        return "Medium"
+    if score > 0:
+        return "Low"
     return None
 
 

@@ -2,12 +2,12 @@
 # Precedence is: CLI flags > environment variables > this file > built-in defaults.
 
 [mongodb]
-uri = "mongodb+srv://ben:Ss69966043@cluster0.0yngueq.mongodb.net"
+uri = "mongodb+srv://alankong_db_user:aIlU5MKwzK1KHY1V@citic.mnfhdwf.mongodb.net/?appName=citic"
 database = "vulnerabilities"
 
 # Conflict handling for existing type/code records in terminal scrape runs:
 # skip, or overwrite.
-conflict = "skip"
+conflict = "overwrite"
 
 [mongodb.collections]
 avd = "avd"
@@ -27,3 +27,4 @@ hikvision = "hikvision"
 cnnvd = "cnnvd"
 cnvd = "cnvd"
 juniper = "juniper"
+msrc = "msrc"

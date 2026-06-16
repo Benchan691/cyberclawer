@@ -11,6 +11,7 @@ from vuln_scraper.scrapers.hkcert import HKCERTProvider
 from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
 from vuln_scraper.scrapers.infosec import InfoSecProvider
 from vuln_scraper.scrapers.juniper import JuniperProvider
+from vuln_scraper.scrapers.msrc import MSRCProvider
 from vuln_scraper.scrapers.paloalto import PaloAltoProvider
 from vuln_scraper.scrapers.qianxin import QianxinProvider
 from vuln_scraper.scrapers.ransomwarelive import RansomwareLiveProvider
@@ -30,6 +31,7 @@ __all__ = [
     "HuaweiSAProvider",
     "InfoSecProvider",
     "JuniperProvider",
+    "MSRCProvider",
     "PaloAltoProvider",
     "QianxinProvider",
     "RansomwareLiveProvider",

@@ -1,0 +1,5 @@
+BASE_URL = "https://api.msrc.microsoft.com/cvrf/v3.0"
+SOURCE_URL = "https://msrc.microsoft.com/update-guide/vulnerability"
+LIST_URL = f"{BASE_URL}/Updates"
+DETAIL_URL = f"{BASE_URL}/cvrf"
+DEFAULT_COLLECTION = "msrc"

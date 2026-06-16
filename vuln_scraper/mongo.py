@@ -127,6 +127,37 @@ def documents_content_match(existing: dict[str, Any], document: dict[str, Any]) 
     return document_content_payload(existing) == document_content_payload(document)
 
 
+_VOLATILE_PROVIDER_DETAIL_FIELDS: dict[str, frozenset[str]] = {
+    # HKCERT page view counters change on every request and must not affect catch-up overlap.
+    "hkcert": frozenset({"views"}),
+    # Qianxin read counters and article navigation metadata change between API calls.
+    "qianxin": frozenset({"read_num", "prev_article", "next_article", "raw"}),
+}
+
+
+def sanitize_details_for_content_compare(details: dict[str, Any]) -> dict[str, Any]:
+    sanitized = copy.deepcopy(details)
+    hkcert = sanitized.get("hkcert")
+    if isinstance(hkcert, dict):
+        from vuln_scraper.scrapers.hkcert.parsers.detail import normalize_hkcert_detail
+
+        sanitized["hkcert"] = normalize_hkcert_detail(hkcert)
+
+    qianxin = sanitized.get("qianxin")
+    if isinstance(qianxin, dict):
+        from vuln_scraper.scrapers.qianxin.parsers.detail import normalize_qianxin_detail
+
+        sanitized["qianxin"] = normalize_qianxin_detail(qianxin)
+
+    for provider_key, provider_detail in sanitized.items():
+        if not isinstance(provider_detail, dict):
+            continue
+        provider_detail.pop("raw_tables", None)
+        for field in _VOLATILE_PROVIDER_DETAIL_FIELDS.get(provider_key, ()):
+            provider_detail.pop(field, None)
+    return sanitized
+
+
 def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
     raw_cve = document.get("cve_code")
     if raw_cve is None:
@@ -141,7 +172,7 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
         "disclosure_date": document.get("disclosure_date"),
         "status": document.get("status"),
         "severity": document.get("severity") or "",
-        "details": copy.deepcopy(document.get("details") or {}),
+        "details": sanitize_details_for_content_compare(document.get("details") or {}),
     }
 
 
@@ -229,8 +260,12 @@ def _sync_one(
 
 def _documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool:
     ignored = {"scraped_at", "source"}
-    existing_core = {key: value for key, value in existing.items() if key not in ignored}
-    document_core = {key: value for key, value in document.items() if key not in ignored}
+    existing_core = copy.deepcopy({key: value for key, value in existing.items() if key not in ignored})
+    document_core = copy.deepcopy({key: value for key, value in document.items() if key not in ignored})
+    if "details" in existing_core:
+        existing_core["details"] = sanitize_details_for_content_compare(existing_core["details"])
+    if "details" in document_core:
+        document_core["details"] = sanitize_details_for_content_compare(document_core["details"])
     return existing_core == document_core
 
 

@@ -1,5 +1,19 @@
 # Per-scraper HTTP retry/backoff and error-log settings.
 # Precedence: explicit ScraperSettings / CLI > [scrapers.<provider>] > [scrapers.defaults].
+#
+# Catch-up provider selection (optional):
+# - Omit this section to run every scraper.
+# - Use providers = ["all"] to run every scraper explicitly.
+# - Or list only the scrapers you want; remove lines you do not need.
+#
+# Available provider keys:
+# avd, cisco, cnnvd, cnvd, cve, github_advisory, govcert, hikvision, hkcert,
+# huawei_sa, infosec, juniper, msrc, paloalto, qianxin, ransomwarelive, splunk, zeroday
+
+[scrapers.catch_up]
+providers = [
+    "hkcert"
+]
 
 [scrapers.defaults]
 retries = 3

@@ -35,6 +35,7 @@ DEFAULT_MONGO_COLLECTIONS = {
     "cnnvd": "cnnvd",
     "cnvd": "cnvd",
     "juniper": "juniper",
+    "msrc": "msrc",
 }
 DEFAULT_MONGO_CONFIG_FILE = Path("mongodb.toml")
 DEFAULT_SCRAPERS_CONFIG_FILE = Path("scrapers.toml")
@@ -389,6 +390,36 @@ def _optional_config_float(config: dict[str, Any], key: str) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def catch_up_provider_keys(
+    path: Path | str | None = DEFAULT_SCRAPERS_CONFIG_FILE,
+) -> tuple[str, ...] | None:
+    """Return configured catch-up provider keys, or None to run every provider."""
+    config = load_scrapers_config(path)
+    catch_up = _scraper_table(config, "catch_up")
+    if "providers" not in catch_up:
+        return None
+
+    raw = catch_up["providers"]
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(f"{path} [scrapers.catch_up] providers must be a list of provider keys")
+
+    keys: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        key = str(item).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    if keys == ["all"]:
+        return None
+    if "all" in keys:
+        raise ValueError(f"{path} [scrapers.catch_up] providers cannot mix 'all' with specific provider keys")
+    return tuple(keys)
 
 
 def retry_config_for_provider(
