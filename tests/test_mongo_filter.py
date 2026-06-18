@@ -88,6 +88,8 @@ def test_distinct_values_and_dynamic_attack_metric_fields() -> None:
 def test_filter_fields_for_provider_uses_avd_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("avd")
 
+    assert "published_time" in categorical_fields
+    assert "updated_time" in categorical_fields
     assert "details.avd.danger_level" in categorical_fields
     assert "details.avd.affected_software.product" in categorical_fields
     assert "details.avd.description" in text_fields
@@ -228,7 +230,10 @@ def test_filter_fields_for_provider_uses_cnvd_fields() -> None:
     categorical_fields, text_fields, dynamic_path = filter_fields_for_provider("cnvd")
 
     assert "severity" in categorical_fields
+    assert "published_time" in categorical_fields
+    assert "updated_time" in categorical_fields
     assert "details.cnvd.severity" in categorical_fields
+    assert "details.cnvd.updated_date" in categorical_fields
     assert "details.cnvd.affected_products" in categorical_fields
     assert "details.cnvd.description" in text_fields
     assert "details.cnvd.reference_links" in text_fields

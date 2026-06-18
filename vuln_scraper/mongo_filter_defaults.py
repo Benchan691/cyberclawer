@@ -6,6 +6,8 @@ CATEGORICAL_FIELDS: tuple[str, ...] = (
     "severity",
     "vuln_type",
     "disclosure_date",
+    "published_time",
+    "updated_time",
 )
 
 TEXT_FIELDS: tuple[str, ...] = (

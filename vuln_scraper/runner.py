@@ -27,6 +27,7 @@ from .mongo import (
 )
 from .providers import ScraperProvider
 from .table_extractor import extract_raw_tables
+from .timestamps import record_updated_at_or_after
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class ScraperRunner:
         stop_on_first_known: bool | None = None,
         stop_on_unchanged_content: bool = False,
         cve_delta_catch_up: bool = False,
+        updated_since: datetime | None = None,
     ) -> None:
         self.progress_callback = progress_callback
         self.mongo_client_factory = mongo_client_factory
@@ -117,6 +119,7 @@ class ScraperRunner:
         self._stop_on_first_known_override = stop_on_first_known
         self._stop_on_unchanged_content = stop_on_unchanged_content
         self._cve_delta_catch_up = cve_delta_catch_up
+        self._updated_since = updated_since
         self._existing_documents: dict[str, dict[str, Any]] = {}
         self.stop_reason: str | None = None
         self.settings = settings.for_provider(
@@ -345,6 +348,9 @@ class ScraperRunner:
         target.errors.extend(source.errors)
 
     async def _scrape_newest_records(self, client: ScraperClient, *, known_ids: set[str]) -> None:
+        if self._updated_since is not None:
+            await self._scrape_updated_since_records(client)
+            return
         if self._stop_on_unchanged_content:
             await self._scrape_newest_records_compare_content(client, known_ids=known_ids)
             return
@@ -430,6 +436,87 @@ class ScraperRunner:
 
         if self.stop_reason is None and len(selected_ids) >= self.settings.limit:
             self.stop_reason = "limit"
+
+        self.selected_ids = selected_ids[: self.settings.limit]
+        self.selection_finalized = True
+
+    async def _scrape_updated_since_records(self, client: ScraperClient) -> None:
+        if self._updated_since is None:
+            raise ValueError("updated-since scrape requires a timestamp boundary")
+
+        self.stop_reason = None
+        page = 1
+        total_pages: int | None = None
+        selected_ids: list[str] = []
+
+        while len(selected_ids) < self.settings.limit:
+            if total_pages is not None and page > total_pages:
+                self.stop_reason = "timestamp_boundary"
+                break
+
+            url = self.provider.list_url(page, checkpoint=self.checkpoint)
+            logger.info("Fetching updated-since list page %s", page)
+            self._emit(phase="list", page=page)
+            try:
+                list_page = await self._fetch_list_page(client, url, page)
+            except FetchError as exc:
+                self._record_failure(self._list_failure_identity(), url, exc, phase="list")
+                self.stop_reason = "error"
+                break
+
+            if not list_page.entries:
+                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
+                self.stop_reason = "no_rows"
+                break
+
+            self._clear_list_failures(page=page)
+            self._merge_list_entries(list_page.entries)
+            self.checkpoint.last_list_page = page
+            if list_page.total_pages is not None:
+                total_pages = list_page.total_pages
+                self.checkpoint.total_pages = list_page.total_pages
+            if list_page.total_records is not None:
+                self.checkpoint.total_records = list_page.total_records
+
+            page_has_parseable_timestamps = False
+            hit_timestamp_boundary = False
+            for entry in list_page.entries:
+                if self._detail_url_for_entry(entry) is not None and not self._has_detail(entry.key):
+                    await self._scrape_detail(client, entry)
+
+                for record_id in self._record_ids_for_entry(entry):
+                    record = self.records_by_id.get(record_id)
+                    if not record:
+                        continue
+                    comparison = record_updated_at_or_after(record, self._updated_since)
+                    if comparison is None:
+                        continue
+                    page_has_parseable_timestamps = True
+                    if not comparison:
+                        hit_timestamp_boundary = True
+                        self.stop_reason = "timestamp_boundary"
+                        break
+                    if record_id not in selected_ids:
+                        selected_ids.append(record_id)
+                    if len(selected_ids) >= self.settings.limit:
+                        self.stop_reason = "limit"
+                        break
+                if self.stop_reason in {"limit", "timestamp_boundary"}:
+                    break
+
+            self.selected_ids = selected_ids.copy()
+            self.checkpoint.save(self.settings.checkpoint_file)
+            self._emit(phase="page-complete", page=page)
+
+            if self.stop_reason in {"limit", "timestamp_boundary"}:
+                break
+            if not page_has_parseable_timestamps or hit_timestamp_boundary:
+                self.stop_reason = "timestamp_boundary"
+                break
+            page += 1
+
+        if self.stop_reason is None:
+            self.stop_reason = "timestamp_boundary"
 
         self.selected_ids = selected_ids[: self.settings.limit]
         self.selection_finalized = True
@@ -763,8 +850,10 @@ class ScraperRunner:
         client: ScraperClient,
         entries: list[ListEntry],
         selected_count: int,
+        *,
+        ignore_limit: bool = False,
     ) -> None:
-        targets = self._detail_targets_for_page(entries, selected_count)
+        targets = self._detail_targets_for_page(entries, selected_count, ignore_limit=ignore_limit)
         if not targets:
             logger.info("No detail pages to fetch for this page.")
             return
@@ -836,19 +925,22 @@ class ScraperRunner:
         self,
         entries: list[ListEntry],
         selected_count: int,
+        *,
+        ignore_limit: bool = False,
     ) -> list[ListEntry]:
         remaining = self.settings.limit - selected_count
         targets: list[ListEntry] = []
 
         for entry in entries:
-            if remaining <= 0:
+            if remaining <= 0 and not ignore_limit:
                 break
             if not self._has_detail(entry.key):
                 if self._detail_url_for_entry(entry) is None:
                     continue
                 targets.append(entry)
                 self.detail_fetch_count += 1
-            remaining -= 1
+            if not ignore_limit:
+                remaining -= 1
 
         return targets
 

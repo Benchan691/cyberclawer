@@ -14,7 +14,6 @@
 providers = [
     "avd",
     "cisco",
-    "cnnvd",
     "cnvd",
     "govcert",
     "github_advisory",

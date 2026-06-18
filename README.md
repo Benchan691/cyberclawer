@@ -196,11 +196,12 @@ Interactive scrape, choosing scraper and amount:
 python scrape.py tui
 ```
 
-Catch up every provider: scrape newest-first from each collection and stop when the
-newest stored record matches the live source content (title, severity, details, etc.;
-not ID alone and not scrape metadata like `scraped_at`). Updated source records are
-re-scraped and overwritten before advancing. Each catch-up run fetches at most 5
-records (configurable with `--batch-size`), then re-checks overlap before continuing.
+Catch up every provider: scrape newest-first from each collection and sync records
+whose normalized `updated_time` is today or newer, using the Asia/Hong_Kong calendar
+day (`00:00:00` local time). Existing records inside that today window are
+overwritten so source-side updates are refreshed even when IDs already exist.
+The scraper stops a provider when a fetched page has parseable timestamps and all
+records on that page are older than today.
 CVE is the exception: catch-up reads the CVEProject delta log once and processes every
 new and updated CVE after the timestamp saved in `checkpoint.json`, ignoring the
 generic catch-up batch and record limits:
@@ -210,8 +211,8 @@ python scrape.py catch-up
 python scrape.py catch-up --batch-size 5 --limit 200 --max-runs-per-provider 50
 ```
 
-`--limit` caps total new records per provider across all catch-up runs; `--batch-size`
-controls how many are fetched per run (default 5).
+`--limit` caps total today-window records per provider. `--batch-size` is retained
+for CLI compatibility but timestamp catch-up runs once per provider.
 
 Run one scraper once, for example AVD (browser extra recommended) or CNVD (requires the `cnvd` extra):
 
@@ -244,11 +245,35 @@ Each document is keyed by unique lowercase scraper `type` + provider-native
 `hkcert:suse-linux-kernel-multiple-vulnerabilities_20260601`,
 `huawei_sa:huawei-sa-LKEiSHPVtLPEDF-60937345`, or `cve:2024-3094`. Common fields live at the top level:
 
-- `type`, `code`, `cve_code`, `title`, `disclosure_date`, `status`, `severity`
+- `type`, `code`, `cve_code`, `title`, `disclosure_date`, `published_time`,
+  `updated_time`, `status`, `severity`
 - `source`
 - `details`
 
 Provider-specific fields live under `details.<provider>`.
+
+Normalized timestamps are stored at the top level for every Mongo document:
+
+| Collection | `published_time` source | `updated_time` source |
+| --- | --- | --- |
+| `avd` | `disclosure_date` | `disclosure_date` |
+| `hkcert` | `details.hkcert.release_date` | `details.hkcert.last_update_date` |
+| `cve` | `details.cve.published` | `details.cve.last_modified` |
+| `cisco` | `details.cisco.first_published` | `details.cisco.last_updated` |
+| `zeroday` | `details.zeroday.disclosed_date` | `details.zeroday.patched_date` |
+| `govcert` | `details.govcert.published_date` | `details.govcert.published_date` |
+| `github_advisory` | `details.github_advisory.published_at` | `details.github_advisory.updated_at` |
+| `huawei_sa` | `details.huawei_sa.publishDate` | `details.huawei_sa.publishDate` |
+| `paloalto` | `details.paloalto.published_date` | `details.paloalto.updated_date` |
+| `qianxin` | `details.qianxin.published_date` / `published_at` | `details.qianxin.updated_date` / `updated_at` |
+| `ransomwarelive` | `details.ransomwarelive.attackdate` | `details.ransomwarelive.discovered` |
+| `infosec` | `details.infosec.published_date` | `details.infosec.published_date` |
+| `splunk` | `details.splunk.published_date` | `details.splunk.last_modified` |
+| `hikvision` | `details.hikvision.initial_release_date` / `published_date` | `details.hikvision.updated_date` |
+| `cnnvd` | `details.cnnvd.publishTime` | `details.cnnvd.updateTime` |
+| `cnvd` | `details.cnvd.published_date` | `details.cnvd.updated_date`, falling back to `published_date` |
+| `juniper` | `details.juniper.published_date` | `details.juniper.updated_date` |
+| `msrc` | `details.msrc.initial_release_date` | `details.msrc.current_release_date` |
 
 When a detail response contains HTML tables, every table is also preserved under
 `details.<provider>.raw_tables` as a rectangular 2D array of cleaned cell text.
@@ -311,7 +336,7 @@ the source field names such as `id`, `vulName`, `cnnvdCode`, `cveCode`,
 `patch`.
 CNVD detail fields include `cnvd_id`, `severity`, `cvss_score`,
 `cvss_vector`, `affected_products`, `cve_ids`, `description`, `solution`,
-`reference_links`, `published_date`, and `raw_fields`.
+`reference_links`, `published_date`, `updated_date`, and `raw_fields`.
 
 CVE master records use `type = "cve"`, `code = "YYYY-NNNN"`, `cve_code = null`,
 and store normalized CVE v5 fields under `details.cve`, including descriptions,

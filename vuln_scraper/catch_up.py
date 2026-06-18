@@ -8,6 +8,7 @@ from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
 from .error_log import log_uncaught_provider_error
 from .providers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
+from .timestamps import today_start
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def providers_for_catch_up(settings: ScraperSettings) -> list[ScraperProvider]:
 
 def provider_caught_up(output: dict) -> bool:
     stop_reason = output.get("stop_reason")
-    if stop_reason in {"overlap", "timestamp_boundary"}:
+    if stop_reason == "timestamp_boundary":
         return True
     return False
 
@@ -96,6 +97,7 @@ def run_catch_up_cycle(
         scraped_total = 0
         last_stop_reason: str | None = None
         per_provider_limit = settings.limit
+        updated_since = today_start()
 
         if provider.key == "cve":
             run_settings = replace(
@@ -136,99 +138,56 @@ def run_catch_up_cycle(
             )
             continue
 
-        while runs < max_runs_per_provider:
-            remaining = per_provider_limit - scraped_total
-            run_limit = min(batch_size, remaining)
-            if run_limit <= 0:
-                logger.info(
-                    "Provider %s reached per-provider limit=%s after %s run(s)",
-                    provider.key,
-                    per_provider_limit,
-                    runs,
-                )
-                break
+        runs += 1
+        run_settings = replace(
+            provider_settings,
+            limit=per_provider_limit,
+            mongo_conflict="overwrite",
+        ).normalized()
+        logger.info(
+            "Timestamp catch-up for provider %s collection %s (updated_since=%s, limit=%s)",
+            provider.key,
+            normalized.mongo_collection,
+            updated_since.isoformat(),
+            per_provider_limit,
+        )
+        try:
+            output = asyncio.run(
+                ScraperRunner(
+                    run_settings,
+                    provider=provider,
+                    updated_since=updated_since,
+                ).run()
+            )
+        except Exception as exc:
+            logger.exception("Timestamp catch-up failed for provider %s", provider.key)
+            log_uncaught_provider_error(
+                data_dir=normalized.data_dir,
+                error_log_name=normalized.error_log,
+                provider=provider.key,
+                error=exc,
+            )
+            continue
 
-            runs += 1
-            run_settings = replace(
-                provider_settings,
-                limit=run_limit,
-                mongo_conflict=provider_settings.mongo_conflict or "overwrite",
-            ).normalized()
-            logger.info(
-                "Catch-up run %s for provider %s collection %s (batch=%s, provider_total=%s/%s)",
-                runs,
-                provider.key,
-                normalized.mongo_collection,
-                run_limit,
-                scraped_total,
-                per_provider_limit,
-            )
-            try:
-                output = asyncio.run(
-                    ScraperRunner(
-                        run_settings,
-                        provider=provider,
-                        stop_on_unchanged_content=True,
-                    ).run()
-                )
-            except Exception as exc:
-                logger.exception("Catch-up failed for provider %s run %s", provider.key, runs)
-                log_uncaught_provider_error(
-                    data_dir=normalized.data_dir,
-                    error_log_name=normalized.error_log,
-                    provider=provider.key,
-                    error=exc,
-                )
-                break
-            last_stop_reason = output.get("stop_reason")
-            vulnerabilities = output.get("vulnerabilities", [])
-            run_count = output.get("result_count", len(vulnerabilities))
-            scraped_total += run_count
-            completed = sum(
-                1
-                for item in vulnerabilities
-                if isinstance(item.get("details"), dict)
-                and isinstance(item["details"].get(provider.key), dict)
-            )
-            mongo = output.get("mongo_sync") or {}
-            logger.info(
-                "Provider %s run %s: fetched %s records (%s with details, stop_reason=%s, "
-                "provider_total=%s/%s); inserted=%s overwritten=%s deleted=%s skipped=%s",
-                provider.key,
-                runs,
-                len(vulnerabilities),
-                completed,
-                last_stop_reason,
-                scraped_total,
-                per_provider_limit,
-                mongo.get("inserted", 0),
-                mongo.get("overwritten", 0),
-                mongo.get("deleted", 0),
-                mongo.get("skipped", 0),
-            )
-
-            if scraped_total >= per_provider_limit:
-                logger.info(
-                    "Provider %s reached per-provider limit=%s after %s run(s)",
-                    provider.key,
-                    per_provider_limit,
-                    runs,
-                )
-                break
-            if provider_caught_up(output):
-                logger.info("Provider %s caught up after %s run(s)", provider.key, runs)
-                break
-            if no_progress(output):
-                logger.info(
-                    "Provider %s stopped after %s run(s) with no forward progress",
-                    provider.key,
-                    runs,
-                )
-                break
-        else:
-            logger.warning(
-                "Provider %s reached max_runs_per_provider=%s (last stop_reason=%s)",
-                provider.key,
-                max_runs_per_provider,
-                last_stop_reason,
-            )
+        last_stop_reason = output.get("stop_reason")
+        vulnerabilities = output.get("vulnerabilities", [])
+        scraped_total = output.get("result_count", len(vulnerabilities))
+        completed = sum(
+            1
+            for item in vulnerabilities
+            if isinstance(item.get("details"), dict)
+            and isinstance(item["details"].get(provider.key), dict)
+        )
+        mongo = output.get("mongo_sync") or {}
+        logger.info(
+            "Provider %s timestamp catch-up: fetched %s today-window records "
+            "(%s with details, stop_reason=%s); inserted=%s overwritten=%s deleted=%s skipped=%s",
+            provider.key,
+            len(vulnerabilities),
+            completed,
+            last_stop_reason,
+            mongo.get("inserted", 0),
+            mongo.get("overwritten", 0),
+            mongo.get("deleted", 0),
+            mongo.get("skipped", 0),
+        )

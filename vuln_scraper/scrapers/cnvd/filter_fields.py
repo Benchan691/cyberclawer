@@ -6,6 +6,7 @@ CATEGORICAL_FIELDS = (
     "disclosure_date",
     "details.cnvd.severity",
     "details.cnvd.published_date",
+    "details.cnvd.updated_date",
     "details.cnvd.affected_products",
     "details.cnvd.cve_ids",
 )

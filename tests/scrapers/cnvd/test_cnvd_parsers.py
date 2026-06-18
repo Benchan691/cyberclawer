@@ -76,6 +76,8 @@ def test_parse_cnvd_detail_extracts_labeled_fields_links_and_cves() -> None:
     assert detail["description"] == "攻击者可利用该漏洞执行任意代码。"
     assert detail["solution"] == "升级至安全版本。"
     assert detail["published_date"] == "2026-06-01"
+    assert detail["updated_date"] == "2026-06-02"
+    assert detail["raw_fields"]["更新时间"] == "2026-06-02"
     assert "https://example.test/advisory/CNVD-2026-21550" in detail["reference_links"]
 
 

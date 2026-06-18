@@ -18,6 +18,7 @@ from .mongo_filter_defaults import (
 
 
 SORT_SPEC: tuple[tuple[str, int], ...] = (
+    ("updated_time", -1),
     ("disclosure_date", -1),
     ("type", 1),
     ("code", -1),
@@ -105,10 +106,23 @@ def filter_fields_for_provider(provider_key: str) -> tuple[tuple[str, ...], tupl
     except ModuleNotFoundError:
         return CATEGORICAL_BASE_FIELDS, TEXT_FIELDS, DYNAMIC_ATTACK_METRICS_PATH
 
-    categorical_fields = tuple(getattr(module, "CATEGORICAL_FIELDS", CATEGORICAL_BASE_FIELDS))
+    categorical_fields = _dedupe_fields(
+        (*CATEGORICAL_BASE_FIELDS, *tuple(getattr(module, "CATEGORICAL_FIELDS", ())))
+    )
     text_fields = tuple(getattr(module, "TEXT_FIELDS", TEXT_FIELDS))
     dynamic_path = getattr(module, "DYNAMIC_ATTACK_METRICS_PATH", None)
     return categorical_fields, text_fields, dynamic_path
+
+
+def _dedupe_fields(fields: tuple[str, ...]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for field in fields:
+        if field in seen:
+            continue
+        result.append(field)
+        seen.add(field)
+    return tuple(result)
 
 
 def available_categorical_fields(

@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -27,6 +28,7 @@ from vuln_scraper.scrapers.splunk import SplunkProvider
 from vuln_scraper.scrapers.zeroday import ZeroDayProvider
 
 from tests.fake_avd_provider import FakeAvdProvider
+from vuln_scraper.timestamps import LOCAL_TIMEZONE, document_updated_time
 
 
 def test_limit_counts_raw_results(tmp_path) -> None:
@@ -317,6 +319,175 @@ def test_mongo_update_mixed_page_syncs_new_records_then_stops_on_known_page(tmp_
         "avd:2026-10004",
     }
     assert client.list_pages_seen == [1, 2]
+
+
+def test_timestamp_catch_up_overwrites_today_records_even_when_known(tmp_path) -> None:
+    today = datetime.now(LOCAL_TIMEZONE).date()
+    yesterday = today - timedelta(days=1)
+    client = FakeTimestampAVDClient(today.isoformat(), yesterday.isoformat())
+    collection = FakeMongoCollection(
+        {
+            "avd:2026-10001": {
+                "_id": "avd:2026-10001",
+                "type": "avd",
+                "code": "2026-10001",
+                "title": "stale title",
+            },
+        }
+    )
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=10,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+    boundary = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TIMEZONE)
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            updated_since=boundary,
+        )._run_with_client(client)
+    )
+
+    assert identities(output["vulnerabilities"]) == ["avd:2026-10001", "avd:2026-10002"]
+    assert output["stop_reason"] == "timestamp_boundary"
+    assert output["mongo_sync"]["overwritten"] == 1
+    assert output["mongo_sync"]["inserted"] == 1
+    assert collection.documents["avd:2026-10001"]["title"] != "stale title"
+    assert client.list_pages_seen == [1, 2]
+    assert client.detail_ids_seen == ["AVD-2026-10001", "AVD-2026-10002", "AVD-2026-10003"]
+
+
+def test_timestamp_catch_up_stops_immediately_on_first_older_record(tmp_path) -> None:
+    today = datetime.now(LOCAL_TIMEZONE).date()
+    yesterday = today - timedelta(days=1)
+    client = FakeTimestampAVDClient([today.isoformat(), yesterday.isoformat()], yesterday.isoformat())
+    collection = FakeMongoCollection()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=10,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+    boundary = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TIMEZONE)
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            updated_since=boundary,
+        )._run_with_client(client)
+    )
+
+    assert identities(output["vulnerabilities"]) == ["avd:2026-10001"]
+    assert output["stop_reason"] == "timestamp_boundary"
+    assert client.list_pages_seen == [1]
+    assert client.detail_ids_seen == ["AVD-2026-10001", "AVD-2026-10002"]
+
+
+def test_timestamp_catch_up_skips_older_records_and_stops(tmp_path) -> None:
+    today = datetime.now(LOCAL_TIMEZONE).date()
+    yesterday = today - timedelta(days=1)
+    client = FakeTimestampAVDClient(yesterday.isoformat(), yesterday.isoformat())
+    collection = FakeMongoCollection()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=10,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+    boundary = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TIMEZONE)
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            updated_since=boundary,
+        )._run_with_client(client)
+    )
+
+    assert output["vulnerabilities"] == []
+    assert output["stop_reason"] == "timestamp_boundary"
+    assert output["mongo_sync"]["inserted"] == 0
+    assert client.list_pages_seen == [1]
+
+
+def test_timestamp_catch_up_stops_when_page_has_no_parseable_timestamps(tmp_path) -> None:
+    client = FakeTimestampAVDClient("not a date", "not a date")
+    collection = FakeMongoCollection()
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "high_risk_vulns.json",
+        checkpoint_file=tmp_path / "checkpoint.json",
+        limit=10,
+        mongo_enabled=True,
+        mongo_conflict="overwrite",
+        request_delay=0,
+        retries=0,
+        concurrency=2,
+    )
+    boundary = datetime.combine(datetime.now(LOCAL_TIMEZONE).date(), datetime.min.time(), tzinfo=LOCAL_TIMEZONE)
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=FakeAvdProvider(),
+            mongo_client_factory=fake_mongo_factory(collection),
+            updated_since=boundary,
+        )._run_with_client(client)
+    )
+
+    assert output["vulnerabilities"] == []
+    assert output["stop_reason"] == "timestamp_boundary"
+    assert client.list_pages_seen == [1]
+
+
+def test_timestamp_resolver_uses_fallback_publish_fields() -> None:
+    assert document_updated_time(
+        {
+            "type": "avd",
+            "disclosure_date": "2026-06-18",
+            "details": {"avd": {}},
+        }
+    ) == "2026-06-17T16:00:00+00:00"
+    assert document_updated_time(
+        {
+            "type": "govcert",
+            "details": {"govcert": {"published_date": "2026-06-18"}},
+        }
+    ) == "2026-06-17T16:00:00+00:00"
+    assert document_updated_time(
+        {
+            "type": "huawei_sa",
+            "details": {"huawei_sa": {"publishDate": "2026-06-18"}},
+        }
+    ) == "2026-06-17T16:00:00+00:00"
+    assert document_updated_time(
+        {
+            "type": "infosec",
+            "details": {"infosec": {"published_date": "2026-06-18"}},
+        }
+    ) == "2026-06-17T16:00:00+00:00"
 
 
 def test_hkcert_mongo_sync_pages_past_leading_known_records(tmp_path) -> None:
@@ -1513,6 +1684,26 @@ class FakeClient:
         return FetchResult(html=detail_html(avd_id), status_code=200, url=url)
 
 
+class FakeTimestampAVDClient:
+    def __init__(self, page_one_date: str | list[str], page_two_date: str | list[str]) -> None:
+        self.page_one_date = page_one_date
+        self.page_two_date = page_two_date
+        self.list_pages_seen: list[int] = []
+        self.detail_ids_seen: list[str] = []
+
+    async def get_html(self, url: str) -> FetchResult:
+        parsed = urlparse(url)
+        if parsed.path.endswith("/high-risk/list"):
+            page = int(parse_qs(parsed.query)["page"][0])
+            self.list_pages_seen.append(page)
+            date = self.page_one_date if page == 1 else self.page_two_date
+            return FetchResult(html=timestamp_list_page_html(page, date), status_code=200, url=url)
+
+        avd_id = parse_qs(parsed.query)["id"][0]
+        self.detail_ids_seen.append(avd_id)
+        return FetchResult(html=detail_html(avd_id), status_code=200, url=url)
+
+
 class FakeCVEClient:
     def __init__(self, *, delta: list[dict] | None = None) -> None:
         self.delta = delta or []
@@ -1849,6 +2040,39 @@ def list_page_html(page: int) -> str:
         </tr>
         """
         for index, (avd_id, title, vuln_type) in enumerate(rows, start=1)
+    )
+    return f"""
+    <table>
+      <tr><th>AVD编号</th><th>漏洞名称</th><th>漏洞类型</th><th>披露时间</th><th>漏洞状态</th></tr>
+      {body}
+    </table>
+    <div>第 {page} 页 / 2 页 • 总计 4 条记录</div>
+    """
+
+
+def timestamp_list_page_html(page: int, disclosure_date: str | list[str]) -> str:
+    rows = {
+        1: [
+            ("AVD-2026-10001", "Product RCE (CVE-2026-10001)", "CWE-78"),
+            ("AVD-2026-10002", "Supply chain poisoning event", "未定义"),
+        ],
+        2: [
+            ("AVD-2026-10003", "Kernel bug", "CWE-120"),
+            ("AVD-2026-10004", "Another event", "未定义"),
+        ],
+    }[page]
+    dates = disclosure_date if isinstance(disclosure_date, list) else [disclosure_date] * len(rows)
+    body = "\n".join(
+        f"""
+        <tr>
+          <td><a href="/detail?id={avd_id}">{avd_id}</a></td>
+          <td>{title}</td>
+          <td>{vuln_type}</td>
+          <td>{date}</td>
+          <td>CVE PoC</td>
+        </tr>
+        """
+        for (avd_id, title, vuln_type), date in zip(rows, dates, strict=False)
     )
     return f"""
     <table>

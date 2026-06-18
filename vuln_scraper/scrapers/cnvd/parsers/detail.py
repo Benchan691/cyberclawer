@@ -31,6 +31,7 @@ class CNVDDetailRecord:
     solution: str | None = None
     reference_links: list[str] = field(default_factory=list)
     published_date: str | None = None
+    updated_date: str | None = None
     raw_fields: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ def parse_detail_page(html: str) -> CNVDDetailRecord:
         solution=_field_value(raw_fields, ("漏洞解决方案", "解决方案", "修复建议", "处置建议")),
         reference_links=_reference_links(parsed, all_text),
         published_date=_field_value(raw_fields, ("公开日期", "发布时间", "发布日期", "收录时间")),
+        updated_date=_field_value(raw_fields, ("更新时间", "更新日期", "最后更新时间")),
         raw_fields=raw_fields,
     )
 

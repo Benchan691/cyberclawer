@@ -17,8 +17,8 @@ from vuln_scraper.config import default_scrape_settings
 from vuln_scraper.providers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
 
 
-def test_provider_caught_up_on_overlap() -> None:
-    assert provider_caught_up({"stop_reason": "overlap"})
+def test_provider_caught_up_ignores_overlap() -> None:
+    assert not provider_caught_up({"stop_reason": "overlap"})
     assert not provider_caught_up({"stop_reason": "limit", "result_count": 10})
 
 
@@ -29,7 +29,7 @@ def test_provider_caught_up_on_timestamp_boundary() -> None:
 def test_no_progress_on_empty_result() -> None:
     assert no_progress({"result_count": 0, "mongo_sync": {}})
     assert not no_progress({"result_count": 0, "mongo_sync": {"deleted": 1}})
-    assert not no_progress({"stop_reason": "overlap", "result_count": 0})
+    assert no_progress({"stop_reason": "overlap", "result_count": 0})
 
 
 def test_catch_up_default_limit_is_one_thousand() -> None:
@@ -42,17 +42,25 @@ def test_catch_up_default_batch_size_is_five() -> None:
 
 def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
     conflicts: list[str] = []
-    unchanged_flags: list[bool] = []
+    updated_since_seen: list[object] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(
+            self,
+            settings,
+            *,
+            provider=None,
+            stop_on_first_known=None,
+            stop_on_unchanged_content=False,
+            updated_since=None,
+        ) -> None:
             conflicts.append(settings.mongo_conflict)
-            unchanged_flags.append(stop_on_unchanged_content)
+            updated_since_seen.append(updated_since)
             self.provider = provider or HKCERTProvider()
 
         async def run(self):
             return {
-                "stop_reason": "overlap",
+                "stop_reason": "timestamp_boundary",
                 "result_count": 0,
                 "vulnerabilities": [],
                 "mongo_sync": {"inserted": 0},
@@ -77,35 +85,34 @@ def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
     )
 
     assert conflicts == ["overwrite"]
-    assert unchanged_flags == [True]
+    assert updated_since_seen[0] is not None
 
 
-def test_run_catch_up_cycle_stops_on_overlap(monkeypatch) -> None:
+def test_run_catch_up_cycle_runs_provider_once_for_timestamp_boundary(monkeypatch) -> None:
     calls: list[str] = []
-    outputs = [
-        {
-            "stop_reason": "limit",
-            "result_count": 5,
-            "vulnerabilities": [{"details": {"hkcert": {}}}],
-            "mongo_sync": {"inserted": 5},
-        },
-        {
-            "stop_reason": "overlap",
-            "result_count": 0,
-            "vulnerabilities": [],
-            "mongo_sync": {"inserted": 0, "skipped": 2},
-        },
-    ]
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(
+            self,
+            settings,
+            *,
+            provider=None,
+            stop_on_first_known=None,
+            stop_on_unchanged_content=False,
+            updated_since=None,
+        ) -> None:
             self.provider = provider or HKCERTProvider()
-            assert stop_on_unchanged_content is True
+            assert stop_on_unchanged_content is False
+            assert updated_since is not None
 
         async def run(self):
-            output = outputs[min(len(calls), len(outputs) - 1)]
             calls.append(self.provider.key)
-            return output
+            return {
+                "stop_reason": "timestamp_boundary",
+                "result_count": 0,
+                "vulnerabilities": [],
+                "mongo_sync": {"inserted": 0, "skipped": 2},
+            }
 
     def fake_asyncio_run(coro):
         loop = asyncio.new_event_loop()
@@ -123,20 +130,20 @@ def test_run_catch_up_cycle_stops_on_overlap(monkeypatch) -> None:
 
     run_catch_up_cycle(default_scrape_settings(), max_runs_per_provider=10)
 
-    assert calls == ["hkcert", "hkcert"]
+    assert calls == ["hkcert"]
 
 
 def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
             self.provider = provider
 
         async def run(self):
             calls.append(self.provider.key)
             return {
-                "stop_reason": "overlap",
+                "stop_reason": "timestamp_boundary",
                 "result_count": 0,
                 "vulnerabilities": [],
                 "mongo_sync": {"inserted": 0},
@@ -162,17 +169,18 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
     assert calls == ["hkcert", "zeroday"]
 
 
-def test_run_catch_up_cycle_respects_max_runs(monkeypatch) -> None:
+def test_run_catch_up_cycle_uses_one_timestamp_run(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
             self.provider = provider or HKCERTProvider()
+            assert updated_since is not None
 
         async def run(self):
             calls.append(self.provider.key)
             return {
-                "stop_reason": "limit",
+                "stop_reason": "timestamp_boundary",
                 "result_count": 1,
                 "vulnerabilities": [{"details": {"hkcert": {}}}],
                 "mongo_sync": {"inserted": 1},
@@ -194,14 +202,14 @@ def test_run_catch_up_cycle_respects_max_runs(monkeypatch) -> None:
 
     run_catch_up_cycle(default_scrape_settings(), max_runs_per_provider=2)
 
-    assert calls == ["hkcert", "hkcert"]
+    assert calls == ["hkcert"]
 
 
-def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
+def test_run_catch_up_cycle_uses_per_provider_limit(monkeypatch) -> None:
     limits_seen: list[int] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
             limits_seen.append(settings.limit)
             self.settings = settings
             self.provider = provider or HKCERTProvider()
@@ -231,7 +239,7 @@ def test_run_catch_up_cycle_stops_at_per_provider_limit(monkeypatch) -> None:
 
     run_catch_up_cycle(default_scrape_settings(limit=25), max_runs_per_provider=10, batch_size=5)
 
-    assert limits_seen == [5, 5, 5, 5, 5]
+    assert limits_seen == [25]
 
 
 def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> None:
@@ -352,13 +360,13 @@ def test_run_catch_up_cycle_uses_configured_providers(monkeypatch, tmp_path) -> 
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
             self.provider = provider or HKCERTProvider()
 
         async def run(self):
             calls.append(self.provider.key)
             return {
-                "stop_reason": "overlap",
+                "stop_reason": "timestamp_boundary",
                 "result_count": 0,
                 "vulnerabilities": [],
                 "mongo_sync": {"inserted": 0},

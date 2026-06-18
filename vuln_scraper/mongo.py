@@ -10,6 +10,7 @@ from .config import ScraperSettings
 from .models import cve_codes as detail_cve_codes
 from .models import normalize_cve_code
 from .severity import severity_from_record
+from .timestamps import document_published_time, document_updated_time
 
 
 MongoClientFactory = Callable[[str], Any]
@@ -177,6 +178,8 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
         "cve_code": cve_code,
         "cve_codes": _normalized_document_cve_codes(document),
         "disclosure_date": document.get("disclosure_date"),
+        "published_time": document.get("published_time"),
+        "updated_time": document.get("updated_time"),
         "status": document.get("status"),
         "severity": document.get("severity") or "",
         "details": sanitize_details_for_content_compare(document.get("details") or {}),
@@ -230,6 +233,8 @@ def _ensure_indexes(collection: Any) -> None:
     collection.create_index("cve_codes")
     collection.create_index("related_cves.cve_code")
     collection.create_index("disclosure_date")
+    collection.create_index("published_time")
+    collection.create_index("updated_time")
     collection.create_index("status")
     collection.create_index("severity")
 
@@ -382,6 +387,8 @@ def build_mongo_document(record: dict[str, Any], output: dict[str, Any]) -> dict
     document.setdefault("details", {})
     document["details"] = sanitize_details_for_storage(document["details"])
     document["severity"] = severity_from_record(document) or ""
+    document["published_time"] = document_published_time(document)
+    document["updated_time"] = document_updated_time(document)
     document["scraped_at"] = output.get("scraped_at")
     if isinstance(record.get("source"), dict):
         document["source"] = record["source"]

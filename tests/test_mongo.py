@@ -61,10 +61,25 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
         ("cve_codes", False),
         ("related_cves.cve_code", False),
         ("disclosure_date", False),
+        ("published_time", False),
+        ("updated_time", False),
         ("status", False),
         ("severity", False),
     ]
     assert collection.documents["avd:2026-10001"]["type"] == "avd"
+
+
+def test_build_mongo_document_sets_normalized_timestamps() -> None:
+    document = build_mongo_document(
+        {
+            **record("2026-10001"),
+            "disclosure_date": "2026-06-18",
+        },
+        output_payload(),
+    )
+
+    assert document["published_time"] == "2026-06-17T16:00:00+00:00"
+    assert document["updated_time"] == "2026-06-17T16:00:00+00:00"
 
 
 def test_sync_stores_all_raw_output_records() -> None:
