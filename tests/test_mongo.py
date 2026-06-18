@@ -24,6 +24,7 @@ def test_build_mongo_document_sets_lowercase_identity_and_cve_code() -> None:
     assert document["type"] == "avd"
     assert document["code"] == "2026-10001"
     assert document["cve_code"] == "2026-10001"
+    assert document["cve_codes"] == ["2026-10001"]
     assert "cross_refs" not in document
     assert document["source"] == "test-source"
     assert document["severity"] == ""
@@ -57,6 +58,8 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
     assert collection.indexes == [
         ([("type", 1), ("code", 1)], True),
         ("cve_code", False),
+        ("cve_codes", False),
+        ("related_cves.cve_code", False),
         ("disclosure_date", False),
         ("status", False),
         ("severity", False),
@@ -82,6 +85,7 @@ def test_sync_stores_all_raw_output_records() -> None:
     assert result.inserted == 2
     assert set(collection.documents) == {"avd:2026-10001", "avd:2026-10002"}
     assert collection.documents["avd:2026-10002"]["cve_code"] is None
+    assert collection.documents["avd:2026-10002"]["cve_codes"] == []
 
 
 def test_sync_skips_conflicts_when_not_interactive() -> None:
@@ -141,7 +145,7 @@ def test_documents_content_match_detects_detail_changes() -> None:
     assert not documents_content_match(existing, incoming)
 
 
-def test_documents_content_match_ignores_hkcert_views() -> None:
+def test_build_mongo_document_strips_hkcert_views() -> None:
     details = {
         "hkcert": {
             "summary": "Example bulletin",
@@ -149,13 +153,70 @@ def test_documents_content_match_ignores_hkcert_views() -> None:
             "views": "1004",
         }
     }
-    existing = build_mongo_document(hkcert_record("example-bulletin", details=details), output_payload())
-    incoming_details = copy.deepcopy(details)
-    incoming_details["hkcert"]["views"] = "1005"
-    incoming = build_mongo_document(hkcert_record("example-bulletin", details=incoming_details), output_payload())
+    document = build_mongo_document(hkcert_record("example-bulletin", details=details), output_payload())
 
-    assert documents_content_match(existing, incoming)
-    assert documents_match(existing, incoming)
+    assert "views" not in document["details"]["hkcert"]
+
+
+def test_build_mongo_document_derives_hkcert_cve_codes_from_identifiers() -> None:
+    document = build_mongo_document(
+        hkcert_record(
+            "android-multiple-vulnerabilities",
+            details={
+                "hkcert": {
+                    "vulnerability_identifiers": [
+                        {"cve_id": "CVE-2025-48595"},
+                        {"cve_id": "CVE-2025-48633"},
+                    ]
+                }
+            },
+        ),
+        output_payload(),
+    )
+
+    assert document["cve_code"] == "2025-48595"
+    assert document["cve_codes"] == ["2025-48595", "2025-48633"]
+
+
+def test_sync_links_hkcert_cve_codes_to_existing_cve_documents() -> None:
+    hkcert_collection = FakeCollection()
+    cve_collection = FakeCollection()
+    cve_collection.documents["cve:2025-48595"] = {
+        "_id": "cve:2025-48595",
+        "type": "cve",
+        "code": "2025-48595",
+    }
+    settings = ScraperSettings(mongo_enabled=True)
+
+    result = sync_output_to_mongo(
+        output_payload(
+            [
+                hkcert_record(
+                    "android-multiple-vulnerabilities",
+                    details={
+                        "hkcert": {
+                            "vulnerability_identifiers": [
+                                {"cve_id": "CVE-2025-48595"},
+                                {"cve_id": "CVE-2025-48633"},
+                            ]
+                        }
+                    },
+                )
+            ]
+        ),
+        settings,
+        client_factory=fake_factory(
+            hkcert_collection,
+            {"hkcert": hkcert_collection, "cve": cve_collection},
+        ),
+    )
+
+    assert result.inserted == 1
+    document = hkcert_collection.documents["hkcert:android-multiple-vulnerabilities"]
+    assert document["related_cve_ids"] == ["cve:2025-48595"]
+    assert document["related_cves"] == [
+        {"collection": "cve", "document_id": "cve:2025-48595", "cve_code": "2025-48595"}
+    ]
 
 
 def test_sync_skips_unchanged_hkcert_when_only_views_change() -> None:
@@ -176,6 +237,7 @@ def test_sync_skips_unchanged_hkcert_when_only_views_change() -> None:
     assert result.unchanged == 1
     assert result.skipped == 1
     assert result.overwritten == 0
+    assert "views" not in collection.documents["hkcert:example-bulletin"]["details"]["hkcert"]
 
 
 def test_documents_content_match_ignores_qianxin_read_num_and_navigation() -> None:
@@ -286,44 +348,65 @@ def output_payload(vulnerabilities: list[dict] | None = None) -> dict:
     }
 
 
-def fake_factory(collection: "FakeCollection"):
+def fake_factory(collection: "FakeCollection", collections: dict[str, "FakeCollection"] | None = None):
     def create_client(uri: str) -> "FakeClient":
-        return FakeClient(collection)
+        return FakeClient(collection, collections)
 
     return create_client
 
 
 class FakeClient:
-    def __init__(self, collection: "FakeCollection") -> None:
-        self.collection = collection
+    def __init__(
+        self,
+        collection: "FakeCollection",
+        collections: dict[str, "FakeCollection"] | None = None,
+    ) -> None:
+        self.database = FakeDatabase(collection, collections)
         self.closed = False
 
     def __getitem__(self, name: str) -> "FakeDatabase":
-        return FakeDatabase(self.collection)
+        return self.database
 
     def close(self) -> None:
         self.closed = True
 
 
 class FakeDatabase:
-    def __init__(self, collection: "FakeCollection") -> None:
+    def __init__(
+        self,
+        collection: "FakeCollection",
+        collections: dict[str, "FakeCollection"] | None = None,
+    ) -> None:
         self.collection = collection
+        self.collections = dict(collections or {})
+        for item in [collection, *self.collections.values()]:
+            item.database = self
 
     def __getitem__(self, name: str) -> "FakeCollection":
-        return self.collection
+        return self.collections.get(name, self.collection)
 
 
 class FakeCollection:
     def __init__(self) -> None:
         self.documents: dict[str, dict] = {}
         self.indexes: list[tuple[str, bool]] = []
+        self.database = None
 
     def create_index(self, field: str, unique: bool = False) -> None:
         self.indexes.append((field, unique))
 
     def find_one(self, query: dict) -> dict | None:
-        document = self.documents.get(query["_id"])
-        return copy.deepcopy(document) if document is not None else None
+        for document in self.documents.values():
+            if _matches_query(document, query):
+                return copy.deepcopy(document)
+        return None
+
+    def find(self, query: dict, projection: dict | None = None):
+        return [
+            copy.deepcopy(document)
+            for document in self.documents.values()
+            if _matches_query(document, query)
+        ]
 
     def insert_one(self, document: dict) -> None:
         self.documents[document["_id"]] = copy.deepcopy(document)
@@ -340,3 +423,29 @@ class FakeCollection:
 class FakeDeleteResult:
     def __init__(self, deleted_count: int) -> None:
         self.deleted_count = deleted_count
+
+
+def _matches_query(document: dict, query: dict) -> bool:
+    if "$or" in query:
+        return any(_matches_query(document, condition) for condition in query["$or"])
+    for field, expected in query.items():
+        value = _field_value(document, field)
+        if isinstance(expected, dict) and "$in" in expected:
+            candidates = value if isinstance(value, list) else [value]
+            if not any(candidate in expected["$in"] for candidate in candidates):
+                return False
+        elif isinstance(value, list):
+            if expected not in value:
+                return False
+        elif value != expected:
+            return False
+    return True
+
+
+def _field_value(document: dict, field: str):
+    value = document
+    for part in field.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value

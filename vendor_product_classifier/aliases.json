@@ -1,0 +1,751 @@
+[
+  {
+    "vendor": "Cisco",
+    "product": "Catalyst SD-WAN Manager",
+    "aliases": [
+      "Cisco Catalyst SD-WAN Manager",
+      "Catalyst SD-WAN Manager",
+      "Cisco SD-WAN Manager",
+      "Cisco vManage",
+      "vManage"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "IOS XE",
+    "aliases": [
+      "Cisco IOS XE",
+      "Cisco IOS XE Software",
+      "IOS XE",
+      "IOS-XE",
+      "Cisco IOS-XE"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "IOS XR",
+    "aliases": [
+      "Cisco IOS XR",
+      "Cisco IOS XR Software",
+      "IOS XR",
+      "IOS-XR",
+      "Cisco IOS-XR"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "NX-OS",
+    "aliases": [
+      "Cisco NX-OS",
+      "Cisco NX-OS Software",
+      "NX-OS",
+      "NX OS"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "IOS",
+    "aliases": [
+      "Cisco IOS",
+      "Cisco IOS Software"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "ASA Software",
+    "aliases": [
+      "Cisco ASA Software",
+      "Cisco Adaptive Security Appliance Software",
+      "Adaptive Security Appliance Software"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Firepower Threat Defense",
+    "aliases": [
+      "Cisco Firepower Threat Defense",
+      "Firepower Threat Defense",
+      "Cisco FTD",
+      "FTD Software"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Secure Firewall Management Center",
+    "aliases": [
+      "Cisco Secure Firewall Management Center",
+      "Secure Firewall Management Center",
+      "Cisco Firepower Management Center",
+      "Firepower Management Center",
+      "Cisco FMC",
+      "FMC"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Identity Services Engine",
+    "aliases": [
+      "Cisco Identity Services Engine",
+      "Identity Services Engine",
+      "Cisco ISE",
+      "ISE"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Unified Communications Manager",
+    "aliases": [
+      "Cisco Unified Communications Manager",
+      "Unified Communications Manager",
+      "Cisco Unified CM",
+      "Cisco CUCM",
+      "CUCM"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Secure Client",
+    "aliases": [
+      "Cisco Secure Client",
+      "Cisco AnyConnect Secure Mobility Client",
+      "AnyConnect Secure Mobility Client",
+      "Cisco AnyConnect",
+      "AnyConnect"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Webex Meetings",
+    "aliases": [
+      "Cisco Webex Meetings",
+      "Webex Meetings",
+      "Cisco Webex"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Catalyst Center",
+    "aliases": [
+      "Cisco Catalyst Center",
+      "Catalyst Center",
+      "Cisco DNA Center",
+      "DNA Center"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "UCS Manager",
+    "aliases": [
+      "Cisco UCS Manager",
+      "UCS Manager",
+      "Cisco Unified Computing System Manager"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Secure Email Gateway",
+    "aliases": [
+      "Cisco Secure Email Gateway",
+      "Cisco Email Security Appliance",
+      "Email Security Appliance",
+      "Cisco ESA"
+    ]
+  },
+  {
+    "vendor": "Cisco",
+    "product": "Secure Web Appliance",
+    "aliases": [
+      "Cisco Secure Web Appliance",
+      "Cisco Web Security Appliance",
+      "Web Security Appliance",
+      "Cisco WSA"
+    ]
+  },
+  {
+    "vendor": "Debian",
+    "product": "Linux",
+    "aliases": [
+      "Debian Linux",
+      "Debian GNU/Linux",
+      "Debian GNU Linux",
+      "Debian"
+    ]
+  },
+  {
+    "vendor": "Oracle",
+    "product": "Linux",
+    "aliases": [
+      "Oracle Linux",
+      "Oracle Enterprise Linux",
+      "OEL"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "Enterprise Linux",
+    "aliases": [
+      "Red Hat Enterprise Linux",
+      "Red Hat Enterprise Linux Server",
+      "RHEL",
+      "RHEL Server"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "OpenShift Container Platform",
+    "aliases": [
+      "Red Hat OpenShift Container Platform",
+      "OpenShift Container Platform",
+      "Red Hat OpenShift",
+      "OpenShift"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "Ansible Automation Platform",
+    "aliases": [
+      "Red Hat Ansible Automation Platform",
+      "Ansible Automation Platform",
+      "Red Hat Ansible",
+      "Ansible Tower"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "Satellite",
+    "aliases": [
+      "Red Hat Satellite",
+      "Satellite Server",
+      "Satellite Capsule"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "JBoss Enterprise Application Platform",
+    "aliases": [
+      "Red Hat JBoss Enterprise Application Platform",
+      "JBoss Enterprise Application Platform",
+      "JBoss EAP",
+      "Red Hat JBoss EAP"
+    ]
+  },
+  {
+    "vendor": "Red Hat",
+    "product": "OpenStack Platform",
+    "aliases": [
+      "Red Hat OpenStack Platform",
+      "OpenStack Platform",
+      "RHOSP"
+    ]
+  },
+  {
+    "vendor": "Canonical",
+    "product": "Ubuntu",
+    "aliases": [
+      "Canonical Ubuntu",
+      "Ubuntu Linux",
+      "Ubuntu"
+    ]
+  },
+  {
+    "vendor": "SUSE",
+    "product": "Linux Enterprise Server",
+    "aliases": [
+      "SUSE Linux Enterprise Server",
+      "SUSE Linux Enterprise",
+      "SLES"
+    ]
+  },
+  {
+    "vendor": "Amazon",
+    "product": "Linux",
+    "aliases": [
+      "Amazon Linux",
+      "Amazon Linux 2",
+      "Amazon Linux 2023",
+      "Amazon Linux AMI"
+    ]
+  },
+  {
+    "vendor": "Rocky Linux",
+    "product": "Linux",
+    "aliases": [
+      "Rocky Linux"
+    ]
+  },
+  {
+    "vendor": "AlmaLinux",
+    "product": "Linux",
+    "aliases": [
+      "AlmaLinux",
+      "AlmaLinux OS"
+    ]
+  },
+  {
+    "vendor": "Linux",
+    "product": "Kernel",
+    "aliases": [
+      "Linux Kernel",
+      "Linux kernel"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Windows",
+    "aliases": [
+      "Microsoft Windows",
+      "Microsoft Windows 10",
+      "Microsoft Windows 11",
+      "Windows 10",
+      "Windows 11"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Windows Server",
+    "aliases": [
+      "Microsoft Windows Server",
+      "Windows Server",
+      "Windows Server 2012",
+      "Windows Server 2016",
+      "Windows Server 2019",
+      "Windows Server 2022",
+      "Windows Server 2025"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Edge",
+    "aliases": [
+      "Microsoft Edge",
+      "Microsoft Edge Chromium",
+      "Edge Chromium"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Exchange Server",
+    "aliases": [
+      "Microsoft Exchange Server",
+      "Exchange Server",
+      "Microsoft Exchange"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "SharePoint Server",
+    "aliases": [
+      "Microsoft SharePoint Server",
+      "SharePoint Server",
+      "Microsoft SharePoint"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "SQL Server",
+    "aliases": [
+      "Microsoft SQL Server",
+      "SQL Server",
+      "Microsoft SQL"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Office",
+    "aliases": [
+      "Microsoft Office",
+      "Microsoft 365 Apps",
+      "Office 365",
+      "Microsoft 365"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Teams",
+    "aliases": [
+      "Microsoft Teams",
+      "Teams"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Azure",
+    "aliases": [
+      "Microsoft Azure",
+      "Azure"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": ".NET",
+    "aliases": [
+      "Microsoft .NET",
+      ".NET Framework",
+      ".NET Core",
+      "ASP.NET Core",
+      "Microsoft ASP.NET"
+    ]
+  },
+  {
+    "vendor": "Microsoft",
+    "product": "Malware Protection Engine",
+    "aliases": [
+      "Microsoft Malware Protection Engine",
+      "Malware Protection Engine",
+      "Microsoft Defender Malware Protection Engine",
+      "Microsoft Windows Defender Malware Protection Engine",
+      "Windows Defender Malware Protection Engine",
+      "Microsoft Defender Antivirus Malware Protection Engine",
+      "Defender Malware Protection Engine"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "PAN-OS",
+    "aliases": [
+      "Palo Alto Networks PAN-OS",
+      "Palo Alto PAN-OS",
+      "PAN-OS",
+      "PAN OS"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "GlobalProtect",
+    "aliases": [
+      "Palo Alto Networks GlobalProtect",
+      "Palo Alto GlobalProtect",
+      "GlobalProtect"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "Prisma Access",
+    "aliases": [
+      "Palo Alto Networks Prisma Access",
+      "Prisma Access"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "Cortex XDR",
+    "aliases": [
+      "Palo Alto Networks Cortex XDR",
+      "Cortex XDR"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "Cortex XSOAR",
+    "aliases": [
+      "Palo Alto Networks Cortex XSOAR",
+      "Cortex XSOAR",
+      "Demisto"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "Panorama",
+    "aliases": [
+      "Palo Alto Networks Panorama",
+      "Palo Alto Panorama",
+      "Panorama"
+    ]
+  },
+  {
+    "vendor": "Palo Alto Networks",
+    "product": "Expedition",
+    "aliases": [
+      "Palo Alto Networks Expedition",
+      "Palo Alto Expedition",
+      "Expedition"
+    ]
+  },
+  {
+    "vendor": "Google",
+    "product": "Android",
+    "aliases": [
+      "Google Android",
+      "Android",
+      "Android OS",
+      "Android Open Source Project",
+      "AOSP"
+    ]
+  },
+  {
+    "vendor": "Google",
+    "product": "Chrome",
+    "aliases": [
+      "Google Chrome",
+      "Chrome",
+      "Chrome Browser",
+      "Chrome Desktop",
+      "Chrome for Android",
+      "Chrome for iOS"
+    ]
+  },
+  {
+    "vendor": "Google",
+    "product": "Chromium",
+    "aliases": [
+      "Google Chromium",
+      "Chromium",
+      "Chromium Browser"
+    ]
+  },
+  {
+    "vendor": "Google",
+    "product": "ChromeOS",
+    "aliases": [
+      "Google ChromeOS",
+      "Google Chrome OS",
+      "ChromeOS",
+      "Chrome OS"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "Acrobat Reader",
+    "aliases": [
+      "Adobe Acrobat Reader",
+      "Acrobat Reader",
+      "Adobe Reader"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "Acrobat",
+    "aliases": [
+      "Adobe Acrobat",
+      "Acrobat DC",
+      "Adobe Acrobat DC"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "ColdFusion",
+    "aliases": [
+      "Adobe ColdFusion",
+      "ColdFusion"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "Commerce",
+    "aliases": [
+      "Adobe Commerce",
+      "Magento Open Source",
+      "Magento"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "Experience Manager",
+    "aliases": [
+      "Adobe Experience Manager",
+      "Adobe AEM",
+      "AEM"
+    ]
+  },
+  {
+    "vendor": "Adobe",
+    "product": "Photoshop",
+    "aliases": [
+      "Adobe Photoshop",
+      "Photoshop"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "QTS",
+    "aliases": [
+      "QNAP Systems QTS",
+      "QNAP QTS",
+      "QTS"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "QuTS hero",
+    "aliases": [
+      "QNAP Systems QuTS hero",
+      "QNAP QuTS hero",
+      "QuTS hero"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "QuTScloud",
+    "aliases": [
+      "QNAP Systems QuTScloud",
+      "QNAP QuTScloud",
+      "QuTScloud"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "QTS hero",
+    "aliases": [
+      "QNAP Systems QTS hero",
+      "QNAP QTS hero",
+      "QTS hero"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "Qsync Central",
+    "aliases": [
+      "QNAP Systems Qsync Central",
+      "QNAP Qsync Central",
+      "Qsync Central"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "Video Station",
+    "aliases": [
+      "QNAP Systems Video Station",
+      "QNAP Video Station",
+      "Video Station"
+    ]
+  },
+  {
+    "vendor": "QNAP Systems",
+    "product": "Music Station",
+    "aliases": [
+      "QNAP Systems Music Station",
+      "QNAP Music Station",
+      "Music Station"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "GPU Display Driver",
+    "aliases": [
+      "NVIDIA GPU Display Driver",
+      "NVIDIA Display Driver",
+      "NVIDIA Graphics Driver",
+      "NVIDIA GPU Driver",
+      "NVIDIA Windows GPU Display Driver",
+      "NVIDIA Linux GPU Display Driver"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "CUDA Toolkit",
+    "aliases": [
+      "NVIDIA CUDA Toolkit",
+      "CUDA Toolkit",
+      "NVIDIA CUDA"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "vGPU Software",
+    "aliases": [
+      "NVIDIA vGPU Software",
+      "NVIDIA Virtual GPU Software",
+      "NVIDIA vGPU",
+      "Virtual GPU Software"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "DGX",
+    "aliases": [
+      "NVIDIA DGX",
+      "NVIDIA DGX Systems",
+      "DGX Systems"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "BlueField DPU",
+    "aliases": [
+      "NVIDIA BlueField DPU",
+      "BlueField DPU",
+      "NVIDIA BlueField"
+    ]
+  },
+  {
+    "vendor": "NVIDIA",
+    "product": "Jetson",
+    "aliases": [
+      "NVIDIA Jetson",
+      "Jetson Linux",
+      "Jetson AGX",
+      "Jetson Xavier",
+      "Jetson Orin"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "Archer",
+    "aliases": [
+      "TP-Link Archer",
+      "TP Link Archer",
+      "Archer Router",
+      "Archer AX",
+      "Archer C"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "Omada",
+    "aliases": [
+      "TP-Link Omada",
+      "TP Link Omada",
+      "Omada Controller",
+      "Omada SDN Controller",
+      "Omada Software Controller",
+      "Omada Hardware Controller"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "Deco",
+    "aliases": [
+      "TP-Link Deco",
+      "TP Link Deco",
+      "Deco Mesh",
+      "Deco Router"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "Tapo",
+    "aliases": [
+      "TP-Link Tapo",
+      "TP Link Tapo",
+      "Tapo Camera",
+      "Tapo Smart"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "Kasa",
+    "aliases": [
+      "TP-Link Kasa",
+      "TP Link Kasa",
+      "Kasa Smart"
+    ]
+  },
+  {
+    "vendor": "TP-Link",
+    "product": "VIGI",
+    "aliases": [
+      "TP-Link VIGI",
+      "TP Link VIGI",
+      "VIGI Camera",
+      "VIGI NVR"
+    ]
+  },
+  {
+    "vendor": "Fortinet",
+    "product": "FortiOS",
+    "aliases": [
+      "Fortinet FortiOS",
+      "FortiOS"
+    ]
+  }
+]

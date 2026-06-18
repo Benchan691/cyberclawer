@@ -13,6 +13,7 @@ from vuln_scraper.severity import normalize_severity
 
 
 _CISCO_PARAGRAPH_TAG_RE = re.compile(r"</?p(?:\s[^>]*)?>", re.IGNORECASE)
+_CVE_CODE_RE = re.compile(r"^(?:CVE-)?(\d{4}-\d{4,})$", re.IGNORECASE)
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
 
@@ -83,7 +84,11 @@ def _hkcert(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=detail.get("summary") or detail.get("intro"),
         impacts=detail.get("risk_level") or _first_nested(products, "risk_level"),
         affected=affected,
-        cve=document.get("cve_code") or _first_nested(detail.get("vulnerability_identifiers"), "cve_id"),
+        cve=(
+            _join(_prefixed_cve_codes(document.get("cve_codes")))
+            or _prefixed_cve_code(document.get("cve_code"))
+            or _join(_nested_values(detail.get("vulnerability_identifiers"), "cve_id"))
+        ),
         recommendation=detail.get("solutions"),
         related_link=_join(detail.get("related_links")),
     )
@@ -468,6 +473,23 @@ def _join(values: Any) -> str:
 
 def _join_dicts(values: Any, formatter: Callable[[dict[str, Any]], str]) -> str:
     return _join(formatter(item) for item in _dicts(values))
+
+
+def _prefixed_cve_code(value: Any) -> str:
+    text = _string(value)
+    match = _CVE_CODE_RE.fullmatch(text)
+    return f"CVE-{match.group(1).upper()}" if match else text
+
+
+def _prefixed_cve_codes(values: Any) -> list[str]:
+    codes: list[str] = []
+    seen: set[str] = set()
+    for value in _string_array(values):
+        code = _prefixed_cve_code(value)
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
 
 
 def _dicts(values: Any) -> list[dict[str, Any]]:
@@ -893,7 +915,11 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
 def _mongo_cve(provider: str, detail: str) -> dict[str, Any]:
     sources: dict[str, list[Any]] = {
         "avd": ["$cve_code", f"{detail}.cve_id"],
-        "hkcert": ["$cve_code", _mfirst_nested(f"{detail}.vulnerability_identifiers", "cve_id")],
+        "hkcert": [
+            _mprefixed_cve_codes("$cve_codes"),
+            _mprefixed_cve_code("$cve_code"),
+            _mjoin_values(f"{detail}.vulnerability_identifiers", "cve_id"),
+        ],
         "cve": [f"{detail}.cve_id", "$code"],
         "cisco": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
         "github_advisory": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
@@ -1069,6 +1095,29 @@ def _mfirst_item(value: Any) -> dict[str, Any]:
 
 def _mjoin(value: Any) -> dict[str, Any]:
     return _mjoin_mapped(value, _mstr("$$item"))
+
+
+def _mprefixed_cve_code(value: Any) -> dict[str, Any]:
+    text = _mstr(value)
+    trimmed = {"$trim": {"input": text}}
+    upper = {"$toUpper": trimmed}
+    return {
+        "$cond": [
+            {"$eq": [trimmed, ""]},
+            "",
+            {
+                "$cond": [
+                    {"$regexMatch": {"input": upper, "regex": "^CVE-"}},
+                    upper,
+                    {"$concat": ["CVE-", upper]},
+                ]
+            },
+        ]
+    }
+
+
+def _mprefixed_cve_codes(value: Any) -> dict[str, Any]:
+    return _mjoin_mapped(value, _mprefixed_cve_code("$$item"))
 
 
 def _mextract_urls(value: Any) -> dict[str, Any]:

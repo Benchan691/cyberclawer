@@ -50,7 +50,7 @@ def test_parse_detail_page_extracts_required_hkcert_sections() -> None:
     assert detail["risk_level"] == "Medium Risk"
     assert detail["release_date"] == "1 Jun 2026"
     assert detail["last_update_date"] == "2 Jun 2026"
-    assert detail["views"] == "1004"
+    assert "views" not in detail
     assert detail["table"] == []
 
 
@@ -86,6 +86,7 @@ def test_normalize_hkcert_detail_converts_legacy_intro_tables() -> None:
     normalized = normalize_hkcert_detail(
         {
             "intro": "Adobe Premiere Pro Medium Risk Remote Code Execution APSB26-46",
+            "views": "1004",
             "intro_tables": [
                 {
                     "headers": ["vulnerable_product", "risk_level", "impacts", "notes", "details"],
@@ -103,6 +104,7 @@ def test_normalize_hkcert_detail_converts_legacy_intro_tables() -> None:
     )
 
     assert "intro_tables" not in normalized
+    assert "views" not in normalized
     assert normalized["table"] == [
         {
             "name": "Adobe Premiere Pro",

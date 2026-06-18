@@ -1,0 +1,31 @@
+x-classifier-service: &classifier-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment:
+    PYTHONUNBUFFERED: "1"
+    CLASSIFIER_CONFIG: /app/config/classifier.json
+    CLASSIFIER_LOG_LEVEL: ${CLASSIFIER_LOG_LEVEL:-INFO}
+    SENTENCE_TRANSFORMERS_HOME: /app/models
+  volumes:
+    - ./config/classifier.json:/app/config/classifier.json:ro
+    - ./aliases.json:/app/aliases.json:ro
+    - ./models:/app/models
+
+services:
+  classifier-scanner:
+    <<: *classifier-service
+    command: ["python", "classifier_scanner.py"]
+
+  classifier-worker:
+    <<: *classifier-service
+    command: ["python", "classifier_worker.py"]
+
+  zero-shot-worker:
+    <<: *classifier-service
+    command: ["python", "zero_shot_worker.py"]

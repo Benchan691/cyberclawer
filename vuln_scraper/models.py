@@ -60,16 +60,20 @@ class ListEntry:
         effective_detail = detail if detail is not None else self.embedded_detail
         details = {provider: effective_detail} if effective_detail is not None else {}
         if provider == "cve":
+            codes: list[str] = []
             cve_code = None
         elif provider == "cisco":
+            codes = cve_codes(effective_detail)
             cve_code = normalize_cve_code(_detail_value(effective_detail, "cve_id"))
         else:
-            cve_code = primary_cve_code(effective_detail)
+            codes = cve_codes(effective_detail)
+            cve_code = codes[0] if codes else None
 
         record: dict[str, Any] = {
             "type": provider,
             "code": self.identity.code,
             "cve_code": cve_code,
+            "cve_codes": codes,
             "title": self.title,
             "vuln_type": self.vuln_type,
             "disclosure_date": self.disclosure_date,
@@ -133,14 +137,22 @@ def normalize_cve_code(value: str | None) -> str | None:
 
 
 def primary_cve_code(detail: dict[str, Any] | None) -> str | None:
-    if not isinstance(detail, dict):
-        return None
+    codes = cve_codes(detail)
+    return codes[0] if codes else None
 
+
+def cve_codes(detail: dict[str, Any] | None) -> list[str]:
+    if not isinstance(detail, dict):
+        return []
+
+    codes: list[str] = []
+    seen: set[str] = set()
     for cve_id in _iter_cve_ids(detail):
         normalized = normalize_cve_code(cve_id)
-        if normalized:
-            return normalized
-    return None
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            codes.append(normalized)
+    return codes
 
 
 def _iter_cve_ids(detail: dict[str, Any]) -> Iterable[str]:

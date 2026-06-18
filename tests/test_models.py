@@ -1,6 +1,12 @@
 import pytest
 
-from vuln_scraper.models import ListEntry, VulnerabilityId, normalize_cve_code, primary_cve_code
+from vuln_scraper.models import (
+    ListEntry,
+    VulnerabilityId,
+    cve_codes,
+    normalize_cve_code,
+    primary_cve_code,
+)
 
 
 def test_primary_cve_code_reads_raw_camel_case_code() -> None:
@@ -41,6 +47,18 @@ def test_primary_cve_code_uses_first_detail_identifier() -> None:
     )
 
 
+def test_cve_codes_returns_all_unique_detail_identifiers() -> None:
+    assert cve_codes(
+        {
+            "vulnerability_identifiers": [
+                {"cve_id": "CVE-2025-48595"},
+                {"cve_id": "CVE-2025-48633"},
+                {"cve_id": "CVE-2025-48595"},
+            ]
+        }
+    ) == ["2025-48595", "2025-48633"]
+
+
 def test_list_entry_builds_cve_code_from_vulnerability_identifiers() -> None:
     entry = ListEntry(
         identity=VulnerabilityId(type="HKCERT", code="android-multiple-vulnerabilities_20250601"),
@@ -56,7 +74,7 @@ def test_list_entry_builds_cve_code_from_vulnerability_identifiers() -> None:
         {
             "vulnerability_identifiers": [
                 {"cve_id": "CVE-2025-48595"},
-                {"cve_id": "CVE-2025-48595"},
+                {"cve_id": "CVE-2025-48633"},
             ]
         },
         detail_url="https://www.hkcert.org/security-bulletin/android-multiple-vulnerabilities_20250601",
@@ -64,5 +82,6 @@ def test_list_entry_builds_cve_code_from_vulnerability_identifiers() -> None:
 
     assert record["type"] == "hkcert"
     assert record["cve_code"] == "2025-48595"
+    assert record["cve_codes"] == ["2025-48595", "2025-48633"]
     assert "cross_refs" not in record
     assert "hkcert" in record["details"]

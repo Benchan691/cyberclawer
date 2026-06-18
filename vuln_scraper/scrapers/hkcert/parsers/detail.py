@@ -50,7 +50,6 @@ class HKCERTDetailRecord:
     risk_level: str | None = None
     release_date: str | None = None
     last_update_date: str | None = None
-    views: str | None = None
     summary: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -60,7 +59,7 @@ class HKCERTDetailRecord:
 def parse_detail_page(html: str) -> HKCERTDetailRecord:
     soup = BeautifulSoup(html, "lxml")
     sections = {key: _section_nodes(soup, label) for key, label in SECTION_LABELS.items()}
-    release_date, last_update_date, views = _metadata(soup)
+    release_date, last_update_date = _metadata(soup)
 
     table_rows = _table_rows_from_intro(soup)
     identifiers = _vulnerability_identifiers(sections["vulnerability_identifiers"])
@@ -80,7 +79,6 @@ def parse_detail_page(html: str) -> HKCERTDetailRecord:
         risk_level=_risk_level(soup),
         release_date=release_date,
         last_update_date=last_update_date,
-        views=views,
         summary=_intro(soup) or _table_rows_summary(table_rows),
     )
 
@@ -100,6 +98,7 @@ def _intro(soup: BeautifulSoup) -> str | None:
 def normalize_hkcert_detail(detail: dict[str, Any]) -> dict[str, Any]:
     """Normalize stored hkcert detail payloads to the current MongoDB schema."""
     normalized = dict(detail)
+    normalized.pop("views", None)
     if "intro_tables" in normalized:
         rows: list[dict[str, str | None]] = []
         for intro_table in normalized.pop("intro_tables", []):
@@ -339,13 +338,11 @@ def _risk_level(soup: BeautifulSoup) -> str | None:
     return None
 
 
-def _metadata(soup: BeautifulSoup) -> tuple[str | None, str | None, str | None]:
+def _metadata(soup: BeautifulSoup) -> tuple[str | None, str | None]:
     text = _clean_text(soup.select_one(".page-date")) or _clean_text(soup.select_one(".listingcard__info"))
     release_date = _metadata_match(text, "Release Date")
     last_update_date = _metadata_match(text, "Last Update Date")
-    views_match = re.search(r"(\d[\d,]*)\s+Views", text)
-    views = views_match.group(1).replace(",", "") if views_match else None
-    return release_date, last_update_date, views
+    return release_date, last_update_date
 
 
 def _metadata_match(text: str, label: str) -> str | None:

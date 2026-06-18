@@ -12,7 +12,23 @@
 
 [scrapers.catch_up]
 providers = [
-    "hkcert"
+    "avd",
+    "cisco",
+    "cnnvd",
+    "cnvd",
+    "govcert",
+    "github_advisory",
+    "hikvision",
+    "hkcert",
+    "huawei_sa",
+    "infosec",
+    "juniper",
+    "msrc",
+    "paloalto",
+    "qianxin",
+    "ransomwarelive",
+    "splunk",
+    "zeroday",
 ]
 
 [scrapers.defaults]

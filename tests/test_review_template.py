@@ -73,14 +73,21 @@ def test_avd_uses_danger_level_and_software_without_impact_text() -> None:
 
 def test_hkcert_uses_risk_level_and_product_table_then_system_fallback() -> None:
     table_template = review_template_from_document(
-        document(
-            "hkcert",
-            {
-                "risk_level": "High Risk",
-                "table": [{"name": "Product", "risk_level": "Medium", "details": "< 2.0"}],
-                "systems_affected": ["Fallback system"],
-            },
-        )
+        {
+            **document(
+                "hkcert",
+                {
+                    "risk_level": "High Risk",
+                    "table": [{"name": "Product", "risk_level": "Medium", "details": "< 2.0"}],
+                    "systems_affected": ["Fallback system"],
+                    "vulnerability_identifiers": [
+                        {"cve_id": "CVE-2026-1000"},
+                        {"cve_id": "CVE-2026-2000"},
+                    ],
+                },
+            ),
+            "cve_codes": ["2026-1000", "2026-2000"],
+        }
     )
     fallback_template = review_template_from_document(
         document("hkcert", {"table": [], "systems_affected": ["Windows Server"]})
@@ -88,6 +95,7 @@ def test_hkcert_uses_risk_level_and_product_table_then_system_fallback() -> None
 
     assert table_template["impacts"] == "High"
     assert table_template["affected"] == ["Product < 2.0"]
+    assert table_template["cve"] == "CVE-2026-1000\nCVE-2026-2000"
     assert fallback_template["affected"] == ["Windows Server"]
 
 

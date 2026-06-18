@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .config import ScraperSettings
+from .models import cve_codes as detail_cve_codes
 from .models import normalize_cve_code
 from .severity import severity_from_record
 
@@ -128,20 +129,25 @@ def documents_content_match(existing: dict[str, Any], document: dict[str, Any]) 
 
 
 _VOLATILE_PROVIDER_DETAIL_FIELDS: dict[str, frozenset[str]] = {
-    # HKCERT page view counters change on every request and must not affect catch-up overlap.
-    "hkcert": frozenset({"views"}),
     # Qianxin read counters and article navigation metadata change between API calls.
     "qianxin": frozenset({"read_num", "prev_article", "next_article", "raw"}),
 }
 
 
-def sanitize_details_for_content_compare(details: dict[str, Any]) -> dict[str, Any]:
+def sanitize_details_for_storage(details: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(details, dict):
+        return {}
     sanitized = copy.deepcopy(details)
     hkcert = sanitized.get("hkcert")
     if isinstance(hkcert, dict):
         from vuln_scraper.scrapers.hkcert.parsers.detail import normalize_hkcert_detail
 
         sanitized["hkcert"] = normalize_hkcert_detail(hkcert)
+    return sanitized
+
+
+def sanitize_details_for_content_compare(details: dict[str, Any]) -> dict[str, Any]:
+    sanitized = sanitize_details_for_storage(details)
 
     qianxin = sanitized.get("qianxin")
     if isinstance(qianxin, dict):
@@ -169,6 +175,7 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
     return {
         "title": document.get("title"),
         "cve_code": cve_code,
+        "cve_codes": _normalized_document_cve_codes(document),
         "disclosure_date": document.get("disclosure_date"),
         "status": document.get("status"),
         "severity": document.get("severity") or "",
@@ -176,12 +183,153 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalized_document_cve_codes(document: dict[str, Any]) -> list[str]:
+    codes = _normalize_cve_codes(document.get("cve_codes"))
+    cve_code = normalize_cve_code(str(document.get("cve_code"))) if document.get("cve_code") else None
+    if cve_code and cve_code not in codes:
+        codes.insert(0, cve_code)
+    return codes
+
+
+def _normalize_cve_codes(values: Any) -> list[str]:
+    if values in (None, "", [], {}):
+        return []
+    candidates = values if isinstance(values, list) else [values]
+    codes: list[str] = []
+    seen: set[str] = set()
+    for value in candidates:
+        if value in (None, ""):
+            continue
+        code = normalize_cve_code(str(value))
+        if code is None:
+            raise ValueError(f"invalid cve_codes item: {value!r}")
+        if code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
+
+
+def _cve_codes_from_details(details: Any) -> list[str]:
+    if not isinstance(details, dict):
+        return []
+    codes: list[str] = []
+    seen: set[str] = set()
+    for detail in details.values():
+        if not isinstance(detail, dict):
+            continue
+        for code in detail_cve_codes(detail):
+            if code not in seen:
+                seen.add(code)
+                codes.append(code)
+    return codes
+
+
 def _ensure_indexes(collection: Any) -> None:
     collection.create_index([("type", 1), ("code", 1)], unique=True)
     collection.create_index("cve_code")
+    collection.create_index("cve_codes")
+    collection.create_index("related_cves.cve_code")
     collection.create_index("disclosure_date")
     collection.create_index("status")
     collection.create_index("severity")
+
+
+def _attach_related_cves(collection: Any, document: dict[str, Any]) -> None:
+    document.pop("related_cves", None)
+    document.pop("related_cve_ids", None)
+
+    codes = document.get("cve_codes") or []
+    if not codes:
+        return
+
+    database = getattr(collection, "database", None)
+    if database is None:
+        return
+
+    links = _related_cve_links(database, codes)
+    if not links:
+        return
+    document["related_cves"] = links
+    document["related_cve_ids"] = [link["document_id"] for link in links]
+
+
+def _related_cve_links(database: Any, codes: list[str]) -> list[dict[str, str]]:
+    requested = list(dict.fromkeys(codes))
+    query = _related_cve_query(requested)
+    if not query:
+        return []
+
+    try:
+        documents = database["cve"].find(
+            query,
+            {"_id": 1, "code": 1, "cve_code": 1, "cve_codes": 1, "details.cve.cve_id": 1},
+        )
+    except Exception:
+        return []
+
+    links_by_code: dict[str, dict[str, str]] = {}
+    requested_set = set(requested)
+    for cve_document in documents:
+        document_id = str(cve_document.get("_id") or "")
+        document_codes = _cve_codes_from_cve_document(cve_document)
+        for code in document_codes:
+            if code in requested_set and code not in links_by_code:
+                links_by_code[code] = {
+                    "collection": "cve",
+                    "document_id": document_id or f"cve:{code}",
+                    "cve_code": code,
+                }
+
+    return [links_by_code[code] for code in requested if code in links_by_code]
+
+
+def _related_cve_query(codes: list[str]) -> dict[str, Any]:
+    if not codes:
+        return {}
+    conditions = []
+    for code in codes:
+        prefixed = f"CVE-{code}"
+        forms = [code, prefixed]
+        conditions.extend(
+            [
+                {"_id": {"$in": [f"cve:{form}" for form in forms]}},
+                {"code": {"$in": forms}},
+                {"cve_code": {"$in": forms}},
+                {"cve_codes": {"$in": forms}},
+                {"details.cve.cve_id": {"$in": forms}},
+            ]
+        )
+    return {"$or": conditions}
+
+
+def _cve_codes_from_cve_document(document: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    document_id = document.get("_id")
+    if isinstance(document_id, str):
+        _, separator, suffix = document_id.partition(":")
+        if separator:
+            values.append(suffix)
+    for field in ("code", "cve_code"):
+        values.append(document.get(field))
+    raw_codes = document.get("cve_codes")
+    if isinstance(raw_codes, list):
+        values.extend(raw_codes)
+    detail = document.get("details")
+    if isinstance(detail, dict):
+        cve_detail = detail.get("cve")
+        if isinstance(cve_detail, dict):
+            values.append(cve_detail.get("cve_id"))
+
+    codes: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in (None, ""):
+            continue
+        code = normalize_cve_code(str(value))
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
 
 
 def _sync_records(
@@ -193,6 +341,7 @@ def _sync_records(
     for record in output.get("vulnerabilities", []):
         try:
             document = build_mongo_document(record, output)
+            _attach_related_cves(collection, document)
             _sync_one(collection, document, settings, result)
         except Exception as exc:
             result.errors.append(
@@ -220,9 +369,18 @@ def build_mongo_document(record: dict[str, Any], output: dict[str, Any]) -> dict
     cve_code = normalize_cve_code(str(raw_cve_code)) if raw_cve_code is not None else None
     if raw_cve_code is not None and cve_code is None:
         raise ValueError(f"invalid cve_code: {raw_cve_code!r}")
+    cve_codes = _normalize_cve_codes(document.get("cve_codes"))
+    if not cve_codes:
+        cve_codes = _cve_codes_from_details(document.get("details"))
+    if cve_code and cve_code not in cve_codes:
+        cve_codes.insert(0, cve_code)
+    elif cve_code is None and cve_codes:
+        cve_code = cve_codes[0]
     document["cve_code"] = cve_code
+    document["cve_codes"] = cve_codes
     document.pop("cross_refs", None)
     document.setdefault("details", {})
+    document["details"] = sanitize_details_for_storage(document["details"])
     document["severity"] = severity_from_record(document) or ""
     document["scraped_at"] = output.get("scraped_at")
     if isinstance(record.get("source"), dict):
