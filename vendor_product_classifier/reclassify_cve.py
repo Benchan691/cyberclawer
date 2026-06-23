@@ -15,11 +15,12 @@ try:
         utc_now_iso,
         write_classification,
     )
-    from .zero_shot_worker import (
+    from .zero_shot import (
         EmbeddingZeroShotClassifier,
-        _disabled_classification,
-        _low_confidence_classification,
-        _success_classification,
+        disabled_classification,
+        low_confidence_classification,
+        success_classification,
+        zero_shot_from_config,
     )
 except ImportError:
     from cpe_dictionary import CpeDictionaryLookup, cpe_fingerprint
@@ -31,11 +32,12 @@ except ImportError:
         utc_now_iso,
         write_classification,
     )
-    from zero_shot_worker import (
+    from zero_shot import (
         EmbeddingZeroShotClassifier,
-        _disabled_classification,
-        _low_confidence_classification,
-        _success_classification,
+        disabled_classification,
+        low_confidence_classification,
+        success_classification,
+        zero_shot_from_config,
     )
 
 
@@ -74,15 +76,6 @@ def _dictionary_path(config: dict[str, Any]) -> str | None:
 
 def _lookup_from_config(config: dict[str, Any]) -> CpeDictionaryLookup:
     return CpeDictionaryLookup(dictionary_path=_dictionary_path(config))
-
-
-def _zero_shot_from_config(config: dict[str, Any]) -> EmbeddingZeroShotClassifier:
-    zero_shot = config["zero_shot"]
-    return EmbeddingZeroShotClassifier(
-        model_name=zero_shot["model_name"],
-        confidence_threshold=float(zero_shot["confidence_threshold"]),
-        dictionary_path=_dictionary_path(config),
-    )
 
 
 def _normalize_candidate(value: Any) -> dict[str, str] | None:
@@ -149,13 +142,13 @@ def classify_cve_document(
             "updated_at": utc_now_iso(),
         }
 
-    zero_shot_classifier = zero_shot_classifier or _zero_shot_from_config(config)
+    zero_shot_classifier = zero_shot_classifier or zero_shot_from_config(config)
     result = zero_shot_classifier.classify(document)
     if result.get("classified"):
-        return _success_classification(result)
+        return success_classification(result)
     if not bool(config.get("zero_shot", {}).get("enabled")):
-        return _disabled_classification()
-    return _low_confidence_classification(result)
+        return disabled_classification()
+    return low_confidence_classification(result)
 
 
 def reclassify_cve(
@@ -169,7 +162,7 @@ def reclassify_cve(
 ) -> ReclassifyResult:
     collection = database[collection_name]
     lookup = _lookup_from_config(config) if (config.get("dictionary_lookup") or {}).get("enabled", True) else None
-    zero_shot_classifier = _zero_shot_from_config(config) if use_zero_shot else None
+    zero_shot_classifier = zero_shot_from_config(config) if use_zero_shot else None
     result = ReclassifyResult()
 
     cursor = collection.find({})

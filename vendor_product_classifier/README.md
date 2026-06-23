@@ -1,17 +1,18 @@
 # Vendor/Product Classifier
 
-Standalone RabbitMQ workers that classify only the MongoDB `cve` collection.
+Standalone daemon that classifies only the MongoDB `cve` collection using a local CPE dictionary and optional zero-shot embeddings.
 
 ## Pipeline
 
 ```text
-scanner -> vendor_product_classification_intake -> classifier worker
-                                               | dictionary lookup (hit -> MongoDB)
-                                               -> vendor_product_zero_shot -> zero-shot worker
-                                               -> vendor_product_classification_dead
+classifier_daemon.py
+  -> find unclassified CVE documents in MongoDB
+  -> dictionary lookup (hit -> write classification)
+  -> zero-shot embeddings on miss (when enabled)
+  -> write classification to MongoDB
 ```
 
-The scanner queues CVE documents missing a final vendor/product classification. The classifier worker extracts vendor/product evidence from `details.cve.affected`, CPE in `details.cve.configurations`, root `title`, and English `details.cve.descriptions`, then searches the local CPE dictionary. On a hit it writes `method: dictionary` and skips zero-shot. On a miss it queues the zero-shot worker, which uses embeddings against the same dictionary.
+The daemon scans CVE documents missing a final vendor/product classification on a configurable interval. It extracts vendor/product evidence from `details.cve.affected`, CPE in `details.cve.configurations`, root `title`, and English `details.cve.descriptions`, then searches the local CPE dictionary. On a hit it writes `method: dictionary`. On a miss it runs zero-shot embedding classification when enabled.
 
 ## Configuration
 
@@ -19,14 +20,15 @@ The scanner queues CVE documents missing a final vendor/product classification. 
 cp .env.example .env
 ```
 
-Required secrets:
+MongoDB connection (optional if repo-root `mongodb.toml` is configured):
 
 ```env
-ATLAS_MONGO_URI=
-RABBITMQ_URL=
+MONGO_URI=mongodb://localhost:27017
 ```
 
-`config/classifier.json` contains MongoDB, queue, retry, `dictionary_lookup`, model, and `cpe_dictionary.path` settings. `CPE_DICTIONARY_PATH` overrides the JSON path.
+Resolution order: `MONGO_URI` environment variable, then `[mongodb].uri` from repo-root [`mongodb.toml`](../mongodb.toml), then `mongodb://localhost:27017`.
+
+`config/classifier.json` contains MongoDB database name, scanner interval/batch settings, retry limits, `dictionary_lookup`, model, and `cpe_dictionary.path` settings. `CPE_DICTIONARY_PATH` overrides the JSON path.
 
 The bundled `fixtures/cpes.csv` is the default dictionary (`vendor`,`product` columns; full CPE URIs are synthesized). `fixtures/cpe_dictionary_sample.csv` remains available for small test fixtures.
 
@@ -75,7 +77,7 @@ vuln-scrape reclassify-cve --database vulnerabilities
 vuln-scrape reclassify-cve --database vulnerabilities --zero-shot
 ```
 
-Or from `vendor_product_classifier/` with `ATLAS_MONGO_URI` in `.env`:
+Or from `vendor_product_classifier/`:
 
 ```bash
 python -m vendor_product_classifier.reclassify_cve --dry-run
@@ -91,9 +93,7 @@ cd vendor_product_classifier
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-python classifier_scanner.py
-python classifier_worker.py
-python zero_shot_worker.py
+python classifier_daemon.py
 ```
 
 ## Tests

@@ -1,57 +1,24 @@
 from __future__ import annotations
 
-import signal
-import threading
-from typing import Any, Callable
+from typing import Any
 
 try:
-    from .classifier_worker import handle_task_error
     from .cpe_dictionary import CpeCandidate, CpeDictionaryLookup, CpeIndex, cpe_fingerprint, load_cpe_dictionary
     from .cve_cpe import extract_embedding_evidence, extract_vendor_product_evidence
     from .logging_utils import log_event
-    from .mongo_utils import (
-        create_mongo_client,
-        find_document,
-        get_database,
-        has_vendor_product,
-        load_config,
-        mark_processing,
-        utc_now_iso,
-        write_classification,
-    )
-    from .rabbitmq_utils import connect, declare_queues, decode_message, publish_json
+    from .mongo_utils import utc_now_iso
 except ImportError:
-    from classifier_worker import handle_task_error
     from cpe_dictionary import CpeCandidate, CpeDictionaryLookup, CpeIndex, cpe_fingerprint, load_cpe_dictionary
     from cve_cpe import extract_embedding_evidence, extract_vendor_product_evidence
     from logging_utils import log_event
-    from mongo_utils import (
-        create_mongo_client,
-        find_document,
-        get_database,
-        has_vendor_product,
-        load_config,
-        mark_processing,
-        utc_now_iso,
-        write_classification,
-    )
-    from rabbitmq_utils import connect, declare_queues, decode_message, publish_json
+    from mongo_utils import utc_now_iso
 
 
-STOP_EVENT = threading.Event()
-Publisher = Callable[[Any, str, dict[str, Any]], None]
 COMPONENT = "vendor-product-zero-shot"
 
 
 def log(message: str, *, level: str = "INFO", **fields: Any) -> None:
     log_event(COMPONENT, message, level=level, **fields)
-
-
-def _attempt(task: dict[str, Any]) -> int:
-    try:
-        return int(task.get("attempt") or 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 class EmbeddingZeroShotClassifier:
@@ -165,27 +132,26 @@ class EmbeddingZeroShotClassifier:
         return result
 
 
-def _dictionary_path(config: dict[str, Any]) -> str | None:
-    value = (config.get("cpe_dictionary") or {}).get("path")
-    return str(value) if value else None
-
-
-def _classifier_from_config(config: dict[str, Any]) -> EmbeddingZeroShotClassifier:
+def zero_shot_from_config(config: dict[str, Any]) -> EmbeddingZeroShotClassifier:
     zero_shot = config["zero_shot"]
+    dictionary_path = (config.get("cpe_dictionary") or {}).get("path")
     return EmbeddingZeroShotClassifier(
         model_name=zero_shot["model_name"],
         confidence_threshold=float(zero_shot["confidence_threshold"]),
-        dictionary_path=_dictionary_path(config),
+        dictionary_path=str(dictionary_path) if dictionary_path else None,
     )
 
 
-def _reload_classifier_if_needed(
+def reload_zero_shot_if_needed(
     classifier: EmbeddingZeroShotClassifier | None,
     config: dict[str, Any],
 ) -> EmbeddingZeroShotClassifier | None:
+    if not bool(config.get("zero_shot", {}).get("enabled")):
+        return None
     if classifier is None:
-        return _classifier_from_config(config) if config["zero_shot"].get("enabled") else None
-    dictionary_version = cpe_fingerprint(_dictionary_path(config))
+        return zero_shot_from_config(config)
+    dictionary_path = (config.get("cpe_dictionary") or {}).get("path")
+    dictionary_version = cpe_fingerprint(str(dictionary_path) if dictionary_path else None)
     if classifier.dictionary_version == dictionary_version:
         return classifier
     log(
@@ -193,10 +159,10 @@ def _reload_classifier_if_needed(
         previous_dictionary_version=classifier.dictionary_version,
         dictionary_version=dictionary_version,
     )
-    return _classifier_from_config(config)
+    return zero_shot_from_config(config)
 
 
-def _disabled_classification() -> dict[str, Any]:
+def disabled_classification() -> dict[str, Any]:
     return {
         "status": "unclassified",
         "reason": "zero-shot disabled",
@@ -205,7 +171,7 @@ def _disabled_classification() -> dict[str, Any]:
     }
 
 
-def _success_classification(result: dict[str, Any]) -> dict[str, Any]:
+def success_classification(result: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "status": "classified",
         "vendor": result["vendor"],
@@ -220,7 +186,7 @@ def _success_classification(result: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _low_confidence_classification(result: dict[str, Any]) -> dict[str, Any]:
+def low_confidence_classification(result: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "status": "unclassified",
         "reason": result.get("reason") or "confidence below threshold",
@@ -235,100 +201,3 @@ def _low_confidence_classification(result: dict[str, Any]) -> dict[str, Any]:
             "cpe": result.get("cpe"),
         }
     return payload
-
-
-def process_task(
-    database: Any,
-    channel: Any,
-    task: dict[str, Any],
-    classifier: Any,
-    config: dict[str, Any],
-    *,
-    publish: Publisher = publish_json,
-) -> str:
-    if task.get("task_type") != "vendor_product_zero_shot":
-        raise ValueError(f"Unexpected task_type: {task.get('task_type')}")
-    collection_name = str(task["collection"])
-    document_id = str(task["document_id"])
-    attempt = _attempt(task)
-    if collection_name != "cve":
-        log("zero-shot skipped non-CVE document", collection=collection_name, document_id=document_id)
-        return "skipped_non_cve"
-
-    collection = database[collection_name]
-    document = find_document(database, collection_name, document_id)
-    if document is None:
-        raise ValueError(f"Document not found: {collection_name}/{document_id}")
-    if has_vendor_product(document):
-        return "skipped"
-
-    if not bool(config["zero_shot"].get("enabled")):
-        write_classification(collection, document_id, _disabled_classification())
-        return "unclassified"
-
-    mark_processing(collection, document_id, attempt=attempt, method="zero_shot")
-    classifier = classifier or _classifier_from_config(config)
-    result = classifier.classify(document)
-    if result.get("classified"):
-        write_classification(collection, document_id, _success_classification(result))
-        return "classified"
-
-    write_classification(collection, document_id, _low_confidence_classification(result))
-    return "unclassified"
-
-
-def _request_shutdown(*_: Any) -> None:
-    STOP_EVENT.set()
-
-
-def consume(config: dict[str, Any]) -> None:
-    client = create_mongo_client(config)
-    database = get_database(client, config)
-    classifier = _classifier_from_config(config) if config["zero_shot"].get("enabled") else None
-    try:
-        while not STOP_EVENT.is_set():
-            connection = None
-            try:
-                connection = connect(config)
-                channel = connection.channel()
-                declare_queues(channel, config)
-                channel.basic_qos(prefetch_count=int(config["worker"]["prefetch_count"]))
-                queue_name = config["queues"]["zero_shot"]
-                for method, _, body in channel.consume(queue_name, inactivity_timeout=1):
-                    if STOP_EVENT.is_set():
-                        break
-                    if method is None:
-                        continue
-                    task: dict[str, Any] = {}
-                    try:
-                        task = decode_message(body)
-                        classifier = _reload_classifier_if_needed(classifier, config)
-                        process_task(database, channel, task, classifier, config)
-                    except Exception as exc:
-                        handle_task_error(
-                            database,
-                            channel,
-                            task,
-                            exc,
-                            config,
-                            retry_queue=queue_name,
-                        )
-                    channel.basic_ack(method.delivery_tag)
-            except Exception as exc:
-                log("reconnecting after error", level="ERROR", error=exc)
-                STOP_EVENT.wait(5)
-            finally:
-                if connection is not None and getattr(connection, "is_open", False):
-                    connection.close()
-    finally:
-        client.close()
-
-
-def main() -> None:
-    signal.signal(signal.SIGINT, _request_shutdown)
-    signal.signal(signal.SIGTERM, _request_shutdown)
-    consume(load_config())
-
-
-if __name__ == "__main__":
-    main()

@@ -8,18 +8,12 @@
   "cpe_dictionary": {
     "path": "fixtures/cpes.csv"
   },
-  "queues": {
-    "classification_intake": "vendor_product_classification_intake",
-    "zero_shot": "vendor_product_zero_shot",
-    "dead_letter": "vendor_product_classification_dead"
-  },
   "scanner": {
     "interval_seconds": 300,
     "batch_size": 500,
     "claim_timeout_seconds": 1800
   },
   "worker": {
-    "prefetch_count": 1,
     "max_attempts": 3
   },
   "dictionary_lookup": {

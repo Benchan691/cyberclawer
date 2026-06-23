@@ -10,10 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY __init__.py ./
 COPY fixtures fixtures
-COPY classifier_scanner.py classifier_worker.py zero_shot_worker.py ./
-COPY cpe_dictionary.py cve_cpe.py logging_utils.py mongo_utils.py rabbitmq_utils.py ./
+COPY classifier_daemon.py reclassify_cve.py ./
+COPY cpe_dictionary.py cve_cpe.py logging_utils.py mongo_utils.py zero_shot.py ./
 COPY README.md ./
 COPY config/classifier.json config/classifier.json
 RUN mkdir -p models
 
-CMD ["python", "classifier_worker.py"]
+CMD ["python", "classifier_daemon.py"]

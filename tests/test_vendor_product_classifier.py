@@ -8,8 +8,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from vendor_product_classifier.classifier_scanner import scan_once
-from vendor_product_classifier.classifier_worker import process_task
+from vendor_product_classifier.classifier_daemon import classify_document, scan_once
 from vendor_product_classifier.cpe_dictionary import CpeCandidate, CpeDictionaryLookup
 from vendor_product_classifier.mongo_utils import current_taxonomy_version
 from vendor_product_classifier.cve_cpe import (
@@ -17,9 +16,11 @@ from vendor_product_classifier.cve_cpe import (
     extract_cpe_evidence,
     extract_vendor_product_evidence,
 )
-from vendor_product_classifier.zero_shot_worker import (
+from vendor_product_classifier.reclassify_cve import classify_cve_document
+from vendor_product_classifier.zero_shot import (
     EmbeddingZeroShotClassifier,
-    process_task as process_zero_shot_task,
+    low_confidence_classification,
+    success_classification,
 )
 
 
@@ -30,17 +31,12 @@ def config() -> dict[str, Any]:
     return {
         "mongo": {"database": "vulnerabilities", "collections": ["cve"]},
         "cpe_dictionary": {"path": FIXTURE},
-        "queues": {
-            "classification_intake": "intake",
-            "zero_shot": "zero",
-            "dead_letter": "dead",
-        },
         "scanner": {
             "interval_seconds": 300,
             "batch_size": 500,
             "claim_timeout_seconds": 1800,
         },
-        "worker": {"prefetch_count": 1, "max_attempts": 3},
+        "worker": {"max_attempts": 3},
         "dictionary_lookup": {"enabled": True},
         "zero_shot": {
             "enabled": True,
@@ -127,7 +123,30 @@ def test_dictionary_lookup_matches_vendor_product_and_title() -> None:
     assert title_hit.match_type == "text"
 
 
-def test_classifier_worker_classifies_via_dictionary_without_zero_shot() -> None:
+def test_classify_cve_document_uses_dictionary_without_zero_shot() -> None:
+    document = {
+        "_id": "cve:2026-1000",
+        "details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}},
+    }
+
+    classification = classify_cve_document(document, config(), use_zero_shot=False)
+
+    assert classification["status"] == "classified"
+    assert classification["method"] == "dictionary"
+    assert classification["vendor"] == "Cisco"
+    assert classification["product"] == "IOS XE"
+
+
+def test_classify_cve_document_marks_dictionary_miss_unclassified_without_zero_shot() -> None:
+    document = {"_id": "cve:2026-1000"}
+
+    classification = classify_cve_document(document, config(), use_zero_shot=False)
+
+    assert classification["status"] == "unclassified"
+    assert classification["reason"] == "dictionary miss"
+
+
+def test_daemon_classifies_via_dictionary() -> None:
     collection = FakeCollection(
         [
             {
@@ -136,24 +155,17 @@ def test_classifier_worker_classifies_via_dictionary_without_zero_shot() -> None
             }
         ]
     )
-    published: list[tuple[str, dict[str, Any]]] = []
+    lookup = CpeDictionaryLookup(dictionary_path=FIXTURE)
 
-    result = process_task(
+    stats, _, _ = scan_once(
         FakeDatabase({"cve": collection}),
-        None,
-        {
-            "task_type": "vendor_product_classification",
-            "collection": "cve",
-            "document_id": "cve:2026-1000",
-            "attempt": 0,
-        },
-        None,
         config(),
-        publish=lambda _channel, queue, task: published.append((queue, task)),
+        lookup=lookup,
+        zero_shot_classifier=None,
+        now=datetime.now(timezone.utc),
     )
 
-    assert result == "classified"
-    assert published == []
+    assert stats.classified == 1
     classification = collection.documents["cve:2026-1000"]["classification"]
     assert classification["status"] == "classified"
     assert classification["method"] == "dictionary"
@@ -161,47 +173,7 @@ def test_classifier_worker_classifies_via_dictionary_without_zero_shot() -> None
     assert classification["product"] == "IOS XE"
 
 
-def test_classifier_worker_queues_zero_shot_on_dictionary_miss() -> None:
-    database = FakeDatabase({"cve": FakeCollection([{"_id": "cve:2026-1000"}])})
-    published: list[tuple[str, dict[str, Any]]] = []
-
-    result = process_task(
-        database,
-        None,
-        {
-            "task_type": "vendor_product_classification",
-            "collection": "cve",
-            "document_id": "cve:2026-1000",
-            "attempt": 0,
-        },
-        None,
-        config(),
-        publish=lambda _channel, queue, task: published.append((queue, task)),
-    )
-
-    assert result == "queued_zero_shot"
-    assert published[0][0] == "zero"
-    assert published[0][1]["task_type"] == "vendor_product_zero_shot"
-
-
-def test_scanner_queues_cve_documents() -> None:
-    database = FakeDatabase({"cve": FakeCollection([{"_id": "cve:2026-1000"}])})
-    published: list[tuple[str, dict[str, Any]]] = []
-
-    queued = scan_once(
-        database,
-        None,
-        config(),
-        publish=lambda _channel, queue, task: published.append((queue, task)),
-        now=datetime.now(timezone.utc),
-    )
-
-    assert queued == 1
-    assert published[0][0] == "intake"
-    assert published[0][1]["document_id"] == "cve:2026-1000"
-
-
-def test_scanner_skips_unclassified_for_current_dictionary() -> None:
+def test_daemon_skips_unclassified_for_current_dictionary() -> None:
     database = FakeDatabase(
         {
             "cve": FakeCollection(
@@ -217,39 +189,20 @@ def test_scanner_skips_unclassified_for_current_dictionary() -> None:
             )
         }
     )
-    published: list[tuple[str, dict[str, Any]]] = []
 
-    queued = scan_once(
+    stats, _, _ = scan_once(
         database,
-        None,
         config(),
-        publish=lambda _channel, queue, task: published.append((queue, task)),
+        lookup=CpeDictionaryLookup(dictionary_path=FIXTURE),
         now=datetime.now(timezone.utc),
     )
 
-    assert queued == 0
-    assert published == []
+    assert stats.classified == 0
+    assert stats.unclassified == 0
+    assert stats.skipped_by_reason.get("unclassified_current_dictionary") == 1
 
 
-def test_classifier_worker_skips_non_cve_documents() -> None:
-    result = process_task(
-        FakeDatabase({"cisco": FakeCollection([{"_id": "cisco:ios-xe"}])}),
-        None,
-        {
-            "task_type": "vendor_product_classification",
-            "collection": "cisco",
-            "document_id": "cisco:ios-xe",
-            "attempt": 0,
-        },
-        None,
-        config(),
-        publish=lambda *_: None,
-    )
-
-    assert result == "skipped_non_cve"
-
-
-def test_zero_shot_worker_classifies_exact_cpe_match() -> None:
+def test_zero_shot_classifies_exact_cpe_match() -> None:
     collection = FakeCollection(
         [
             {
@@ -286,18 +239,15 @@ def test_zero_shot_worker_classifies_exact_cpe_match() -> None:
             )
         ],
     )
+    zs_config = config()
+    zs_config["dictionary_lookup"] = {"enabled": False}
 
-    result = process_zero_shot_task(
-        FakeDatabase({"cve": collection}),
-        None,
-        {
-            "task_type": "vendor_product_zero_shot",
-            "collection": "cve",
-            "document_id": "cve:2026-1000",
-            "attempt": 0,
-        },
-        classifier,
-        config(),
+    result = classify_document(
+        collection,
+        collection.documents["cve:2026-1000"],
+        zs_config,
+        lookup=None,
+        zero_shot_classifier=classifier,
     )
 
     assert result == "classified"
@@ -315,7 +265,7 @@ def test_zero_shot_worker_classifies_exact_cpe_match() -> None:
     }
 
 
-def test_zero_shot_worker_marks_low_confidence_matches_unclassified() -> None:
+def test_zero_shot_marks_low_confidence_matches_unclassified() -> None:
     collection = FakeCollection(
         [{"_id": "cve:low", "details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}}}]
     )
@@ -330,26 +280,48 @@ def test_zero_shot_worker_marks_low_confidence_matches_unclassified() -> None:
             "reason": "confidence below threshold",
         }
     )
+    zs_config = config()
+    zs_config["dictionary_lookup"] = {"enabled": False}
 
-    result = process_zero_shot_task(
-        FakeDatabase({"cve": collection}),
-        None,
-        {
-            "task_type": "vendor_product_zero_shot",
-            "collection": "cve",
-            "document_id": "cve:low",
-            "attempt": 0,
-        },
-        classifier,
-        config(),
+    classification = classify_cve_document(
+        collection.documents["cve:low"],
+        zs_config,
+        zero_shot_classifier=classifier,
+        use_zero_shot=True,
     )
 
-    assert result == "unclassified"
-    classification = collection.documents["cve:low"]["classification"]
     assert classification["status"] == "unclassified"
     assert classification["candidate"]["vendor"] == "Cisco"
     assert classification["dictionary_version"] == "test-dict"
     assert "best_vendor" not in classification
+
+
+def test_success_and_low_confidence_helpers() -> None:
+    success = success_classification(
+        {
+            "vendor": "Cisco",
+            "product": "IOS XE",
+            "cpe": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
+            "confidence": 0.9,
+            "method": "zero_shot",
+            "dictionary_version": "test",
+        }
+    )
+    assert success["status"] == "classified"
+    assert success["method"] == "zero_shot"
+
+    low = low_confidence_classification(
+        {
+            "vendor": "Cisco",
+            "product": "IOS XE",
+            "cpe": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
+            "confidence": 0.2,
+            "dictionary_version": "test",
+            "reason": "confidence below threshold",
+        }
+    )
+    assert low["status"] == "unclassified"
+    assert low["candidate"]["vendor"] == "Cisco"
 
 
 class FakeCursor:

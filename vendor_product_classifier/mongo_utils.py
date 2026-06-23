@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    tomllib = None
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from pymongo import MongoClient
+
+DEFAULT_MONGO_URI = "mongodb://localhost:27017"
+DEFAULT_MONGO_CONFIG_FILE = "mongodb.toml"
 
 try:
     from . import CLASSIFIER_VERSION
@@ -74,6 +81,42 @@ def load_dotenv(path: Path) -> None:
         os.environ[key.strip()] = value
 
 
+def repo_root(base: Path) -> Path:
+    return base.parent
+
+
+def load_mongo_toml(path: Path) -> dict[str, Any]:
+    if tomllib is None or not path.exists():
+        return {}
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    mongo = data.get("mongodb", data)
+    return mongo if isinstance(mongo, dict) else {}
+
+
+def resolve_mongo_uri(base: Path) -> str:
+    for env_name in ("MONGO_URI", "ATLAS_MONGO_URI"):
+        value = os.getenv(env_name, "").strip()
+        if value:
+            return value
+    mongo_config = load_mongo_toml(repo_root(base) / DEFAULT_MONGO_CONFIG_FILE)
+    uri = mongo_config.get("uri")
+    if isinstance(uri, str) and uri.strip():
+        return uri.strip()
+    return DEFAULT_MONGO_URI
+
+
+def resolve_mongo_database(config: dict[str, Any], base: Path) -> str:
+    mongo_section = config.get("mongo") or {}
+    database = mongo_section.get("database")
+    if isinstance(database, str) and database.strip():
+        return database.strip()
+    mongo_config = load_mongo_toml(repo_root(base) / DEFAULT_MONGO_CONFIG_FILE)
+    toml_database = mongo_config.get("database")
+    if isinstance(toml_database, str) and toml_database.strip():
+        return toml_database.strip()
+    return "vulnerabilities"
+
+
 def load_config(base_dir: str | Path | None = None, *, require_secrets: bool = True) -> dict[str, Any]:
     base = Path(base_dir) if base_dir is not None else classifier_dir()
     load_dotenv(base / ".env")
@@ -84,24 +127,18 @@ def load_config(base_dir: str | Path | None = None, *, require_secrets: bool = T
     with config_path.open(encoding="utf-8") as handle:
         config = json.load(handle)
 
-    config["ATLAS_MONGO_URI"] = os.getenv("ATLAS_MONGO_URI", "")
-    config["RABBITMQ_URL"] = os.getenv("RABBITMQ_URL", "")
+    config["MONGO_URI"] = resolve_mongo_uri(base)
+    config.setdefault("mongo", {})
+    config["mongo"]["database"] = resolve_mongo_database(config, base)
 
-    if require_secrets:
-        missing = [
-            name
-            for name in ("ATLAS_MONGO_URI", "RABBITMQ_URL")
-            if not config.get(name)
-        ]
-        if missing:
-            raise ValueError(
-                "Missing required environment variable(s): " + ", ".join(missing)
-            )
+    if require_secrets and not config.get("MONGO_URI"):
+        raise ValueError("Missing required MongoDB URI (set MONGO_URI or configure mongodb.toml)")
     return config
 
 
-def create_mongo_client(config: dict[str, Any]) -> MongoClient:
-    return MongoClient(config["ATLAS_MONGO_URI"], serverSelectionTimeoutMS=5000)
+def create_mongo_client(config: dict[str, Any] | str) -> MongoClient:
+    uri = config if isinstance(config, str) else config["MONGO_URI"]
+    return MongoClient(uri, serverSelectionTimeoutMS=5000)
 
 
 def get_database(client: MongoClient, config: dict[str, Any]) -> Any:
@@ -235,17 +272,6 @@ def write_classification(collection: Any, document_id: str, classification: dict
         {"_id": document_id},
         {"$set": {"classification": payload}},
     )
-
-
-def mark_queued(collection: Any, document_id: str, *, now: str | None = None, attempts: int | None = None) -> Any:
-    classification: dict[str, Any] = {
-        "status": "queued",
-        "queued_at": now or utc_now_iso(),
-        "classifier_version": CLASSIFIER_VERSION,
-    }
-    if attempts is not None:
-        classification["attempts"] = attempts
-    return write_classification(collection, document_id, classification)
 
 
 def mark_processing(collection: Any, document_id: str, *, attempt: int, method: str | None = None) -> Any:
