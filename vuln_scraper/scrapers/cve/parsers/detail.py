@@ -27,9 +27,7 @@ class CVEDetailRecord:
     references: list[dict[str, Any]] = field(default_factory=list)
     configurations: list[dict[str, Any]] = field(default_factory=list)
     affected: list[dict[str, Any]] = field(default_factory=list)
-    affected_products: list[str] = field(default_factory=list)
     cve_tags: list[Any] = field(default_factory=list)
-    raw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -61,9 +59,7 @@ def parse_cve_detail(cve: dict[str, Any]) -> CVEDetailRecord:
         references=_dedupe_references(_combined_list(containers, "references")),
         configurations=_combined_list(containers, "cpeApplicability"),
         affected=affected,
-        affected_products=_affected_product_lines(affected),
         cve_tags=_combined_values(containers, "tags"),
-        raw=dict(cve),
     )
 
 
@@ -139,41 +135,6 @@ def _first_container_text(containers: list[dict[str, Any]], key: str) -> str | N
         if text:
             return text
     return None
-
-
-def _affected_product_lines(affected: list[dict[str, Any]]) -> list[str]:
-    lines: list[str] = []
-    for item in affected:
-        vendor = _optional_str(item.get("vendor"))
-        product = _optional_str(item.get("product"))
-        base = " ".join(part for part in (vendor, product) if part)
-        versions = _list_of_dicts(item.get("versions"))
-        affected_versions = [
-            line
-            for version in versions
-            if str(version.get("status") or "").casefold() == "affected"
-            and (line := _affected_version_line(base, version))
-        ]
-        if affected_versions:
-            lines.extend(affected_versions)
-        elif str(item.get("defaultStatus") or "").casefold() == "affected" and base:
-            lines.append(base)
-    return list(dict.fromkeys(lines))
-
-
-def _affected_version_line(base: str, version: dict[str, Any]) -> str:
-    version_text = _optional_str(version.get("version"))
-    less_than = _optional_str(version.get("lessThan"))
-    less_than_equal = _optional_str(version.get("lessThanOrEqual"))
-    version_type = _optional_str(version.get("versionType"))
-    parts = [base, version_text]
-    if less_than:
-        parts.append(f"<{less_than}")
-    if less_than_equal:
-        parts.append(f"<={less_than_equal}")
-    if version_type:
-        parts.append(f"({version_type})")
-    return " ".join(part for part in parts if part)
 
 
 def _dedupe_references(references: list[dict[str, Any]]) -> list[dict[str, Any]]:

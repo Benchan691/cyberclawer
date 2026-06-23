@@ -48,7 +48,7 @@ def test_parse_cve_list_exposes_non_deleted_delta_entries() -> None:
     assert page.entries[0].embedded_detail["_delta_action"] == "new"
 
 
-def test_parse_cve_v5_normalizes_details_and_preserves_raw() -> None:
+def test_parse_cve_v5_normalizes_details_without_raw_dupes() -> None:
     payload = cve_record("CVE-2026-48907")
 
     detail = parse_cve_detail_response(payload).to_dict()
@@ -62,10 +62,9 @@ def test_parse_cve_v5_normalizes_details_and_preserves_raw() -> None:
     assert detail["metrics"]["cvss_v40"][0]["cvssData"]["baseSeverity"] == "CRITICAL"
     assert detail["weaknesses"][0]["descriptions"][0]["cweId"] == "CWE-284"
     assert detail["references"] == [{"url": "https://example.test/advisory"}]
-    assert detail["affected_products"] == [
-        "Example Vendor Joomla Extension 1.0 <2.0 (semver)"
-    ]
-    assert detail["raw"]["dataType"] == "CVE_RECORD"
+    assert detail["affected"][0]["product"] == "Joomla Extension"
+    assert "affected_products" not in detail
+    assert "raw" not in detail
 
 
 def test_parse_cve_v5_accepts_missing_optional_containers() -> None:
@@ -84,7 +83,7 @@ def test_parse_cve_v5_accepts_missing_optional_containers() -> None:
     assert detail["cve_id"] == "CVE-2026-1000"
     assert detail["descriptions"] == []
     assert detail["metrics"] == {}
-    assert detail["affected_products"] == []
+    assert "affected_products" not in detail
 
 
 def test_provider_builds_cvelist_v5_urls_and_normalized_entry() -> None:
@@ -105,7 +104,7 @@ def test_provider_builds_cvelist_v5_urls_and_normalized_entry() -> None:
     assert record["type"] == "cve"
     assert record["code"] == "2026-48907"
     assert record["cve_code"] is None
-    assert record["details"]["cve"]["raw"]["cveMetadata"]["cveId"] == "CVE-2026-48907"
+    assert "raw" not in record["details"]["cve"]
 
 
 def delta_batch(

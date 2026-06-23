@@ -2,24 +2,11 @@
   "mongo": {
     "database": "vulnerabilities",
     "collections": [
-      "avd",
-      "hkcert",
-      "cve",
-      "cisco",
-      "zeroday",
-      "govcert",
-      "github_advisory",
-      "huawei_sa",
-      "paloalto",
-      "qianxin",
-      "infosec",
-      "splunk",
-      "hikvision",
-      "cnnvd",
-      "cnvd",
-      "juniper",
-      "msrc"
+      "cve"
     ]
+  },
+  "cpe_dictionary": {
+    "path": "fixtures/cpes.csv"
   },
   "queues": {
     "classification_intake": "vendor_product_classification_intake",
@@ -35,10 +22,12 @@
     "prefetch_count": 1,
     "max_attempts": 3
   },
+  "dictionary_lookup": {
+    "enabled": true
+  },
   "zero_shot": {
     "enabled": true,
     "model_name": "BAAI/bge-small-en-v1.5",
     "confidence_threshold": 0.78
   }
 }
-

@@ -71,7 +71,8 @@ tests/scrapers/<provider>/
 
 ### `vuln_scraper/config.py`
 
-- Add `<provider>: "<collection>"` to `DEFAULT_MONGO_COLLECTIONS`.
+- Set `default_mongo_collection` on the provider; add a `[mongodb.collections]`
+  override only when the configured collection name differs.
 
 ### `mongodb.toml`
 

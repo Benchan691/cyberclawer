@@ -1087,9 +1087,7 @@ def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
         "CVE",
         "Severity",
     ]
-    assert collection.documents["splunk:SVD-2026-0516"]["details"]["splunk"]["raw_tables"] == (
-        output["vulnerabilities"][0]["details"]["splunk"]["raw_tables"]
-    )
+    assert "raw_tables" not in collection.documents["splunk:SVD-2026-0516"]["details"]["splunk"]
     assert output["mongo_sync"]["inserted"] == 2
     assert set(collection.documents) == {"splunk:SVD-2026-0516", "splunk:SVD-2026-0501", "splunk:SVD-2026-0500"}
     assert client.detail_ids_seen == ["SVD-2026-0516", "SVD-2026-0501"]

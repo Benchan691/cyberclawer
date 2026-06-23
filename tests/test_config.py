@@ -1,6 +1,6 @@
 import pytest
 
-from vuln_scraper.scrapers import provider_keys
+from vuln_scraper.scrapers import all_providers, provider_keys
 from vuln_scraper.config import (
     DEFAULT_BACKOFF_BASE,
     DEFAULT_BACKOFF_JITTER,
@@ -115,26 +115,10 @@ def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert mongo_collections_from_config(config_file) == {
-        "avd": "avd",
-        "hkcert": "hkcert",
-        "cve": "cve",
-        "cisco": "cisco",
-        "zeroday": "zeroday",
-        "govcert": "govcert",
-        "github_advisory": "github_advisory",
-        "huawei_sa": "huawei_sa",
-        "paloalto": "paloalto",
-        "qianxin": "qianxin",
-        "ransomwarelive": "ransomwarelive",
-        "infosec": "infosec",
-        "splunk": "splunk",
-        "hikvision": "hikvision",
-        "cnnvd": "cnnvd",
-        "cnvd": "cnvd",
-        "juniper": "juniper",
-        "msrc": "msrc",
-    }
+    assert mongo_collections_from_config(config_file) == dict(sorted(
+        (provider.key, provider.default_mongo_collection)
+        for provider in all_providers()
+    ))
     assert mongo_collection_for_provider("hkcert", config_file) == "hkcert"
 
 

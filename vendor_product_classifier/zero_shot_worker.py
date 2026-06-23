@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import signal
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable
 
 try:
     from .classifier_worker import handle_task_error
+    from .cpe_dictionary import CpeCandidate, CpeDictionaryLookup, CpeIndex, cpe_fingerprint, load_cpe_dictionary
+    from .cve_cpe import extract_embedding_evidence, extract_vendor_product_evidence
     from .logging_utils import log_event
     from .mongo_utils import (
         create_mongo_client,
@@ -19,9 +20,10 @@ try:
         write_classification,
     )
     from .rabbitmq_utils import connect, declare_queues, decode_message, publish_json
-    from .rule_alias import aliases_fingerprint, evidence_texts, load_aliases
 except ImportError:
     from classifier_worker import handle_task_error
+    from cpe_dictionary import CpeCandidate, CpeDictionaryLookup, CpeIndex, cpe_fingerprint, load_cpe_dictionary
+    from cve_cpe import extract_embedding_evidence, extract_vendor_product_evidence
     from logging_utils import log_event
     from mongo_utils import (
         create_mongo_client,
@@ -34,20 +36,11 @@ except ImportError:
         write_classification,
     )
     from rabbitmq_utils import connect, declare_queues, decode_message, publish_json
-    from rule_alias import aliases_fingerprint, evidence_texts, load_aliases
 
 
 STOP_EVENT = threading.Event()
 Publisher = Callable[[Any, str, dict[str, Any]], None]
 COMPONENT = "vendor-product-zero-shot"
-
-
-@dataclass(frozen=True)
-class TaxonomyLabel:
-    vendor: str
-    product: str
-    alias: str
-    text: str
 
 
 def log(message: str, *, level: str = "INFO", **fields: Any) -> None:
@@ -61,76 +54,35 @@ def _attempt(task: dict[str, Any]) -> int:
         return 0
 
 
-def _vector(value: Any) -> list[float]:
-    if hasattr(value, "tolist"):
-        value = value.tolist()
-    return [float(item) for item in value]
-
-
-def cosine_similarity(left: Any, right: Any) -> float:
-    a = _vector(left)
-    b = _vector(right)
-    if len(a) != len(b) or not a:
-        raise ValueError("Embedding vectors must have the same non-zero length")
-    dot = sum(x * y for x, y in zip(a, b))
-    left_norm = sum(x * x for x in a) ** 0.5
-    right_norm = sum(y * y for y in b) ** 0.5
-    if left_norm == 0 or right_norm == 0:
-        return 0.0
-    return dot / (left_norm * right_norm)
-
-
-def taxonomy_labels(aliases: list[dict[str, Any]]) -> list[TaxonomyLabel]:
-    labels: list[TaxonomyLabel] = []
-    seen: set[tuple[str, str, str]] = set()
-    for entry in aliases:
-        vendor = str(entry.get("vendor") or "").strip()
-        product = str(entry.get("product") or "").strip()
-        if not vendor or not product:
-            continue
-        names = [f"{vendor} {product}", *list(entry.get("aliases") or [])]
-        for alias in names:
-            alias_text = str(alias or "").strip()
-            if not alias_text:
-                continue
-            key = (vendor, product, alias_text.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            labels.append(
-                TaxonomyLabel(
-                    vendor=vendor,
-                    product=product,
-                    alias=alias_text,
-                    text=f"{vendor} {product}: {alias_text}",
-                )
-            )
-    return labels
-
-
 class EmbeddingZeroShotClassifier:
     def __init__(
         self,
         *,
         model_name: str,
         confidence_threshold: float,
-        aliases: list[dict[str, Any]] | None = None,
+        dictionary_path: str | None = None,
+        candidates: list[CpeCandidate] | None = None,
         model: Any = None,
+        lookup: CpeDictionaryLookup | None = None,
     ) -> None:
         self.model_name = model_name
         self.confidence_threshold = confidence_threshold
-        self.aliases = aliases if aliases is not None else load_aliases()
-        self.taxonomy_version = aliases_fingerprint(self.aliases)
-        self.labels = taxonomy_labels(self.aliases)
+        self.dictionary_path = dictionary_path
+        self.candidates = candidates if candidates is not None else load_cpe_dictionary(dictionary_path)
+        self.dictionary_version = "in-memory" if candidates is not None else cpe_fingerprint(dictionary_path)
+        self.lookup = lookup or CpeDictionaryLookup(
+            dictionary_path=dictionary_path,
+            candidates=self.candidates,
+        )
         self.model = model
-        self._label_embeddings: list[Any] | None = None
+        self._candidate_embeddings: list[Any] | None = None
+        self._index: CpeIndex | None = None
         log(
             "zero-shot classifier initialized",
             model_name=self.model_name,
             confidence_threshold=self.confidence_threshold,
-            taxonomy_version=self.taxonomy_version,
-            taxonomy_entries=len(self.aliases),
-            labels=len(self.labels),
+            dictionary_version=self.dictionary_version,
+            candidates=len(self.candidates),
             lazy_model_load=self.model is None,
         )
 
@@ -149,83 +101,73 @@ class EmbeddingZeroShotClassifier:
             embeddings = model.encode(texts, normalize_embeddings=True)
         except TypeError:
             embeddings = model.encode(texts)
-        if hasattr(embeddings, "tolist"):
-            embeddings = embeddings.tolist()
-        return list(embeddings)
+        return embeddings.tolist() if hasattr(embeddings, "tolist") else list(embeddings)
 
-    def _ensure_label_embeddings(self) -> list[Any]:
-        if self._label_embeddings is None:
-            log("embedding taxonomy labels", level="DEBUG", labels=len(self.labels))
-            self._label_embeddings = self._encode([label.text for label in self.labels])
-            log("taxonomy label embeddings ready", labels=len(self._label_embeddings))
-        return self._label_embeddings
+    def _ensure_index(self) -> CpeIndex:
+        if self._index is None:
+            self._candidate_embeddings = self._encode([candidate.text for candidate in self.candidates])
+            self._index = CpeIndex(self._candidate_embeddings)
+        return self._index
 
     def classify(self, document: dict[str, Any]) -> dict[str, Any]:
-        texts = evidence_texts(document)
-        evidence = "\n".join(texts)[:12000]
-        log(
-            "zero-shot evidence prepared",
-            level="DEBUG",
-            document_id=document.get("_id"),
-            evidence_fields=len(texts),
-            evidence_chars=len(evidence),
-        )
+        evidence = extract_embedding_evidence(document)
         if not evidence:
-            log(
-                "zero-shot skipped because document has no evidence text",
-                level="WARNING",
-                document_id=document.get("_id"),
-            )
-            return {
-                "classified": False,
-                "confidence": 0.0,
-                "reason": "no evidence text",
-            }
-        if not self.labels:
-            log(
-                "zero-shot skipped because alias taxonomy is empty",
-                level="ERROR",
-                document_id=document.get("_id"),
-            )
-            return {
-                "classified": False,
-                "confidence": 0.0,
-                "reason": "empty alias taxonomy",
-            }
+            return {"classified": False, "confidence": 0.0, "reason": "no evidence"}
+        if not self.candidates:
+            return {"classified": False, "confidence": 0.0, "reason": "empty CPE dictionary"}
 
-        document_embedding = self._encode([evidence])[0]
-        label_embeddings = self._ensure_label_embeddings()
-        best_index = 0
+        hit = self.lookup.lookup(extract_vendor_product_evidence(document))
+        if hit is None:
+            hit = self.lookup.lookup_cpe_strings(evidence)
+        if hit is not None:
+            return self._result(hit.candidate, hit.confidence, hit.evidence, classified=True, method="zero_shot")
+
+        index = self._ensure_index()
+        best_candidate = self.candidates[0]
         best_score = -1.0
-        for index, label_embedding in enumerate(label_embeddings):
-            score = cosine_similarity(document_embedding, label_embedding)
-            if score > best_score:
-                best_score = score
-                best_index = index
+        best_evidence = evidence[0]
+        for text, embedding in zip(evidence, self._encode(evidence)):
+            for candidate_index, score in index.search(embedding, k=1):
+                if score > best_score:
+                    best_candidate = self.candidates[candidate_index]
+                    best_score = score
+                    best_evidence = text
 
-        best = self.labels[best_index]
-        classified = best_score >= self.confidence_threshold
-        log(
-            "zero-shot best candidate selected",
-            document_id=document.get("_id"),
-            vendor=best.vendor,
-            product=best.product,
-            matched_alias=best.alias,
-            confidence=float(best_score),
-            threshold=self.confidence_threshold,
-            classified=classified,
+        return self._result(
+            best_candidate,
+            best_score,
+            best_evidence,
+            classified=best_score >= self.confidence_threshold,
+            method="zero_shot",
         )
+
+    def _result(
+        self,
+        candidate: CpeCandidate,
+        confidence: float,
+        evidence: str,
+        *,
+        classified: bool,
+        method: str = "zero_shot",
+    ) -> dict[str, Any]:
         result = {
             "classified": classified,
-            "vendor": best.vendor,
-            "product": best.product,
-            "confidence": float(best_score),
-            "matched_alias": best.alias,
-            "matched_text": evidence[:2000],
+            "vendor": candidate.vendor,
+            "product": candidate.product,
+            "cpe": candidate.cpe,
+            "confidence": float(confidence),
+            "dictionary_version": self.dictionary_version,
+            "evidence": evidence,
+            "method": method,
         }
-        if not result["classified"]:
+        if not classified:
             result["reason"] = "confidence below threshold"
         return result
+
+
+def _dictionary_path(config: dict[str, Any]) -> str | None:
+    value = (config.get("cpe_dictionary") or {}).get("path")
+    return str(value) if value else None
 
 
 def _classifier_from_config(config: dict[str, Any]) -> EmbeddingZeroShotClassifier:
@@ -233,6 +175,7 @@ def _classifier_from_config(config: dict[str, Any]) -> EmbeddingZeroShotClassifi
     return EmbeddingZeroShotClassifier(
         model_name=zero_shot["model_name"],
         confidence_threshold=float(zero_shot["confidence_threshold"]),
+        dictionary_path=_dictionary_path(config),
     )
 
 
@@ -242,13 +185,13 @@ def _reload_classifier_if_needed(
 ) -> EmbeddingZeroShotClassifier | None:
     if classifier is None:
         return _classifier_from_config(config) if config["zero_shot"].get("enabled") else None
-    taxonomy_version = aliases_fingerprint()
-    if classifier.taxonomy_version == taxonomy_version:
+    dictionary_version = cpe_fingerprint(_dictionary_path(config))
+    if classifier.dictionary_version == dictionary_version:
         return classifier
     log(
-        "alias taxonomy changed; reloading zero-shot labels",
-        previous_taxonomy_version=classifier.taxonomy_version,
-        taxonomy_version=taxonomy_version,
+        "CPE dictionary changed; reloading zero-shot labels",
+        previous_dictionary_version=classifier.dictionary_version,
+        dictionary_version=dictionary_version,
     )
     return _classifier_from_config(config)
 
@@ -256,37 +199,42 @@ def _reload_classifier_if_needed(
 def _disabled_classification() -> dict[str, Any]:
     return {
         "status": "unclassified",
-        "method": "rule_alias",
-        "reason": "no rule alias match and zero-shot disabled",
+        "reason": "zero-shot disabled",
+        "confidence": 0.0,
         "updated_at": utc_now_iso(),
     }
 
 
 def _success_classification(result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
+        "status": "classified",
         "vendor": result["vendor"],
         "product": result["product"],
+        "cpe": result["cpe"],
         "confidence": float(result["confidence"]),
-        "method": "zero_shot_embedding",
-        "matched_alias": result.get("matched_alias"),
-        "matched_text": result.get("matched_text"),
-        "status": "classified",
-        "classified_at": utc_now_iso(),
+        "dictionary_version": result.get("dictionary_version"),
+        "updated_at": utc_now_iso(),
     }
+    if result.get("method"):
+        payload["method"] = result["method"]
+    return payload
 
 
 def _low_confidence_classification(result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         "status": "unclassified",
-        "method": "zero_shot_embedding",
         "reason": result.get("reason") or "confidence below threshold",
         "confidence": float(result.get("confidence") or 0.0),
-        "best_vendor": result.get("vendor"),
-        "best_product": result.get("product"),
-        "matched_alias": result.get("matched_alias"),
-        "matched_text": result.get("matched_text"),
+        "dictionary_version": result.get("dictionary_version"),
         "updated_at": utc_now_iso(),
     }
+    if result.get("vendor") or result.get("product") or result.get("cpe"):
+        payload["candidate"] = {
+            "vendor": result.get("vendor"),
+            "product": result.get("product"),
+            "cpe": result.get("cpe"),
+        }
+    return payload
 
 
 def process_task(
@@ -303,75 +251,29 @@ def process_task(
     collection_name = str(task["collection"])
     document_id = str(task["document_id"])
     attempt = _attempt(task)
-    log(
-        "zero-shot task started",
-        collection=collection_name,
-        document_id=document_id,
-        attempt=attempt,
-        enabled=bool(config["zero_shot"].get("enabled")),
-    )
+    if collection_name != "cve":
+        log("zero-shot skipped non-CVE document", collection=collection_name, document_id=document_id)
+        return "skipped_non_cve"
+
     collection = database[collection_name]
     document = find_document(database, collection_name, document_id)
     if document is None:
         raise ValueError(f"Document not found: {collection_name}/{document_id}")
     if has_vendor_product(document):
-        log(
-            "zero-shot task skipped",
-            collection=collection_name,
-            document_id=document_id,
-            reason="already_has_vendor_product",
-        )
         return "skipped"
 
     if not bool(config["zero_shot"].get("enabled")):
         write_classification(collection, document_id, _disabled_classification())
-        log(
-            "zero-shot disabled; document marked unclassified",
-            collection=collection_name,
-            document_id=document_id,
-        )
         return "unclassified"
 
-    mark_processing(
-        collection,
-        document_id,
-        attempt=attempt,
-        method="zero_shot_embedding",
-    )
-    log(
-        "document marked processing",
-        level="DEBUG",
-        collection=collection_name,
-        document_id=document_id,
-        method="zero_shot_embedding",
-        attempt=attempt,
-    )
+    mark_processing(collection, document_id, attempt=attempt, method="zero_shot")
     classifier = classifier or _classifier_from_config(config)
     result = classifier.classify(document)
     if result.get("classified"):
         write_classification(collection, document_id, _success_classification(result))
-        log(
-            "zero-shot classification saved",
-            collection=collection_name,
-            document_id=document_id,
-            vendor=result.get("vendor"),
-            product=result.get("product"),
-            confidence=result.get("confidence"),
-            matched_alias=result.get("matched_alias"),
-        )
         return "classified"
 
     write_classification(collection, document_id, _low_confidence_classification(result))
-    log(
-        "zero-shot low-confidence result saved",
-        level="WARNING",
-        collection=collection_name,
-        document_id=document_id,
-        best_vendor=result.get("vendor"),
-        best_product=result.get("product"),
-        confidence=result.get("confidence"),
-        reason=result.get("reason"),
-    )
     return "unclassified"
 
 
@@ -383,28 +285,15 @@ def consume(config: dict[str, Any]) -> None:
     client = create_mongo_client(config)
     database = get_database(client, config)
     classifier = _classifier_from_config(config) if config["zero_shot"].get("enabled") else None
-    log(
-        "zero-shot worker initialized",
-        database=config["mongo"]["database"],
-        zero_shot_queue=config["queues"]["zero_shot"],
-        dead_letter_queue=config["queues"]["dead_letter"],
-        prefetch_count=config["worker"]["prefetch_count"],
-        max_attempts=config["worker"]["max_attempts"],
-        enabled=bool(config["zero_shot"].get("enabled")),
-        model_name=config["zero_shot"].get("model_name"),
-        confidence_threshold=config["zero_shot"].get("confidence_threshold"),
-    )
     try:
         while not STOP_EVENT.is_set():
             connection = None
             try:
-                log("connecting to RabbitMQ", level="DEBUG")
                 connection = connect(config)
                 channel = connection.channel()
                 declare_queues(channel, config)
                 channel.basic_qos(prefetch_count=int(config["worker"]["prefetch_count"]))
                 queue_name = config["queues"]["zero_shot"]
-                log("connected", queue=queue_name)
                 for method, _, body in channel.consume(queue_name, inactivity_timeout=1):
                     if STOP_EVENT.is_set():
                         break
@@ -414,23 +303,9 @@ def consume(config: dict[str, Any]) -> None:
                     try:
                         task = decode_message(body)
                         classifier = _reload_classifier_if_needed(classifier, config)
-                        log(
-                            "queue message received",
-                            level="DEBUG",
-                            collection=task.get("collection"),
-                            document_id=task.get("document_id"),
-                            attempt=task.get("attempt"),
-                            delivery_tag=method.delivery_tag,
-                        )
-                        result = process_task(database, channel, task, classifier, config)
-                        log(
-                            "processed task",
-                            result=result,
-                            collection=task.get("collection"),
-                            document_id=task.get("document_id"),
-                        )
+                        process_task(database, channel, task, classifier, config)
                     except Exception as exc:
-                        result = handle_task_error(
+                        handle_task_error(
                             database,
                             channel,
                             task,
@@ -438,19 +313,15 @@ def consume(config: dict[str, Any]) -> None:
                             config,
                             retry_queue=queue_name,
                         )
-                        log("task error handled", level="ERROR", result=result, error=exc)
                     channel.basic_ack(method.delivery_tag)
-                    log("queue message acked", level="DEBUG", delivery_tag=method.delivery_tag)
             except Exception as exc:
                 log("reconnecting after error", level="ERROR", error=exc)
                 STOP_EVENT.wait(5)
             finally:
                 if connection is not None and getattr(connection, "is_open", False):
                     connection.close()
-                    log("RabbitMQ connection closed", level="DEBUG")
     finally:
         client.close()
-        log("MongoDB client closed", level="DEBUG")
 
 
 def main() -> None:

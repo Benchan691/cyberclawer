@@ -26,5 +26,5 @@ vuln-scrape = "vuln_scraper.cli:main"
 mongodb-filter = "vuln_scraper.tui:main"
 
 [tool.setuptools.packages.find]
-include = ["vuln_scraper*"]
+include = ["vuln_scraper*", "vendor_product_classifier*"]
 namespaces = true

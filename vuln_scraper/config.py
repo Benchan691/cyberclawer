@@ -17,26 +17,6 @@ MAX_RESULT_LIMIT = 1000
 DEFAULT_MONGO_URI = "mongodb://localhost:27017"
 DEFAULT_MONGO_DATABASE = "vulnerabilities"
 DEFAULT_MONGO_COLLECTION = "vulnerabilities"
-DEFAULT_MONGO_COLLECTIONS = {
-    "avd": "avd",
-    "hkcert": "hkcert",
-    "cve": "cve",
-    "cisco": "cisco",
-    "zeroday": "zeroday",
-    "govcert": "govcert",
-    "github_advisory": "github_advisory",
-    "huawei_sa": "huawei_sa",
-    "paloalto": "paloalto",
-    "qianxin": "qianxin",
-    "ransomwarelive": "ransomwarelive",
-    "infosec": "infosec",
-    "splunk": "splunk",
-    "hikvision": "hikvision",
-    "cnnvd": "cnnvd",
-    "cnvd": "cnvd",
-    "juniper": "juniper",
-    "msrc": "msrc",
-}
 DEFAULT_MONGO_CONFIG_FILE = Path("mongodb.toml")
 DEFAULT_SCRAPERS_CONFIG_FILE = Path("scrapers.toml")
 MONGO_CONFLICT_MODES = {"prompt", "skip", "overwrite"}
@@ -470,10 +450,19 @@ def load_mongo_config(path: Path | str | None) -> dict[str, Any]:
     return mongo
 
 
+def _default_mongo_collections() -> dict[str, str]:
+    from vuln_scraper.scrapers import all_providers
+
+    return {
+        provider.key: provider.default_mongo_collection
+        for provider in all_providers()
+    }
+
+
 def mongo_collections_from_config(path: Path | str | None = DEFAULT_MONGO_CONFIG_FILE) -> dict[str, str]:
     config = load_mongo_config(path)
     configured = config.get("collections", {})
-    collections = dict(DEFAULT_MONGO_COLLECTIONS)
+    collections = _default_mongo_collections()
     if isinstance(configured, dict):
         collections.update(
             {

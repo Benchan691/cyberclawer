@@ -133,6 +133,8 @@ _VOLATILE_PROVIDER_DETAIL_FIELDS: dict[str, frozenset[str]] = {
     # Qianxin read counters and article navigation metadata change between API calls.
     "qianxin": frozenset({"read_num", "prev_article", "next_article", "raw"}),
 }
+_GLOBAL_DETAIL_DENYLIST = {"raw", "raw_tables", "raw_sections"}
+_CVE_DETAIL_DENYLIST = {"cve_id", "title", "published", "vuln_status", "affected_products"}
 
 
 def sanitize_details_for_storage(details: dict[str, Any]) -> dict[str, Any]:
@@ -144,6 +146,16 @@ def sanitize_details_for_storage(details: dict[str, Any]) -> dict[str, Any]:
         from vuln_scraper.scrapers.hkcert.parsers.detail import normalize_hkcert_detail
 
         sanitized["hkcert"] = normalize_hkcert_detail(hkcert)
+    for provider_key, provider_detail in sanitized.items():
+        if not isinstance(provider_detail, dict):
+            continue
+        for field in _GLOBAL_DETAIL_DENYLIST:
+            provider_detail.pop(field, None)
+        if provider_key != "cnvd":
+            provider_detail.pop("raw_fields", None)
+        if provider_key == "cve":
+            for field in _CVE_DETAIL_DENYLIST:
+                provider_detail.pop(field, None)
     return sanitized
 
 
@@ -159,7 +171,6 @@ def sanitize_details_for_content_compare(details: dict[str, Any]) -> dict[str, A
     for provider_key, provider_detail in sanitized.items():
         if not isinstance(provider_detail, dict):
             continue
-        provider_detail.pop("raw_tables", None)
         for field in _VOLATILE_PROVIDER_DETAIL_FIELDS.get(provider_key, ()):
             provider_detail.pop(field, None)
     return sanitized
@@ -175,7 +186,6 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
             cve_code = raw_cve
     return {
         "title": document.get("title"),
-        "cve_code": cve_code,
         "cve_codes": _normalized_document_cve_codes(document),
         "disclosure_date": document.get("disclosure_date"),
         "published_time": document.get("published_time"),
@@ -229,7 +239,6 @@ def _cve_codes_from_details(details: Any) -> list[str]:
 
 def _ensure_indexes(collection: Any) -> None:
     collection.create_index([("type", 1), ("code", 1)], unique=True)
-    collection.create_index("cve_code")
     collection.create_index("cve_codes")
     collection.create_index("related_cves.cve_code")
     collection.create_index("disclosure_date")
@@ -255,7 +264,6 @@ def _attach_related_cves(collection: Any, document: dict[str, Any]) -> None:
     if not links:
         return
     document["related_cves"] = links
-    document["related_cve_ids"] = [link["document_id"] for link in links]
 
 
 def _related_cve_links(database: Any, codes: list[str]) -> list[dict[str, str]]:
@@ -267,7 +275,7 @@ def _related_cve_links(database: Any, codes: list[str]) -> list[dict[str, str]]:
     try:
         documents = database["cve"].find(
             query,
-            {"_id": 1, "code": 1, "cve_code": 1, "cve_codes": 1, "details.cve.cve_id": 1},
+            {"_id": 1, "code": 1, "cve_codes": 1, "details.cve.cve_id": 1},
         )
     except Exception:
         return []
@@ -299,7 +307,6 @@ def _related_cve_query(codes: list[str]) -> dict[str, Any]:
             [
                 {"_id": {"$in": [f"cve:{form}" for form in forms]}},
                 {"code": {"$in": forms}},
-                {"cve_code": {"$in": forms}},
                 {"cve_codes": {"$in": forms}},
                 {"details.cve.cve_id": {"$in": forms}},
             ]
@@ -314,8 +321,7 @@ def _cve_codes_from_cve_document(document: dict[str, Any]) -> list[str]:
         _, separator, suffix = document_id.partition(":")
         if separator:
             values.append(suffix)
-    for field in ("code", "cve_code"):
-        values.append(document.get(field))
+    values.append(document.get("code"))
     raw_codes = document.get("cve_codes")
     if isinstance(raw_codes, list):
         values.extend(raw_codes)
@@ -381,9 +387,11 @@ def build_mongo_document(record: dict[str, Any], output: dict[str, Any]) -> dict
         cve_codes.insert(0, cve_code)
     elif cve_code is None and cve_codes:
         cve_code = cve_codes[0]
-    document["cve_code"] = cve_code
     document["cve_codes"] = cve_codes
     document.pop("cross_refs", None)
+    document.pop("cve_code", None)
+    document.pop("related_cve_ids", None)
+    document.pop("vuln_type", None)
     document.setdefault("details", {})
     document["details"] = sanitize_details_for_storage(document["details"])
     document["severity"] = severity_from_record(document) or ""
@@ -417,6 +425,8 @@ def _sync_one(
 
     result.conflicts += 1
     if _should_overwrite(document, existing, settings):
+        if isinstance(existing.get("classification"), dict):
+            document["classification"] = existing["classification"]
         collection.replace_one({"_id": identity}, document, upsert=True)
         result.overwritten += 1
     else:
@@ -424,7 +434,7 @@ def _sync_one(
 
 
 def _documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool:
-    ignored = {"scraped_at", "source"}
+    ignored = {"scraped_at", "source", "classification"}
     existing_core = copy.deepcopy({key: value for key, value in existing.items() if key not in ignored})
     document_core = copy.deepcopy({key: value for key, value in document.items() if key not in ignored})
     if "details" in existing_core:

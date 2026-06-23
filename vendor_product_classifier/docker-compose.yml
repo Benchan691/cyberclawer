@@ -11,10 +11,11 @@ x-classifier-service: &classifier-service
     PYTHONUNBUFFERED: "1"
     CLASSIFIER_CONFIG: /app/config/classifier.json
     CLASSIFIER_LOG_LEVEL: ${CLASSIFIER_LOG_LEVEL:-INFO}
+    CPE_DICTIONARY_PATH: ${CPE_DICTIONARY_PATH:-/app/fixtures/cpes.csv}
     SENTENCE_TRANSFORMERS_HOME: /app/models
   volumes:
     - ./config/classifier.json:/app/config/classifier.json:ro
-    - ./aliases.json:/app/aliases.json:ro
+    - ./fixtures:/app/fixtures:ro
     - ./models:/app/models
 
 services:

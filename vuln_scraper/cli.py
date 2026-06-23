@@ -139,6 +139,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report how many documents would change without writing to MongoDB.",
     )
+
+    migrate_parser = subparsers.add_parser(
+        "migrate-mongo",
+        help="Clean legacy MongoDB vulnerability documents.",
+    )
+    migrate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report changes without writing to MongoDB.",
+    )
+    migrate_parser.add_argument(
+        "--database",
+        default=None,
+        help="MongoDB database name override.",
+    )
+
+    reclassify_parser = subparsers.add_parser(
+        "reclassify-cve",
+        help="Re-run CVE vendor/product classification for all cve collection documents.",
+    )
+    reclassify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report changes without writing to MongoDB.",
+    )
+    reclassify_parser.add_argument(
+        "--database",
+        default=None,
+        help="MongoDB database name override.",
+    )
+    reclassify_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum CVE documents to scan.",
+    )
+    reclassify_parser.add_argument(
+        "--zero-shot",
+        action="store_true",
+        help="Run embedding classification when dictionary lookup misses (slow on large collections).",
+    )
     return parser
 
 
@@ -345,6 +386,68 @@ def main(argv: list[str] | None = None) -> None:
             f"{prefix}: scanned={scanned} "
             f"{'would_update' if args.dry_run else 'updated'}={updated} "
             f"unchanged={unchanged} skipped={skipped} total={len(results)}"
+        )
+        return
+
+    if args.command == "migrate-mongo":
+        from .migrate_mongo import migrate_mongo
+        from .mongo import create_mongo_client
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[args.database or settings.mongo_database]
+            results = migrate_mongo(
+                database,
+                dry_run=args.dry_run,
+                mongo_config_file=settings.mongo_config_file,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+
+        scanned = sum(result.scanned for result in results)
+        updated = sum(result.updated for result in results)
+        action = "would_update" if args.dry_run else "updated"
+        for result in results:
+            print(f"{result.collection}: scanned={result.scanned} {action}={result.updated}")
+        print(f"migrate-mongo: scanned={scanned} {action}={updated} collections={len(results)}")
+        return
+
+    if args.command == "reclassify-cve":
+        from pathlib import Path
+
+        from vendor_product_classifier.mongo_utils import load_config as load_classifier_config
+        from vendor_product_classifier.reclassify_cve import reclassify_cve
+
+        from .mongo import create_mongo_client
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        classifier_config = load_classifier_config(
+            Path(__file__).resolve().parents[1] / "vendor_product_classifier",
+            require_secrets=False,
+        )
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[args.database or settings.mongo_database]
+            stats = reclassify_cve(
+                database,
+                classifier_config,
+                dry_run=args.dry_run,
+                limit=args.limit,
+                use_zero_shot=args.zero_shot,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+
+        action = "would_update" if args.dry_run else "updated"
+        print(
+            f"reclassify-cve: scanned={stats.scanned} {action}={stats.updated} "
+            f"unchanged={stats.unchanged} classified={stats.classified} "
+            f"unclassified={stats.unclassified} errors={stats.errors}"
         )
         return
 

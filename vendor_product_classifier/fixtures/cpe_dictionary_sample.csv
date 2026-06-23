@@ -1,0 +1,4 @@
+cpe,vendor,product,title,deprecated
+cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*,Cisco,IOS XE,Cisco IOS XE,false
+cpe:2.3:a:cisco:catalyst_sd-wan_manager:*:*:*:*:*:*:*:*,Cisco,Catalyst SD-WAN Manager,Cisco Catalyst SD-WAN Manager,false
+cpe:2.3:o:redhat:enterprise_linux:*:*:*:*:*:*:*:*,Red Hat,Enterprise Linux,Red Hat Enterprise Linux,false

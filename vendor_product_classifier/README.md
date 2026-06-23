@@ -1,26 +1,19 @@
 # Vendor/Product Classifier
 
-Standalone background workers for classifying vulnerability MongoDB documents by vendor and product. The pipeline is independent of the Flask web server: it does not import `app.py`, routes, templates, sessions, Company AI, report generation, or any web UI code.
-
-The only shared systems are MongoDB, RabbitMQ, `.env` secrets, and `config/classifier.json`.
+Standalone RabbitMQ workers that classify only the MongoDB `cve` collection.
 
 ## Pipeline
 
 ```text
 scanner -> vendor_product_classification_intake -> classifier worker
+                                               | dictionary lookup (hit -> MongoDB)
                                                -> vendor_product_zero_shot -> zero-shot worker
                                                -> vendor_product_classification_dead
 ```
 
-The scanner finds vulnerability documents without `classification.vendor` or `classification.product`, skips active/classified work, publishes a lightweight RabbitMQ task, and marks the document `queued`.
-
-The classifier worker reloads the MongoDB document, applies rule/alias matching first, and writes a `classified` result when it finds an exact alias match. Unmatched documents are marked `pending_zero_shot` and sent to the zero-shot queue.
-
-The zero-shot worker uses `sentence-transformers` with `BAAI/bge-small-en-v1.5` by default. It embeds document evidence and aliases from `aliases.json`, classifies matches above the configured threshold, and marks lower-confidence records `unclassified`.
+The scanner queues CVE documents missing a final vendor/product classification. The classifier worker extracts vendor/product evidence from `details.cve.affected`, CPE in `details.cve.configurations`, root `title`, and English `details.cve.descriptions`, then searches the local CPE dictionary. On a hit it writes `method: dictionary` and skips zero-shot. On a miss it queues the zero-shot worker, which uses embeddings against the same dictionary.
 
 ## Configuration
-
-Create `.env` from the example:
 
 ```bash
 cp .env.example .env
@@ -33,53 +26,63 @@ ATLAS_MONGO_URI=
 RABBITMQ_URL=
 ```
 
-Non-secret settings live in `config/classifier.json`, including MongoDB database/collections, queue names, scanner interval, retry limits, and zero-shot model settings.
+`config/classifier.json` contains MongoDB, queue, retry, `dictionary_lookup`, model, and `cpe_dictionary.path` settings. `CPE_DICTIONARY_PATH` overrides the JSON path.
 
-Logs are JSON lines written to stdout. The default level is `INFO`; set `CLASSIFIER_LOG_LEVEL=DEBUG` in the process environment for per-document scanner decisions, RabbitMQ publish details, and zero-shot embedding steps. Keep `.env` for secrets only.
+The bundled `fixtures/cpes.csv` is the default dictionary (`vendor`,`product` columns; full CPE URIs are synthesized). `fixtures/cpe_dictionary_sample.csv` remains available for small test fixtures.
 
-Default queues:
+## Classification Shape
 
-- `vendor_product_classification_intake`
-- `vendor_product_zero_shot`
-- `vendor_product_classification_dead`
-
-## MongoDB Fields
-
-Queued documents are written as:
+See [`../database.md`](../database.md) for the canonical MongoDB schema. Successful records use classification v2:
 
 ```json
 {
-  "classification": {
-    "status": "queued",
-    "queued_at": "ISO_DATE",
-    "classifier_version": 1,
-    "taxonomy_version": "ALIASES_SHA256_PREFIX"
-  }
+  "status": "classified",
+  "vendor": "Cisco",
+  "product": "IOS XE",
+  "cpe": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
+  "confidence": 0.91,
+  "method": "dictionary",
+  "dictionary_version": "CPE_CSV_SHA256_PREFIX",
+  "classifier_version": 2,
+  "updated_at": "ISO_DATE"
 }
 ```
-
-Successful rule matches use `method` values `rule_alias_strong` or `rule_alias_weak`. Successful zero-shot matches use `zero_shot_embedding`. Failures use `status: "failed"` with `error`, `attempts`, and `updated_at`.
-
-Only the `classification` subdocument is updated.
-
-Unclassified documents store the current `taxonomy_version`. The scanner skips unclassified records already checked against the current `aliases.json`, and automatically requeues them after the alias taxonomy changes.
 
 ## Docker
 
 ```bash
 cd vendor_product_classifier
 cp .env.example .env
-# edit ATLAS_MONGO_URI and RABBITMQ_URL
 docker compose up -d --build
 ```
 
-Zero-shot is enabled by default. On the first zero-shot classification task, `zero-shot-worker` may download the embedding model into `./models`.
-
-To debug with verbose logs:
+To use a full dictionary:
 
 ```bash
-CLASSIFIER_LOG_LEVEL=DEBUG docker compose up --build
+CPE_DICTIONARY_PATH=/app/fixtures/cpes.csv docker compose up -d --build
 ```
+
+## Dictionary upgrade migration
+
+After switching dictionaries or fixing classification logic, re-run classification for all CVE records:
+
+```bash
+# from repo root — uses mongodb.toml for MongoDB and classifier.json for the CPE dictionary
+vuln-scrape reclassify-cve --dry-run
+vuln-scrape reclassify-cve --database vulnerabilities
+
+# optional: embedding fallback for dictionary misses (slow on large collections)
+vuln-scrape reclassify-cve --database vulnerabilities --zero-shot
+```
+
+Or from `vendor_product_classifier/` with `ATLAS_MONGO_URI` in `.env`:
+
+```bash
+python -m vendor_product_classifier.reclassify_cve --dry-run
+python -m vendor_product_classifier.reclassify_cve --database vulnerabilities
+```
+
+The script scans every `cve` document, re-runs dictionary lookup (and optional zero-shot fallback), and overwrites `classification` when the result differs. Run `vuln-scrape migrate-mongo` first if legacy classification fields still need normalization.
 
 ## Native Python
 
@@ -88,53 +91,12 @@ cd vendor_product_classifier
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# edit .env
 python classifier_scanner.py
 python classifier_worker.py
 python zero_shot_worker.py
 ```
 
-Run each command in its own terminal or process supervisor.
-
-## Test With One Document
-
-Insert or update one test document in a configured collection:
-
-```javascript
-db.cisco.updateOne(
-  { _id: "cisco:test-vmanage" },
-  {
-    $set: {
-      title: "Example Cisco advisory",
-      details: {
-        cisco: {
-          product_names: ["Cisco Catalyst SD-WAN Manager"]
-        }
-      },
-      classification: { status: "unclassified" }
-    }
-  },
-  { upsert: true }
-)
-```
-
-After the scanner and worker run, the document should contain:
-
-```json
-{
-  "classification": {
-    "vendor": "Cisco",
-    "product": "Catalyst SD-WAN Manager",
-    "method": "rule_alias_strong",
-    "status": "classified"
-  }
-}
-```
-
-## Local Tests
-
-From the `avd` repository root:
+## Tests
 
 ```bash
 pytest tests/test_vendor_product_classifier.py

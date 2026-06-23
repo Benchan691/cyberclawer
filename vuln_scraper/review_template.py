@@ -108,7 +108,7 @@ def _cve(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         document,
         description=_join(_nested_values(detail.get("descriptions"), "value")),
         impacts=severity,
-        affected=_join(detail.get("affected_products")) or _cve_affected(detail.get("configurations")),
+        affected=_cve_affected(detail),
         cve=detail.get("cve_id") or document.get("code"),
         related_link=_join(_nested_values(detail.get("references"), "url")),
     )
@@ -379,7 +379,17 @@ def _generic(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
     )
 
 
-def _cve_affected(configurations: Any) -> str:
+def _cve_affected(detail: dict[str, Any]) -> str:
+    affected = _join_dicts(
+        detail.get("affected"),
+        lambda item: _parts(item.get("vendor"), item.get("product")),
+    )
+    if affected:
+        return affected
+    legacy = _join(detail.get("affected_products"))
+    if legacy:
+        return legacy
+    configurations = detail.get("configurations")
     lines: list[str] = []
     for configuration in _dicts(configurations):
         for node in _dicts(configuration.get("nodes")):
@@ -824,6 +834,10 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
     if provider == "cve":
         return _mfirst(
             [
+                _mjoin_mapped(
+                    f"{detail}.affected",
+                    _mconcat_parts(["$$item.vendor", "$$item.product"]),
+                ),
                 _mjoin(f"{detail}.affected_products"),
                 _mongo_cve_affected(f"{detail}.configurations"),
             ]

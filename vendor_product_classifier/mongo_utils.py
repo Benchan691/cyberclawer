@@ -11,11 +11,11 @@ from pymongo import MongoClient
 try:
     from . import CLASSIFIER_VERSION
 except ImportError:
-    CLASSIFIER_VERSION = 1
+    CLASSIFIER_VERSION = 2
 
 
-ACTIVE_STATUSES = {"queued", "processing", "classified", "pending_zero_shot", "vendor_only"}
-REQUEUE_STATUSES = {"unclassified", "failed", "vendor_only"}
+ACTIVE_STATUSES = {"queued", "processing", "classified"}
+REQUEUE_STATUSES = {"unclassified", "failed"}
 
 
 def classifier_dir() -> Path:
@@ -32,11 +32,13 @@ def utc_now_iso() -> str:
 
 def current_taxonomy_version() -> str:
     try:
-        from .rule_alias import aliases_fingerprint
+        from .cpe_dictionary import cpe_fingerprint
     except ImportError:
-        from rule_alias import aliases_fingerprint
+        from cpe_dictionary import cpe_fingerprint
 
-    return aliases_fingerprint()
+    config = load_config(require_secrets=False)
+    path = (config.get("cpe_dictionary") or {}).get("path")
+    return cpe_fingerprint(path)
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -124,9 +126,10 @@ def has_vendor_product(document: dict[str, Any]) -> bool:
 def build_unclassified_query() -> dict[str, Any]:
     return {
         "$or": [
+            {"classification": {"$exists": False}},
             {"classification.vendor": {"$exists": False}},
             {"classification.product": {"$exists": False}},
-            {"classification.status": {"$in": ["unclassified", "failed", "vendor_only"]}},
+            {"classification.status": {"$in": ["unclassified", "failed"]}},
             {"classification.status": {"$exists": False}},
         ]
     }
@@ -189,7 +192,7 @@ def queue_decision(
         return False, "has_vendor_product"
 
     status = classification_status(document)
-    if status in {"classified", "pending_zero_shot"}:
+    if status == "classified":
         return False, status
     if status in {"queued", "processing"}:
         stale = is_stale_claim(
@@ -206,14 +209,14 @@ def queue_decision(
         return False, "failed_max_attempts"
     if status is None:
         return True, "missing_status"
-    if status in {"unclassified", "vendor_only"}:
+    if status == "unclassified":
         classification = document.get("classification") or {}
-        previous_taxonomy = classification.get("taxonomy_version")
+        previous_taxonomy = classification.get("dictionary_version") or classification.get("taxonomy_version")
         if previous_taxonomy == taxonomy_version:
-            return False, f"{status}_current_taxonomy"
+            return False, "unclassified_current_dictionary"
         if previous_taxonomy:
-            return True, "taxonomy_updated"
-        return True, "missing_taxonomy_version"
+            return True, "dictionary_updated"
+        return True, "missing_dictionary_version"
     if status in REQUEUE_STATUSES:
         return True, status
     return False, f"unsupported_status:{status}"
@@ -225,8 +228,9 @@ def find_document(database: Any, collection_name: str, document_id: str) -> dict
 
 def write_classification(collection: Any, document_id: str, classification: dict[str, Any]) -> Any:
     payload = dict(classification)
-    payload["classifier_version"] = CLASSIFIER_VERSION
-    payload["taxonomy_version"] = current_taxonomy_version()
+    payload.setdefault("classifier_version", CLASSIFIER_VERSION)
+    if payload.get("status") in {"classified", "unclassified"}:
+        payload.setdefault("dictionary_version", current_taxonomy_version())
     return collection.update_one(
         {"_id": document_id},
         {"$set": {"classification": payload}},

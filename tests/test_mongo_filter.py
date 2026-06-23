@@ -102,7 +102,7 @@ def test_filter_fields_for_provider_uses_hkcert_fields() -> None:
 
     assert "details.hkcert.risk_level" in categorical_fields
     assert "cve_code" not in categorical_fields
-    assert "cve_code" in text_fields
+    assert "cve_codes" in text_fields
     assert "details.hkcert.solutions" in text_fields
     assert "details.hkcert.summary" in text_fields
     assert "details.hkcert.table.name" in text_fields
@@ -267,10 +267,10 @@ def test_sanitize_curses_text_strips_control_characters() -> None:
 
 
 def test_tui_field_list_deduplicates_overlapping_fields() -> None:
-    assert _dedupe_fields(("type", "status", "type", "cve_code", "cve_code")) == (
+    assert _dedupe_fields(("type", "status", "type", "cve_codes", "cve_codes")) == (
         "type",
         "status",
-        "cve_code",
+        "cve_codes",
     )
 
 
@@ -319,7 +319,7 @@ def record(avd_id: str, disclosure_date: str, status: str, title: str, *, produc
         "_id": f"avd:{code}",
         "type": "avd",
         "code": code,
-        "cve_code": code,
+        "cve_codes": [code],
         "title": title,
         "vuln_type": "CWE-78",
         "disclosure_date": disclosure_date,

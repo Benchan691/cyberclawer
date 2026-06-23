@@ -17,14 +17,15 @@ def test_build_mongo_document_requires_type_and_code() -> None:
         build_mongo_document({"title": "missing id"}, output_payload())
 
 
-def test_build_mongo_document_sets_lowercase_identity_and_cve_code() -> None:
+def test_build_mongo_document_sets_lowercase_identity_and_cve_codes() -> None:
     document = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
 
     assert document["_id"] == "avd:2026-10001"
     assert document["type"] == "avd"
     assert document["code"] == "2026-10001"
-    assert document["cve_code"] == "2026-10001"
+    assert "cve_code" not in document
     assert document["cve_codes"] == ["2026-10001"]
+    assert "vuln_type" not in document
     assert "cross_refs" not in document
     assert document["source"] == "test-source"
     assert document["severity"] == ""
@@ -57,7 +58,6 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
     assert result.inserted == 1
     assert collection.indexes == [
         ([("type", 1), ("code", 1)], True),
-        ("cve_code", False),
         ("cve_codes", False),
         ("related_cves.cve_code", False),
         ("disclosure_date", False),
@@ -99,7 +99,7 @@ def test_sync_stores_all_raw_output_records() -> None:
 
     assert result.inserted == 2
     assert set(collection.documents) == {"avd:2026-10001", "avd:2026-10002"}
-    assert collection.documents["avd:2026-10002"]["cve_code"] is None
+    assert "cve_code" not in collection.documents["avd:2026-10002"]
     assert collection.documents["avd:2026-10002"]["cve_codes"] == []
 
 
@@ -189,7 +189,7 @@ def test_build_mongo_document_derives_hkcert_cve_codes_from_identifiers() -> Non
         output_payload(),
     )
 
-    assert document["cve_code"] == "2025-48595"
+    assert "cve_code" not in document
     assert document["cve_codes"] == ["2025-48595", "2025-48633"]
 
 
@@ -228,10 +228,55 @@ def test_sync_links_hkcert_cve_codes_to_existing_cve_documents() -> None:
 
     assert result.inserted == 1
     document = hkcert_collection.documents["hkcert:android-multiple-vulnerabilities"]
-    assert document["related_cve_ids"] == ["cve:2025-48595"]
+    assert "related_cve_ids" not in document
     assert document["related_cves"] == [
         {"collection": "cve", "document_id": "cve:2025-48595", "cve_code": "2025-48595"}
     ]
+
+
+def test_sync_preserves_classification_on_overwrite() -> None:
+    collection = FakeCollection()
+    existing = build_mongo_document(record("2026-10001", title="old"), output_payload())
+    existing["classification"] = {"status": "classified", "vendor": "Cisco", "product": "IOS XE"}
+    collection.documents["avd:2026-10001"] = existing
+    settings = ScraperSettings(mongo_enabled=True, mongo_conflict="overwrite")
+
+    result = sync_output_to_mongo(
+        output_payload([record("2026-10001", title="new")]),
+        settings,
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.overwritten == 1
+    assert collection.documents["avd:2026-10001"]["title"] == "new"
+    assert collection.documents["avd:2026-10001"]["classification"] == existing["classification"]
+
+
+def test_build_mongo_document_strips_raw_detail_fields() -> None:
+    document = build_mongo_document(
+        {
+            "type": "cve",
+            "code": "2026-10001",
+            "title": "title",
+            "details": {
+                "cve": {
+                    "cve_id": "CVE-2026-10001",
+                    "title": "duplicate",
+                    "published": "2026-01-01",
+                    "vuln_status": "PUBLISHED",
+                    "affected_products": ["Cisco IOS XE"],
+                    "raw": {"big": "blob"},
+                    "affected": [{"vendor": "Cisco", "product": "IOS XE"}],
+                }
+            },
+        },
+        output_payload(),
+    )
+
+    assert document["cve_codes"] == ["2026-10001"]
+    assert document["details"]["cve"] == {
+        "affected": [{"vendor": "Cisco", "product": "IOS XE"}]
+    }
 
 
 def test_sync_skips_unchanged_hkcert_when_only_views_change() -> None:
