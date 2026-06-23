@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     _configure_logging()
 
     if args.command == "run":
-        from .providers import get_provider
+        from .scrapers import get_provider
         from .runner import ScraperRunner
 
         try:
@@ -239,7 +239,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "review":
         from .mongo import create_mongo_client
-        from .providers import get_provider
+        from .scrapers import get_provider
         from .review_template import refresh_review_views
 
         providers = list(args.providers)
@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "backfill-severity":
         from .backfill_severity import backfill_severity
         from .mongo import create_mongo_client
-        from .providers import get_provider
+        from .scrapers import get_provider
 
         providers = list(args.providers)
         try:

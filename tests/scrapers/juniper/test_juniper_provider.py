@@ -5,7 +5,7 @@ import pytest
 
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.models import ListEntry, VulnerabilityId
-from vuln_scraper.providers import JuniperProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import JuniperProvider, get_provider, provider_keys
 from vuln_scraper.runner import ScraperRunner
 
 

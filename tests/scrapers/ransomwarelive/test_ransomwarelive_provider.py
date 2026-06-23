@@ -1,6 +1,6 @@
 import pytest
 
-from vuln_scraper.providers import RansomwareLiveProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import RansomwareLiveProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.ransomwarelive.provider import RansomwareLiveAuthError
 
 

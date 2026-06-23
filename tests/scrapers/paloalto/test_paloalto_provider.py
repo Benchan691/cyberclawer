@@ -1,4 +1,4 @@
-from vuln_scraper.providers import PaloAltoProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import PaloAltoProvider, get_provider, provider_keys
 
 
 def test_paloalto_provider_urls_and_registry() -> None:

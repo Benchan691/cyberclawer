@@ -6,7 +6,7 @@ from typing import Any
 
 from vuln_scraper.config import DEFAULT_MONGO_CONFIG_FILE, mongo_collection_for_provider
 from vuln_scraper.mongo import _ensure_indexes
-from vuln_scraper.providers import get_provider, provider_keys
+from vuln_scraper.scrapers import get_provider, provider_keys
 from vuln_scraper.severity import severity_from_record
 
 

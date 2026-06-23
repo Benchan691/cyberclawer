@@ -1,4 +1,4 @@
-from vuln_scraper.providers import CNVDProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import CNVDProvider, get_provider, provider_keys
 from vuln_scraper.models import ListEntry, VulnerabilityId
 
 

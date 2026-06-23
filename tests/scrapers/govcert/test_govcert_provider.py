@@ -1,4 +1,4 @@
-from vuln_scraper.providers import GovCERTProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import GovCERTProvider, get_provider, provider_keys
 
 
 def test_govcert_provider_urls_and_registry() -> None:

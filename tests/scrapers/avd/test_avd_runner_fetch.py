@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from vuln_scraper.config import ScraperSettings
-from vuln_scraper.providers import get_provider
+from vuln_scraper.scrapers import get_provider
 from vuln_scraper.runner import ScraperRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"

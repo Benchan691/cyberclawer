@@ -12,7 +12,7 @@ from pathlib import Path
 from dataclasses import replace
 
 from vuln_scraper.config import default_scrape_settings
-from vuln_scraper.providers import get_provider
+from vuln_scraper.scrapers import get_provider
 from vuln_scraper.runner import ScraperRunner
 from vuln_scraper.scrapers.cnvd.session import CNVDSession, CNVDSessionError
 

@@ -1,6 +1,6 @@
 import pytest
 
-from vuln_scraper.providers import SplunkProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import SplunkProvider, get_provider, provider_keys
 
 
 def test_splunk_provider_registry_and_defaults() -> None:

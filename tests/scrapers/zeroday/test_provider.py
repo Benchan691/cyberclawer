@@ -1,4 +1,4 @@
-from vuln_scraper.providers import ZeroDayProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import ZeroDayProvider, get_provider, provider_keys
 
 
 def test_zero_day_provider_urls_and_registry() -> None:

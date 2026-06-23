@@ -1,5 +1,5 @@
 from vuln_scraper.models import ListEntry, VulnerabilityId
-from vuln_scraper.providers import AVDProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import AVDProvider, get_provider, provider_keys
 
 
 def test_avd_provider_registry_and_defaults() -> None:

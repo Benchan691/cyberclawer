@@ -1,6 +1,6 @@
 from urllib.parse import parse_qs, urlparse
 
-from vuln_scraper.providers import GitHubAdvisoryProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import GitHubAdvisoryProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.github_advisory.config import DETAIL_URL, LIST_URL
 
 

@@ -14,7 +14,7 @@ from vuln_scraper.catch_up import (
     run_catch_up_cycle,
 )
 from vuln_scraper.config import default_scrape_settings
-from vuln_scraper.providers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
+from vuln_scraper.scrapers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
 
 
 def test_provider_caught_up_ignores_overlap() -> None:

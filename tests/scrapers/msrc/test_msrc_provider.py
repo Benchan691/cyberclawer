@@ -1,7 +1,7 @@
 from urllib.parse import unquote, urlparse
 
 from vuln_scraper.models import ListEntry, VulnerabilityId
-from vuln_scraper.providers import MSRCProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import MSRCProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.msrc.config import DETAIL_URL, LIST_URL
 
 

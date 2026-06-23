@@ -1,4 +1,4 @@
-from vuln_scraper.scrapers.cve import CVEProvider
+from vuln_scraper.scrapers import CVEProvider
 from vuln_scraper.scrapers.cve.parsers.detail import parse_cve_detail_response
 from vuln_scraper.scrapers.cve.parsers.list import parse_cve_delta_log, parse_cve_list
 

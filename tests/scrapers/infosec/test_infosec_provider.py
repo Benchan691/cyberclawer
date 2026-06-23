@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from vuln_scraper.providers import InfoSecProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import InfoSecProvider, get_provider, provider_keys
 
 
 def test_infosec_provider_urls_and_registry() -> None:

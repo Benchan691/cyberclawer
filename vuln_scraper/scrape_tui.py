@@ -9,7 +9,7 @@ from typing import Any
 from .config import MAX_RESULT_LIMIT, default_scrape_settings, error_log_path_for_settings
 from .error_log import log_uncaught_provider_error
 from .filters import validate_limit
-from .providers import get_provider, provider_keys
+from .scrapers import get_provider, provider_keys
 from .runner import ScraperRunner
 from .tui import safe_addnstr
 

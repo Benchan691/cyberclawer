@@ -1,4 +1,4 @@
-from vuln_scraper.providers import QianxinProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import QianxinProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.qianxin.config import DEFAULT_PAGE_SIZE, DETAIL_API_URL, LIST_API_URL
 
 

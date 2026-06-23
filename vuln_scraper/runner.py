@@ -25,7 +25,7 @@ from .mongo import (
     existing_identity_keys,
     sync_records_to_collection,
 )
-from .providers import ScraperProvider
+from .scrapers import ScraperProvider
 from .table_extractor import extract_raw_tables
 from .timestamps import record_updated_at_or_after
 

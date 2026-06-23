@@ -10,12 +10,9 @@ Create this structure under `vuln_scraper/scrapers/`:
 
 ```text
 vuln_scraper/scrapers/<provider>/
-  __init__.py
   config.py
-  filter_fields.py
   provider.py
   parsers/
-    __init__.py
     list.py
     detail.py
 ```
@@ -55,12 +52,6 @@ tests/scrapers/<provider>/
   - Parse list response into `ListPage` + `ListEntry`.
 - `vuln_scraper/scrapers/<provider>/parsers/detail.py`
   - Parse detail response into a typed detail record with `to_dict()`.
-- `vuln_scraper/scrapers/<provider>/filter_fields.py`
-  - Provide categorical and text filter fields for `mongodb-filter`.
-- `vuln_scraper/scrapers/<provider>/__init__.py`
-  - Export `<ProviderName>Provider`.
-- `vuln_scraper/scrapers/<provider>/parsers/__init__.py`
-  - Export parser entrypoints.
 - `tests/scrapers/<provider>/test_provider.py`
   - Validate URL behavior, registry inclusion, and provider defaults.
 - `tests/scrapers/<provider>/test_parsers.py`
@@ -74,10 +65,9 @@ tests/scrapers/<provider>/
 - Add provider to `PROVIDERS` (dict insertion order controls `catch-up` iteration;
   `provider_keys()` is sorted alphabetically for CLI/help).
 
-### `vuln_scraper/providers.py`
+### `vuln_scraper/mongo_filter.py`
 
-- Re-export the provider from `vuln_scraper.scrapers.<provider>`.
-- Add it to `__all__`.
+- Add provider-specific categorical/text paths to `FILTER_FIELDS`.
 
 ### `vuln_scraper/config.py`
 
@@ -92,7 +82,7 @@ tests/scrapers/<provider>/
 - Add `[scrapers.<provider>]` to tune `retries`, `backoff_base`, `backoff_max`,
   `backoff_jitter`, and CNVD-only `session_max_retries` / `session_retry_delay`.
 - Add `[scrapers.catch_up]` with `providers = ["all"]` or a provider list such as
-  `providers = ["hkcert", "cve"]` to control which scrapers `python scrape.py catch-up`
+  `providers = ["hkcert", "cve"]` to control which scrapers `vuln-scrape catch-up`
   runs. Omit the section to run all scrapers.
 - Failures append to the combined log configured by `[scrapers.defaults] error_log`.
 
@@ -123,7 +113,7 @@ tests/scrapers/<provider>/
 - [ ] `list_url` and `detail_url` are deterministic and correctly encoded.
 - [ ] Parser output includes stable identity fields (`type`, `code`, optional `cve_code`).
 - [ ] `details.<provider>` structure is consistent and serializable.
-- [ ] Filter fields point to real document paths.
+- [ ] `FILTER_FIELDS` paths point to real document paths.
 - [ ] New provider appears in `provider_keys()` and `get_provider()`.
 - [ ] Sync cycle includes provider and writes to intended Mongo collection.
 - [ ] Tests pass.
@@ -134,4 +124,3 @@ tests/scrapers/<provider>/
 PYTHONPATH=. uv run pytest -q
 PYTHONPATH=. uv run pytest -q tests/scrapers/<provider>
 ```
-

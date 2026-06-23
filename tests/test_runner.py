@@ -10,22 +10,22 @@ import pytest
 from vuln_scraper.client import FetchResult
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import Checkpoint, ScraperRunner
-from vuln_scraper.scrapers.cisco import CiscoProvider
-from vuln_scraper.scrapers.cnnvd import CNNVDProvider
-from vuln_scraper.scrapers.cnvd import CNVDProvider
-from vuln_scraper.scrapers.cve import CVEProvider
-from vuln_scraper.scrapers.govcert import GovCERTProvider
-from vuln_scraper.scrapers.hkcert import HKCERTProvider
-from vuln_scraper.scrapers.hikvision import HikvisionProvider
-from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
-from vuln_scraper.scrapers.infosec import InfoSecProvider
-from vuln_scraper.scrapers.juniper import JuniperProvider
-from vuln_scraper.scrapers.msrc import MSRCProvider
-from vuln_scraper.scrapers.paloalto import PaloAltoProvider
-from vuln_scraper.scrapers.qianxin import QianxinProvider
-from vuln_scraper.scrapers.ransomwarelive import RansomwareLiveProvider
-from vuln_scraper.scrapers.splunk import SplunkProvider
-from vuln_scraper.scrapers.zeroday import ZeroDayProvider
+from vuln_scraper.scrapers import CiscoProvider
+from vuln_scraper.scrapers import CNNVDProvider
+from vuln_scraper.scrapers import CNVDProvider
+from vuln_scraper.scrapers import CVEProvider
+from vuln_scraper.scrapers import GovCERTProvider
+from vuln_scraper.scrapers import HKCERTProvider
+from vuln_scraper.scrapers import HikvisionProvider
+from vuln_scraper.scrapers import HuaweiSAProvider
+from vuln_scraper.scrapers import InfoSecProvider
+from vuln_scraper.scrapers import JuniperProvider
+from vuln_scraper.scrapers import MSRCProvider
+from vuln_scraper.scrapers import PaloAltoProvider
+from vuln_scraper.scrapers import QianxinProvider
+from vuln_scraper.scrapers import RansomwareLiveProvider
+from vuln_scraper.scrapers import SplunkProvider
+from vuln_scraper.scrapers import ZeroDayProvider
 
 from tests.fake_avd_provider import FakeAvdProvider
 from vuln_scraper.timestamps import LOCAL_TIMEZONE, document_updated_time

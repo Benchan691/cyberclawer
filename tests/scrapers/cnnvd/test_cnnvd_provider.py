@@ -1,5 +1,5 @@
 from vuln_scraper.models import ListEntry, VulnerabilityId
-from vuln_scraper.providers import CNNVDProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import CNNVDProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.cnnvd.config import DETAIL_API_URL, LIST_API_URL, SOURCE_URL
 
 

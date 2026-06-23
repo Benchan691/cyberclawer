@@ -1,6 +1,6 @@
 from vuln_scraper.config import default_scrape_settings
 from vuln_scraper.models import ListEntry, VulnerabilityId
-from vuln_scraper.providers import get_provider
+from vuln_scraper.scrapers import get_provider
 from vuln_scraper.runner import ScraperRunner
 
 

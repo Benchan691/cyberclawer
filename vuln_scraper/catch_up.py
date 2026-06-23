@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
 from .error_log import log_uncaught_provider_error
-from .providers import ScraperProvider, all_providers, provider_keys
+from .scrapers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
 from .timestamps import today_start
 

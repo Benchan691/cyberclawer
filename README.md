@@ -53,8 +53,8 @@ side paths) can use a proxy without affecting the MongoDB connection. Set
 # .env
 SCRAPER_PROXY=http://127.0.0.1:7890
 
-python scrape.py tui
-python scrape.py run avd --limit 10 --proxy http://127.0.0.1:7890
+vuln-scrape tui
+vuln-scrape run avd --limit 10 --proxy http://127.0.0.1:7890
 ```
 
 If `SCRAPER_PROXY` is unset, `HTTPS_PROXY` and then `HTTP_PROXY` are used. Prefer
@@ -70,8 +70,8 @@ All scrapers use one MongoDB database, with one collection per scraper.
 
 | Scraper folder | MongoDB collection | Ingest CLI |
 | --- | --- | --- |
-| `vuln_scraper/scrapers/avd/` | `avd` | `python scrape.py run avd --limit 100` / `python scrape.py tui` |
-| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `python scrape.py tui` / `python scrape.py catch-up` |
+| `vuln_scraper/scrapers/avd/` | `avd` | `vuln-scrape run avd --limit 100` / `vuln-scrape tui` |
+| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `vuln-scrape tui` / `vuln-scrape catch-up` |
 | `vuln_scraper/scrapers/cve/` | `cve` | same |
 | `vuln_scraper/scrapers/cisco/` | `cisco` | same |
 | `vuln_scraper/scrapers/zeroday/` | `zeroday` | same |
@@ -85,7 +85,7 @@ All scrapers use one MongoDB database, with one collection per scraper.
 | `vuln_scraper/scrapers/splunk/` | `splunk` | same |
 | `vuln_scraper/scrapers/hikvision/` | `hikvision` | same |
 | `vuln_scraper/scrapers/cnnvd/` | `cnnvd` | same |
-| `vuln_scraper/scrapers/cnvd/` | `cnvd` | `pip install -e '.[cnvd]'` then `python scrape.py run cnvd --limit 100` |
+| `vuln_scraper/scrapers/cnvd/` | `cnvd` | `pip install -e '.[cnvd]'` then `vuln-scrape run cnvd --limit 100` |
 | `vuln_scraper/scrapers/juniper/` | `juniper` | same |
 | `vuln_scraper/scrapers/msrc/` | `msrc` | same |
 
@@ -138,11 +138,11 @@ field across collections; review views store the same normalized value in
 `impacts`. To backfill existing source collections without re-scraping:
 
 ```bash
-python scrape.py backfill-severity
-python scrape.py backfill-severity cnnvd hikvision --dry-run
+vuln-scrape backfill-severity
+vuln-scrape backfill-severity cnnvd hikvision --dry-run
 ```
 
-Then refresh review views with `python scrape.py review`. Alternatively,
+Then refresh review views with `vuln-scrape review`. Alternatively,
 re-scrape with `--mongo-conflict overwrite`.
 
 `scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
@@ -193,7 +193,7 @@ Available provider keys: `avd`, `cisco`, `cnnvd`, `cnvd`, `cve`, `github_advisor
 Interactive scrape, choosing scraper and amount:
 
 ```bash
-python scrape.py tui
+vuln-scrape tui
 ```
 
 Catch up every provider: scrape newest-first from each collection and sync records
@@ -207,8 +207,8 @@ new and updated CVE after the timestamp saved in `checkpoint.json`, ignoring the
 generic catch-up batch and record limits:
 
 ```bash
-python scrape.py catch-up
-python scrape.py catch-up --batch-size 5 --limit 200 --max-runs-per-provider 50
+vuln-scrape catch-up
+vuln-scrape catch-up --batch-size 5 --limit 200 --max-runs-per-provider 50
 ```
 
 `--limit` caps total today-window records per provider. `--batch-size` is retained
@@ -218,10 +218,10 @@ Run one scraper once, for example AVD (browser extra recommended) or CNVD (requi
 
 ```bash
 pip install -e '.[browser]'
-python scrape.py run avd --limit 100
+vuln-scrape run avd --limit 100
 
 pip install -e '.[cnvd]'
-python scrape.py run cnvd --limit 100
+vuln-scrape run cnvd --limit 100
 ```
 
 Filter and browse records in MongoDB:
@@ -467,4 +467,4 @@ Cisco requires an access token for every OpenVuln API request. Set
 client-credentials token from Cisco. The shorter `CISCO_CLIENT_ID`,
 `CISCO_CLIENT_KEY`, and `CISCO_CLIENT_SECRET` names are also accepted. These can
 be exported in the shell or placed in a project `.env` file (loaded automatically
-when you run `python scrape.py` or `vuln-scrape`).
+when you run `vuln-scrape`).

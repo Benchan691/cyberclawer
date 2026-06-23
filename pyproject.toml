@@ -27,3 +27,4 @@ mongodb-filter = "vuln_scraper.tui:main"
 
 [tool.setuptools.packages.find]
 include = ["vuln_scraper*"]
+namespaces = true

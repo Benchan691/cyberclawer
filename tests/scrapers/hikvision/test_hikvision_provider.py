@@ -1,4 +1,4 @@
-from vuln_scraper.providers import HikvisionProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import HikvisionProvider, get_provider, provider_keys
 
 
 def test_hikvision_provider_registry_and_defaults() -> None:

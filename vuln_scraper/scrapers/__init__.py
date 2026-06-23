@@ -3,24 +3,24 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol
 
 from vuln_scraper.models import ListPage
-from vuln_scraper.scrapers.avd import AVDProvider
-from vuln_scraper.scrapers.cisco import CiscoProvider
-from vuln_scraper.scrapers.cnnvd import CNNVDProvider
-from vuln_scraper.scrapers.cnvd import CNVDProvider
-from vuln_scraper.scrapers.cve import CVEProvider
-from vuln_scraper.scrapers.govcert import GovCERTProvider
-from vuln_scraper.scrapers.github_advisory import GitHubAdvisoryProvider
-from vuln_scraper.scrapers.hikvision import HikvisionProvider
-from vuln_scraper.scrapers.hkcert import HKCERTProvider
-from vuln_scraper.scrapers.huawei_sa import HuaweiSAProvider
-from vuln_scraper.scrapers.infosec import InfoSecProvider
-from vuln_scraper.scrapers.juniper import JuniperProvider
-from vuln_scraper.scrapers.msrc import MSRCProvider
-from vuln_scraper.scrapers.paloalto import PaloAltoProvider
-from vuln_scraper.scrapers.qianxin import QianxinProvider
-from vuln_scraper.scrapers.ransomwarelive import RansomwareLiveProvider
-from vuln_scraper.scrapers.splunk import SplunkProvider
-from vuln_scraper.scrapers.zeroday import ZeroDayProvider
+from vuln_scraper.scrapers.avd.provider import AVDProvider
+from vuln_scraper.scrapers.cisco.provider import CiscoAuthError, CiscoProvider
+from vuln_scraper.scrapers.cnnvd.provider import CNNVDProvider
+from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
+from vuln_scraper.scrapers.cve.provider import CVEProvider
+from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
+from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvider
+from vuln_scraper.scrapers.hikvision.provider import HikvisionProvider
+from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
+from vuln_scraper.scrapers.huawei_sa.provider import HuaweiSAProvider
+from vuln_scraper.scrapers.infosec.provider import InfoSecProvider
+from vuln_scraper.scrapers.juniper.provider import JuniperProvider
+from vuln_scraper.scrapers.msrc.provider import MSRCProvider
+from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
+from vuln_scraper.scrapers.qianxin.provider import QianxinProvider
+from vuln_scraper.scrapers.ransomwarelive.provider import RansomwareLiveProvider
+from vuln_scraper.scrapers.splunk.provider import SplunkProvider
+from vuln_scraper.scrapers.zeroday.provider import ZeroDayProvider
 
 
 class ScraperProvider(Protocol):

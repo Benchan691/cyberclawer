@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import ScraperRunner
-from vuln_scraper.scrapers.cnvd import CNVDProvider
+from vuln_scraper.scrapers import CNVDProvider
 from tests.test_runner import FakeCNVDClient, identities
 
 

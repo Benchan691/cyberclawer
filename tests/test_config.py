@@ -1,6 +1,6 @@
 import pytest
 
-from vuln_scraper.providers import provider_keys
+from vuln_scraper.scrapers import provider_keys
 from vuln_scraper.config import (
     DEFAULT_BACKOFF_BASE,
     DEFAULT_BACKOFF_JITTER,

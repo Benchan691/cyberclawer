@@ -3,8 +3,8 @@ import asyncio
 import httpx
 import pytest
 
-from vuln_scraper.providers import CiscoProvider, get_provider, provider_keys
-from vuln_scraper.scrapers.cisco import CiscoAuthError
+from vuln_scraper.scrapers import CiscoProvider, get_provider, provider_keys
+from vuln_scraper.scrapers import CiscoAuthError
 
 
 def test_cisco_provider_urls_headers_and_registry(monkeypatch) -> None:
