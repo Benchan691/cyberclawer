@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,13 @@ class CpeDictionaryLookup:
             (candidate.vendor.casefold(), candidate.product.casefold()): candidate
             for candidate in self.candidates
         }
+        self._by_normalized_vendor_product = {
+            (
+                _normalize_vendor_for_lookup(candidate.vendor),
+                _normalize_product_for_lookup(candidate.vendor, candidate.product),
+            ): candidate
+            for candidate in self.candidates
+        }
         labels: list[tuple[str, CpeCandidate]] = []
         seen_labels: set[str] = set()
         for candidate in self.candidates:
@@ -88,7 +96,20 @@ class CpeDictionaryLookup:
             vendor = getattr(item, "vendor", None) or (item.get("vendor") if isinstance(item, dict) else None)
             product = getattr(item, "product", None) or (item.get("product") if isinstance(item, dict) else None)
             if vendor and product:
-                candidate = self._by_vendor_product.get((str(vendor).casefold(), str(product).casefold()))
+                lookup_keys = [
+                    (str(vendor).casefold(), str(product).casefold()),
+                    (
+                        _normalize_vendor_for_lookup(str(vendor)),
+                        _normalize_product_for_lookup(str(vendor), str(product)),
+                    ),
+                ]
+                candidate = None
+                for lookup_key in lookup_keys:
+                    candidate = self._by_vendor_product.get(lookup_key)
+                    if candidate is not None:
+                        break
+                if candidate is None:
+                    candidate = self._by_normalized_vendor_product.get(lookup_keys[1])
                 if candidate is not None:
                     evidence_text = f"{vendor} {product}"
                     return LookupResult(candidate, 1.0, evidence_text, "vendor_product")
@@ -207,9 +228,26 @@ def _first(row: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _normalize_vendor_for_lookup(vendor: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", vendor.casefold())
+
+
+def _normalize_product_for_lookup(vendor: str, product: str) -> str:
+    text = product.casefold().strip()
+    vendor_fold = vendor.casefold().strip()
+    if vendor_fold and text.startswith(vendor_fold):
+        text = text[len(vendor_fold) :].strip()
+    text = re.sub(r"\s+\d+([.\d]*)*$", "", text).strip()
+    return _normalize_label(text.replace("_", " "))
+
+
 def _parse_cpe(cpe: str) -> tuple[str, str]:
     parts = _split_cpe(cpe)
-    return (parts[3], parts[4]) if len(parts) > 4 and parts[:2] == ["cpe", "2.3"] else ("", "")
+    if len(parts) > 4 and parts[:2] == ["cpe", "2.3"]:
+        return (parts[3], parts[4])
+    if len(parts) > 3 and parts[0] == "cpe" and parts[1].startswith("/"):
+        return (parts[2], parts[3])
+    return ("", "")
 
 
 def _split_cpe(cpe: str) -> list[str]:

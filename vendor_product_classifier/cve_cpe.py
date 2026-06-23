@@ -11,6 +11,7 @@ except ImportError:
 
 
 CPE_RE = re.compile(r"\bcpe:2\.3:[^\s\"'<>,)\]]+", re.IGNORECASE)
+CPE22_RE = re.compile(r"\bcpe:/[^\s\"'<>,)\]]+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,19 @@ def extract_vendor_product_evidence(document: dict[str, Any]) -> list[VendorProd
                 continue
             vendor = str(item.get("vendor") or "").strip() or None
             product = str(item.get("product") or "").strip() or None
+            cpes = item.get("cpes")
+            if isinstance(cpes, list):
+                for cpe_value in cpes:
+                    if not isinstance(cpe_value, str) or not cpe_value.strip():
+                        continue
+                    cpe_text = cpe_value.strip()
+                    cpe_vendor, cpe_product = vendor_product_from_cpe(cpe_text)
+                    add(
+                        vendor=cpe_vendor or None,
+                        product=cpe_product or None,
+                        cpe=cpe_text,
+                        source="cve.affected.cpes",
+                    )
             if vendor or product:
                 add(vendor=vendor, product=product, source="cve.affected")
 
@@ -155,3 +169,4 @@ def _iter_cpes(value: Any):
             yield from _iter_cpes(child)
     elif isinstance(value, str):
         yield from (match.group(0) for match in CPE_RE.finditer(value))
+        yield from (match.group(0) for match in CPE22_RE.finditer(value))
