@@ -23,7 +23,6 @@ dev = ["pytest>=8.0.0"]
 
 [project.scripts]
 vuln-scrape = "vuln_scraper.cli:main"
-mongodb-filter = "vuln_scraper.tui:main"
 
 [tool.setuptools.packages.find]
 include = ["vuln_scraper*", "vendor_product_classifier*"]

@@ -1,7 +1,6 @@
 # Vulnerability Bulletin Scrapers
 
-Terminal scrapers ingest vulnerability bulletins into MongoDB, and `mongodb-filter`
-browses, reads, and exports filtered records from the same database. There is no web UI.
+Terminal scrapers ingest vulnerability bulletins into MongoDB. There is no web UI.
 
 ## Install
 
@@ -133,8 +132,7 @@ export MONGO_URI='mongodb+srv://user:password@cluster.example.mongodb.net'
 Each synced vulnerability document includes a top-level `severity` field with
 normalized English labels (`Critical`, `High`, `Medium`, `Low`, `Unknown`, or
 empty when unavailable). Provider-specific severity values remain under
-`details.<provider>`. The filter TUI exposes `severity` as a shared categorical
-field across collections; review views store the same normalized value in
+`details.<provider>`. Review views store the same normalized value in
 `impacts`. To backfill existing source collections without re-scraping:
 
 ```bash
@@ -201,10 +199,8 @@ whose normalized `updated_time` is today or newer, using the Asia/Hong_Kong cale
 day (`00:00:00` local time). Existing records inside that today window are
 overwritten so source-side updates are refreshed even when IDs already exist.
 The scraper stops a provider when a fetched page has parseable timestamps and all
-records on that page are older than today.
-CVE is the exception: catch-up reads the CVEProject delta log once and processes every
-new and updated CVE after the timestamp saved in `checkpoint.json`, ignoring the
-generic catch-up batch and record limits:
+records on that page are older than today. CVE catch-up uses the same today window:
+it filters the CVEProject delta log to entries updated today, then respects `--limit`.
 
 ```bash
 vuln-scrape catch-up
@@ -223,20 +219,6 @@ vuln-scrape run avd --limit 100
 pip install -e '.[cnvd]'
 vuln-scrape run cnvd --limit 100
 ```
-
-Filter and browse records in MongoDB:
-
-```bash
-mongodb-filter
-mongodb-filter --mongo-config mongodb.toml
-mongodb-filter --mongo-collection hkcert
-```
-
-Without `--mongo-collection`, `mongodb-filter` opens a collection picker using
-`[mongodb.collections]`. Filtering stays in the terminal: checkbox fields,
-text-contains fields, paged result browsing, record read (Enter on a result), and
-JSON export (`e` in the TUI — prompts for a filename under `data/`; if the file
-already exists, choose replace or rename).
 
 ## Document Shape
 
@@ -268,7 +250,7 @@ vuln_scraper/scrapers/
   zeroday/
 ```
 
-Each scraper owns its URL config, provider, filter fields, and parsers.
+Each scraper owns its URL config, provider, and parsers.
 
 Run tests:
 
@@ -351,12 +333,11 @@ treats this feed as newest-first and stops once it reaches a stored victim.
 
 The CVE scraper uses the
 [CVEProject cvelistV5 delta log](https://github.com/CVEProject/cvelistV5).
-Each run reads the delta log newest-first, skips CVEs already stored in MongoDB,
+Each `run` reads the delta log newest-first, skips CVEs already stored in MongoDB,
 and fetches up to the requested limit of new records from GitHub. Mongo sync uses
-the same conflict handling as other providers. During `catch-up`, CVE instead
-processes delta batches oldest-first after `providers.cve.last_delta_fetch_time` in
-`checkpoint.json`, overwrites new and updated records, ignores deleted entries, and
-advances the timestamp only after a complete batch syncs successfully.
+the same conflict handling as other providers. During `catch-up`, CVE filters the
+delta log to entries updated today (Asia/Hong_Kong), respects `--limit`, and
+overwrites matching records like other providers.
 
 The Cisco scraper uses the [PSIRT OpenVuln API](https://developer.cisco.com/docs/psirt/).
 Cisco requires an access token for every OpenVuln API request. Set

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId, normalize_cve_code
@@ -15,7 +16,7 @@ from vuln_scraper.scrapers.cve.parsers.detail import (
     english_description,
     parse_cve_detail_response,
 )
-from vuln_scraper.scrapers.cve.parsers.list import parse_cve_list
+from vuln_scraper.scrapers.cve.parsers.list import parse_cve_list, parse_cve_list_updated_since
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +49,15 @@ class CVEProvider:
     def request_headers(self) -> dict[str, str]:
         return {"Accept": "application/json"}
 
-    def parse_list(self, data: Any, *, page: int) -> ListPage:
+    def parse_list(self, data: Any, *, page: int, updated_since: datetime | None = None) -> ListPage:
+        if updated_since is not None:
+            return parse_cve_list_updated_since(
+                data,
+                updated_since=updated_since,
+                page=page,
+                provider=self.key,
+                source_url=self.source_url,
+            )
         return parse_cve_list(data, page=page, provider=self.key, source_url=self.source_url)
 
     def parse_detail(self, data: Any) -> CVEDetailRecord:

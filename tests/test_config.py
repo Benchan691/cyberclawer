@@ -14,7 +14,6 @@ from vuln_scraper.config import (
     catch_up_provider_keys,
     mongo_collection_for_provider,
     mongo_collections_from_config,
-    resolve_mongo_export_path,
     apply_httpx_proxy_kwargs,
     resolve_proxy_url,
     retry_config_for_provider,
@@ -228,24 +227,6 @@ def test_scraper_settings_for_provider_sets_collection(tmp_path) -> None:
     settings = ScraperSettings(mongo_enabled=True, mongo_config_file=config_file).for_provider("hkcert").normalized()
 
     assert settings.mongo_collection == "hkcert"
-
-
-def test_resolve_mongo_export_path_normalizes_name(tmp_path) -> None:
-    path = resolve_mongo_export_path(tmp_path, "my-export", default_name="default.json")
-
-    assert path == tmp_path / "my-export.json"
-
-
-def test_resolve_mongo_export_path_uses_default_for_blank_name(tmp_path) -> None:
-    path = resolve_mongo_export_path(tmp_path, "   ", default_name="mongo_filtered_vulns.json")
-
-    assert path == tmp_path / "mongo_filtered_vulns.json"
-
-
-def test_resolve_mongo_export_path_ignores_directory_components(tmp_path) -> None:
-    path = resolve_mongo_export_path(tmp_path, "../outside.json", default_name="default.json")
-
-    assert path == tmp_path / "outside.json"
 
 
 def test_load_scrapers_config_reads_scrapers_table(tmp_path) -> None:

@@ -99,45 +99,6 @@ def run_catch_up_cycle(
         per_provider_limit = settings.limit
         updated_since = today_start()
 
-        if provider.key == "cve":
-            run_settings = replace(
-                provider_settings,
-                mongo_conflict="overwrite",
-            ).normalized()
-            logger.info(
-                "CVE timestamp catch-up for collection %s (fetches CVEProject data from raw.githubusercontent.com, not github_advisory)",
-                normalized.mongo_collection,
-            )
-            try:
-                output = asyncio.run(
-                    ScraperRunner(
-                        run_settings,
-                        provider=provider,
-                        cve_delta_catch_up=True,
-                    ).run()
-                )
-            except Exception as exc:
-                logger.exception("CVE timestamp catch-up failed")
-                log_uncaught_provider_error(
-                    data_dir=normalized.data_dir,
-                    error_log_name=normalized.error_log,
-                    provider=provider.key,
-                    error=exc,
-                )
-                continue
-            mongo = output.get("mongo_sync") or {}
-            logger.info(
-                "CVE timestamp catch-up: fetched=%s stop_reason=%s; "
-                "inserted=%s overwritten=%s skipped=%s errors=%s",
-                output.get("result_count", 0),
-                output.get("stop_reason"),
-                mongo.get("inserted", 0),
-                mongo.get("overwritten", 0),
-                mongo.get("skipped", 0),
-                len(mongo.get("errors", [])),
-            )
-            continue
-
         runs += 1
         run_settings = replace(
             provider_settings,

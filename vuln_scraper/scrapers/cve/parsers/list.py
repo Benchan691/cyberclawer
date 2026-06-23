@@ -35,6 +35,60 @@ class CVEDeltaBatch:
     entries: tuple[CVEDeltaEntry, ...]
 
 
+def parse_cve_list_updated_since(
+    data: Any,
+    *,
+    updated_since: datetime,
+    page: int,
+    provider: str = "cve",
+    source_url: str | None = SOURCE_URL,
+) -> ListPage:
+    boundary = (
+        updated_since.astimezone(UTC)
+        if updated_since.tzinfo is not None
+        else updated_since.replace(tzinfo=UTC)
+    )
+    batches = parse_cve_delta_log(data, after="1970-01-01T00:00:00Z")
+    candidates: list[tuple[datetime, ListEntry]] = []
+    for batch in reversed(batches):
+        for delta_entry in batch.entries:
+            if delta_entry.action == "deleted":
+                continue
+            updated_at = _delta_entry_updated_at(delta_entry, batch.fetch_time)
+            if updated_at is None or updated_at < boundary:
+                continue
+            candidates.append(
+                (
+                    updated_at,
+                    cve_delta_entry_to_list_entry(
+                        delta_entry,
+                        provider=provider,
+                        source_url=source_url,
+                    ),
+                )
+            )
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    entries = [entry for _, entry in candidates]
+    return ListPage(
+        page=page,
+        entries=entries,
+        total_pages=1,
+        total_records=len(entries),
+        start_index=0,
+        results_per_page=len(entries),
+    )
+
+
+def _delta_entry_updated_at(delta_entry: CVEDeltaEntry, batch_fetch_time: str) -> datetime | None:
+    if delta_entry.date_updated:
+        return parse_cve_datetime(delta_entry.date_updated)
+    try:
+        return parse_cve_datetime(batch_fetch_time)
+    except ValueError:
+        return None
+
+
 def parse_cve_list(
     data: Any,
     *,

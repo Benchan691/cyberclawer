@@ -1,6 +1,15 @@
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+
 from vuln_scraper.scrapers import CVEProvider
 from vuln_scraper.scrapers.cve.parsers.detail import parse_cve_detail_response
-from vuln_scraper.scrapers.cve.parsers.list import parse_cve_delta_log, parse_cve_list
+from vuln_scraper.scrapers.cve.parsers.list import (
+    parse_cve_delta_log,
+    parse_cve_list,
+    parse_cve_list_updated_since,
+)
+
+LOCAL_TIMEZONE = ZoneInfo("Asia/Hong_Kong")
 
 
 def test_parse_delta_log_filters_and_orders_batches_oldest_first() -> None:
@@ -46,6 +55,28 @@ def test_parse_cve_list_exposes_non_deleted_delta_entries() -> None:
     assert page.total_records == 1
     assert [entry.key for entry in page.entries] == ["cve:2026-3000"]
     assert page.entries[0].embedded_detail["_delta_action"] == "new"
+
+
+def test_parse_cve_list_updated_since_filters_by_today_boundary() -> None:
+    today = datetime.now(LOCAL_TIMEZONE).date()
+    yesterday = today.fromordinal(today.toordinal() - 1)
+    today_updated = f"{today.isoformat()}T12:00:00.000Z"
+    yesterday_updated = f"{yesterday.isoformat()}T12:00:00.000Z"
+    boundary = datetime.combine(today, time.min, tzinfo=LOCAL_TIMEZONE)
+    payload = [
+        delta_batch(
+            "2026-06-05T03:00:00.000Z",
+            new=[delta_entry("CVE-2026-3000", date_updated=today_updated)],
+        ),
+        delta_batch(
+            "2026-06-05T02:00:00.000Z",
+            updated=[delta_entry("CVE-2026-2000", date_updated=yesterday_updated)],
+        ),
+    ]
+
+    page = parse_cve_list_updated_since(payload, updated_since=boundary, page=1)
+
+    assert [entry.key for entry in page.entries] == ["cve:2026-3000"]
 
 
 def test_parse_cve_v5_normalizes_details_without_raw_dupes() -> None:
@@ -122,12 +153,12 @@ def delta_batch(
     }
 
 
-def delta_entry(cve_id: str, *, github_link: str | None = "https://example.test/cve.json") -> dict:
+def delta_entry(cve_id: str, *, github_link: str | None = "https://example.test/cve.json", date_updated: str = "2026-06-05T00:00:00.000Z") -> dict:
     return {
         "cveId": cve_id,
         "cveOrgLink": f"https://www.cve.org/CVERecord?id={cve_id}",
         "githubLink": github_link,
-        "dateUpdated": "2026-06-05T00:00:00.000Z",
+        "dateUpdated": date_updated,
     }
 
 

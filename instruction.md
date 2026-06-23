@@ -65,10 +65,6 @@ tests/scrapers/<provider>/
 - Add provider to `PROVIDERS` (dict insertion order controls `catch-up` iteration;
   `provider_keys()` is sorted alphabetically for CLI/help).
 
-### `vuln_scraper/mongo_filter.py`
-
-- Add provider-specific categorical/text paths to `FILTER_FIELDS`.
-
 ### `vuln_scraper/config.py`
 
 - Set `default_mongo_collection` on the provider; add a `[mongodb.collections]`
@@ -103,8 +99,6 @@ tests/scrapers/<provider>/
   - Add catch-up behavior tests if the provider has special stop/progress rules.
 - `tests/test_runner.py`
   - Add provider-specific run behavior tests if needed (for example stop-on-known logic).
-- `tests/test_mongo_filter.py`
-  - Add `filter_fields_for_provider("<provider>")` coverage.
 
 ## 4) Implementation checklist
 
@@ -114,7 +108,6 @@ tests/scrapers/<provider>/
 - [ ] `list_url` and `detail_url` are deterministic and correctly encoded.
 - [ ] Parser output includes stable identity fields (`type`, `code`, optional `cve_code`).
 - [ ] `details.<provider>` structure is consistent and serializable.
-- [ ] `FILTER_FIELDS` paths point to real document paths.
 - [ ] New provider appears in `provider_keys()` and `get_provider()`.
 - [ ] Sync cycle includes provider and writes to intended Mongo collection.
 - [ ] Tests pass.

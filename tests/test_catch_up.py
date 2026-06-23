@@ -242,8 +242,8 @@ def test_run_catch_up_cycle_uses_per_provider_limit(monkeypatch) -> None:
     assert limits_seen == [25]
 
 
-def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> None:
-    calls: list[tuple[int, str, bool, bool]] = []
+def test_run_catch_up_cycle_routes_cve_through_timestamp_path(monkeypatch) -> None:
+    calls: list[tuple[int, str, object]] = []
 
     class FakeScraper:
         def __init__(
@@ -253,23 +253,16 @@ def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> N
             provider=None,
             stop_on_first_known=None,
             stop_on_unchanged_content=False,
-            cve_delta_catch_up=False,
+            updated_since=None,
         ) -> None:
-            calls.append(
-                (
-                    settings.limit,
-                    settings.mongo_conflict,
-                    stop_on_unchanged_content,
-                    cve_delta_catch_up,
-                )
-            )
+            calls.append((settings.limit, settings.mongo_conflict, updated_since))
 
         async def run(self):
             return {
                 "stop_reason": "timestamp_boundary",
-                "result_count": 500,
+                "result_count": 0,
                 "vulnerabilities": [],
-                "mongo_sync": {"inserted": 500},
+                "mongo_sync": {"inserted": 0},
             }
 
     def fake_asyncio_run(coro):
@@ -292,7 +285,10 @@ def test_run_catch_up_cycle_routes_cve_to_single_timestamp_run(monkeypatch) -> N
         batch_size=1,
     )
 
-    assert calls == [(2, "overwrite", False, True)]
+    assert len(calls) == 1
+    assert calls[0][0] == 2
+    assert calls[0][1] == "overwrite"
+    assert calls[0][2] is not None
 
 
 def test_providers_for_catch_up_returns_all_when_unconfigured(tmp_path) -> None:

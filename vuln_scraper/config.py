@@ -12,7 +12,6 @@ from typing import Any
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_OUTPUT_FILE = DEFAULT_DATA_DIR / "high_risk_vulns.json"
 DEFAULT_CHECKPOINT_FILE = DEFAULT_DATA_DIR / "checkpoint.json"
-DEFAULT_MONGO_FILTERED_OUTPUT_FILE = DEFAULT_DATA_DIR / "mongo_filtered_vulns.json"
 MAX_RESULT_LIMIT = 1000
 DEFAULT_MONGO_URI = "mongodb://localhost:27017"
 DEFAULT_MONGO_DATABASE = "vulnerabilities"
@@ -502,23 +501,6 @@ def default_scrape_settings(*, limit: int = MAX_RESULT_LIMIT, mongo_enabled: boo
         browser_fallback=False,
         mongo_interactive=False,
     )
-
-
-def mongo_filtered_output_file(data_dir: Path, collection: str) -> Path:
-    safe_collection = collection.strip().replace("/", "_") or "records"
-    default_name = DEFAULT_MONGO_FILTERED_OUTPUT_FILE.name
-    if safe_collection == DEFAULT_MONGO_COLLECTION:
-        return Path(data_dir) / default_name
-    return Path(data_dir) / f"mongo_filtered_{safe_collection}.json"
-
-
-def resolve_mongo_export_path(data_dir: Path, name: str, *, default_name: str) -> Path:
-    cleaned = Path(name.strip() or default_name).name
-    if not cleaned:
-        cleaned = default_name
-    if not cleaned.lower().endswith(".json"):
-        cleaned = f"{cleaned}.json"
-    return Path(data_dir) / cleaned
 
 
 def _optional_config_str(config: dict[str, Any], key: str) -> str | None:

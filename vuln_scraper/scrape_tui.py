@@ -11,7 +11,7 @@ from .error_log import log_uncaught_provider_error
 from .filters import validate_limit
 from .scrapers import get_provider, provider_keys
 from .runner import ScraperRunner
-from .tui import safe_addnstr
+from .curses_utils import safe_addnstr
 
 logger = logging.getLogger(__name__)
 

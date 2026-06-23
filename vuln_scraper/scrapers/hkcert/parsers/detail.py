@@ -22,7 +22,7 @@ SECTION_LABELS = {
 
 _TABLE_HEADER_ALIASES = {
     # Column header can vary across HKCERT bulletin tables. We normalize it into
-    # a single key name used by mongodb-filter and downstream consumers.
+    # a single key name used by downstream consumers.
     "vulnerable product": "name",
     "vulnerable object name": "name",
     "risk level": "risk_level",
