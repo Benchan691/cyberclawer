@@ -260,7 +260,7 @@ def test_splunk_review_description_includes_description_tables() -> None:
 
     pipeline = json.dumps(review_view_pipeline("splunk"))
     assert "description_tables" in pipeline
-    assert '"field": "$$item"' not in pipeline
+    assert "$getField" not in pipeline
 
 
 def test_cnnvd_related_link_extracts_urls_from_refer_url() -> None:

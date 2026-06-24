@@ -1179,22 +1179,32 @@ def _mreduce_concat_non_empty(items: Any, *, separator: str) -> dict[str, Any]:
 
 
 def _mongo_splunk_row_line(headers: Any, row: Any) -> dict[str, Any]:
+    # Views disallow $getField with a dynamic field name; match via $objectToArray instead.
     return _mreduce_concat_non_empty(
         {
             "$map": {
                 "input": {"$cond": [{"$isArray": headers}, headers, []]},
                 "as": "header",
                 "in": {
-                    "$toString": {
-                        "$ifNull": [
-                            {
-                                "$getField": {
-                                    "field": {"$toString": "$$header"},
-                                    "input": row,
+                    "$let": {
+                        "vars": {
+                            "match": {
+                                "$first": {
+                                    "$filter": {
+                                        "input": {
+                                            "$cond": [
+                                                {"$eq": [{"$type": row}, "object"]},
+                                                {"$objectToArray": row},
+                                                [],
+                                            ]
+                                        },
+                                        "as": "entry",
+                                        "cond": {"$eq": ["$$entry.k", "$$header"]},
+                                    }
                                 }
-                            },
-                            "",
-                        ]
+                            }
+                        },
+                        "in": {"$toString": {"$ifNull": ["$$match.v", ""]}},
                     }
                 },
             }
