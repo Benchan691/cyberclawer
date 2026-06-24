@@ -146,6 +146,32 @@ def test_classify_cve_document_marks_dictionary_miss_unclassified_without_zero_s
     assert classification["reason"] == "dictionary miss"
 
 
+def test_classify_cve_document_matches_redhat_cpe22_affected_cpes() -> None:
+    document = {
+        "_id": "cve:2026-53701",
+        "title": "CVE-2026-53701",
+        "details": {
+            "cve": {
+                "affected": [
+                    {
+                        "vendor": "Red Hat",
+                        "product": "Red Hat Enterprise Linux 10",
+                        "cpes": ["cpe:/o:redhat:enterprise_linux:10"],
+                    }
+                ],
+                "configurations": [],
+            }
+        },
+    }
+
+    classification = classify_cve_document(document, config(), use_zero_shot=False)
+
+    assert classification["status"] == "classified"
+    assert classification["method"] == "dictionary"
+    assert classification["vendor"] == "Red Hat"
+    assert classification["product"] == "Enterprise Linux"
+
+
 def test_daemon_classifies_via_dictionary() -> None:
     collection = FakeCollection(
         [
