@@ -1156,6 +1156,53 @@ def _mextract_urls(value: Any) -> dict[str, Any]:
     }
 
 
+def _mreduce_concat_non_empty(items: Any, *, separator: str) -> dict[str, Any]:
+    return {
+        "$reduce": {
+            "input": {
+                "$filter": {
+                    "input": {"$cond": [{"$isArray": items}, items, []]},
+                    "as": "part",
+                    "cond": {"$ne": [{"$trim": {"input": {"$toString": "$$part"}}}, ""]},
+                }
+            },
+            "initialValue": "",
+            "in": {
+                "$concat": [
+                    "$$value",
+                    {"$cond": [{"$eq": ["$$value", ""]}, "", separator]},
+                    {"$toString": "$$this"},
+                ]
+            },
+        }
+    }
+
+
+def _mongo_splunk_row_line(headers: Any, row: Any) -> dict[str, Any]:
+    return _mreduce_concat_non_empty(
+        {
+            "$map": {
+                "input": {"$cond": [{"$isArray": headers}, headers, []]},
+                "as": "header",
+                "in": {
+                    "$toString": {
+                        "$ifNull": [
+                            {
+                                "$getField": {
+                                    "field": {"$toString": "$$header"},
+                                    "input": row,
+                                }
+                            },
+                            "",
+                        ]
+                    }
+                },
+            }
+        },
+        separator=" | ",
+    )
+
+
 def _mongo_splunk_description(detail: str) -> dict[str, Any]:
     tables_field = f"{detail}.description_tables"
     desc_field = f"{detail}.description"
@@ -1167,31 +1214,17 @@ def _mongo_splunk_description(detail: str) -> dict[str, Any]:
             "in": {
                 "$let": {
                     "vars": {
-                        "header_line": _mjoin_mapped(
+                        "header_line": _mreduce_concat_non_empty(
                             {"$ifNull": ["$$table.headers", []]},
-                            _mstr("$$item"),
                             separator=" | ",
                         ),
                         "row_lines": {
                             "$map": {
                                 "input": {"$ifNull": ["$$table.rows", []]},
                                 "as": "row",
-                                "in": _mjoin_mapped(
+                                "in": _mongo_splunk_row_line(
                                     {"$ifNull": ["$$table.headers", []]},
-                                    {
-                                        "$toString": {
-                                            "$ifNull": [
-                                                {
-                                                    "$getField": {
-                                                        "field": "$$item",
-                                                        "input": "$$row",
-                                                    }
-                                                },
-                                                "",
-                                            ]
-                                        }
-                                    },
-                                    separator=" | ",
+                                    "$$row",
                                 ),
                             }
                         },
