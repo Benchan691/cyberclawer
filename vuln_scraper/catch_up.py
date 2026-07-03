@@ -8,7 +8,7 @@ from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
 from .error_log import log_uncaught_provider_error
 from .scrapers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
-from .timestamps import today_start
+from .timestamps import window_start
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ def run_catch_up_cycle(
     include_manual_verification: bool = False,
     max_runs_per_provider: int = DEFAULT_MAX_RUNS_PER_PROVIDER,
     batch_size: int = CATCH_UP_BATCH_SIZE,
+    days: int = 1,
 ) -> None:
     selected_providers = providers_for_catch_up(settings)
     selected_keys = [provider.key for provider in selected_providers]
@@ -97,7 +98,7 @@ def run_catch_up_cycle(
         scraped_total = 0
         last_stop_reason: str | None = None
         per_provider_limit = settings.limit
-        updated_since = today_start()
+        updated_since = window_start(days)
 
         runs += 1
         run_settings = replace(
@@ -106,10 +107,12 @@ def run_catch_up_cycle(
             mongo_conflict="overwrite",
         ).normalized()
         logger.info(
-            "Timestamp catch-up for provider %s collection %s (updated_since=%s, limit=%s)",
+            "Timestamp catch-up for provider %s collection %s "
+            "(updated_since=%s, days=%s, limit=%s)",
             provider.key,
             normalized.mongo_collection,
             updated_since.isoformat(),
+            days,
             per_provider_limit,
         )
         try:
@@ -141,7 +144,7 @@ def run_catch_up_cycle(
         )
         mongo = output.get("mongo_sync") or {}
         logger.info(
-            "Provider %s timestamp catch-up: fetched %s today-window records "
+            "Provider %s timestamp catch-up: fetched %s window records "
             "(%s with details, stop_reason=%s); inserted=%s overwritten=%s deleted=%s skipped=%s",
             provider.key,
             len(vulnerabilities),

@@ -488,6 +488,18 @@ def test_timestamp_resolver_uses_fallback_publish_fields() -> None:
             "details": {"infosec": {"published_date": "2026-06-18"}},
         }
     ) == "2026-06-17T16:00:00+00:00"
+    assert document_updated_time(
+        {
+            "type": "cnnvd",
+            "details": {"cnnvd": {"publishDate": "2026-06-18"}},
+        }
+    ) == "2026-06-17T16:00:00+00:00"
+    assert document_updated_time(
+        {
+            "type": "cnnvd",
+            "details": {"cnnvd": {"updateTime": "2026-06-18 12:30:00"}},
+        }
+    ) == "2026-06-18T04:30:00+00:00"
 
 
 def test_hkcert_mongo_sync_pages_past_leading_known_records(tmp_path) -> None:

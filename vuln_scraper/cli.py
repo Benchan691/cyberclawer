@@ -88,6 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Records to scrape per catch-up run before re-checking overlap (default 5).",
     )
     catch_up_parser.add_argument(
+        "--days",
+        type=_positive_int_arg,
+        default=1,
+        help=(
+            "Calendar days to include ending today (Asia/Hong_Kong). "
+            "Default 1 is today only; use 7 for the last week."
+        ),
+    )
+    catch_up_parser.add_argument(
         "--max-runs-per-provider",
         type=_positive_int_arg,
         default=DEFAULT_MAX_RUNS_PER_PROVIDER,
@@ -275,6 +284,7 @@ def main(argv: list[str] | None = None) -> None:
             include_manual_verification=args.include_manual_verification,
             max_runs_per_provider=args.max_runs_per_provider,
             batch_size=batch_size,
+            days=args.days,
         )
         return
 

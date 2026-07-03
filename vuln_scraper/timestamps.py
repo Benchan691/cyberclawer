@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -26,7 +26,7 @@ _PUBLISHED_PATHS: dict[str, tuple[str, ...]] = {
         "details.hikvision.published_date",
         "disclosure_date",
     ),
-    "cnnvd": ("details.cnnvd.publishTime", "disclosure_date"),
+    "cnnvd": ("details.cnnvd.publishDate", "details.cnnvd.publishTime", "disclosure_date"),
     "cnvd": ("details.cnvd.published_date", "disclosure_date"),
     "juniper": ("details.juniper.published_date", "disclosure_date"),
     "msrc": ("details.msrc.initial_release_date", "disclosure_date"),
@@ -66,7 +66,12 @@ _UPDATED_PATHS: dict[str, tuple[str, ...]] = {
         "details.hikvision.published_date",
         "disclosure_date",
     ),
-    "cnnvd": ("details.cnnvd.updateTime", "details.cnnvd.publishTime", "disclosure_date"),
+    "cnnvd": (
+        "details.cnnvd.updateTime",
+        "details.cnnvd.publishDate",
+        "details.cnnvd.publishTime",
+        "disclosure_date",
+    ),
     "cnvd": ("details.cnvd.updated_date", "details.cnvd.published_date", "disclosure_date"),
     "juniper": ("details.juniper.updated_date", "details.juniper.published_date", "disclosure_date"),
     "msrc": ("details.msrc.current_release_date", "details.msrc.initial_release_date", "disclosure_date"),
@@ -96,6 +101,13 @@ _DATE_FORMATS = (
 
 def today_start(tz: ZoneInfo = LOCAL_TIMEZONE) -> datetime:
     return datetime.combine(datetime.now(tz).date(), time.min, tzinfo=tz)
+
+
+def window_start(days: int = 1, tz: ZoneInfo = LOCAL_TIMEZONE) -> datetime:
+    """Inclusive calendar-day window ending today in ``tz`` (``days=1`` is today only)."""
+    if days < 1:
+        raise ValueError("days must be at least 1")
+    return today_start(tz) - timedelta(days=days - 1)
 
 
 def document_published_time(record: dict[str, Any]) -> str | None:
