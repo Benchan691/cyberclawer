@@ -1121,17 +1121,8 @@ def test_cnnvd_detail_requests_stop_after_first_success(tmp_path) -> None:
     output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
 
     assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
-    assert output["vulnerabilities"][0]["details"]["cnnvd"] == cnnvd_detail_payload("record-1911")[
-        "data"
-    ]["cnnvdDetail"]
-    assert client.detail_payloads == [
-        {
-            "id": "record-1911",
-            "cnnvdCode": "CNNVD-202606-1911",
-            "cveCode": "CVE-2026-11628",
-            "vulType": "0",
-        }
-    ]
+    assert output["vulnerabilities"][0]["details"]["cnnvd"] == cnnvd_detail_payload("record-1911")["data"]
+    assert client.detail_payloads == [{"id": "record-1911"}]
 
 
 def test_successful_run_output_ignores_stale_checkpoint_failures(tmp_path) -> None:
@@ -1211,8 +1202,8 @@ def test_cnnvd_fetches_one_list_page_for_multiple_details(tmp_path) -> None:
     assert client.detail_ids_seen == ["record-1911", "record-1910", "record-1909"]
 
 
-def test_cnnvd_detail_requests_fall_back_after_invalid_response(tmp_path) -> None:
-    client = FakeCNNVDClient(fail_combined=True)
+def test_cnnvd_detail_requests_use_internal_id(tmp_path) -> None:
+    client = FakeCNNVDClient()
     settings = ScraperSettings(
         data_dir=tmp_path,
         output_file=tmp_path / "cnnvd.json",
@@ -1225,15 +1216,33 @@ def test_cnnvd_detail_requests_fall_back_after_invalid_response(tmp_path) -> Non
     output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
 
     assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
-    assert client.detail_payloads == [
-        {
-            "id": "record-1911",
-            "cnnvdCode": "CNNVD-202606-1911",
-            "cveCode": "CVE-2026-11628",
-            "vulType": "0",
-        },
-        {"id": "record-1911", "vulType": "0"},
-    ]
+    assert client.detail_payloads == [{"id": "record-1911"}]
+
+
+def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
+    class Provider(CNNVDProvider):
+        async def finalize_json_request(self, client, request):
+            request = dict(request)
+            request["headers"] = {"X-Test": "finalized"}
+            return request
+
+    class Client:
+        def __init__(self) -> None:
+            self.headers = None
+
+        async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
+            self.headers = headers
+            return FakeJSONResult({"ok": True}, url)
+
+    runner = ScraperRunner(
+        ScraperSettings(data_dir=tmp_path, output_file=tmp_path / "out.json", checkpoint_file=tmp_path / "cp.json"),
+        provider=Provider(),
+    )
+    client = Client()
+
+    asyncio.run(runner._fetch_json_request(client, {"method": "POST", "url": "https://example.test", "json": {}}))
+
+    assert client.headers == {"X-Test": "finalized"}
 
 
 def test_cnvd_mongo_sync_stops_at_first_known_record_and_forces_browser(tmp_path) -> None:
@@ -1738,7 +1747,9 @@ class FakeCNNVDClient:
         self.detail_payloads: list[dict] = []
 
     async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
-        if url.endswith("/cnnvdVulList"):
+        if url.endswith("/tourist/sign"):
+            return FakeJSONResult({"code": 200, "data": "test-signature"}, url)
+        if url.endswith("/searchVul"):
             self.list_request_count += 1
             return FakeJSONResult(cnnvd_list_payload(), url)
 
@@ -2297,29 +2308,26 @@ def cnnvd_list_payload() -> dict:
                 {
                     "id": "record-1911",
                     "vulName": "Google Chrome 安全漏洞",
-                    "cnnvdCode": "CNNVD-202606-1911",
-                    "cveCode": "CVE-2026-11628",
-                    "hazardLevel": "高危",
-                    "publishTime": "2026-06-08",
-                    "typeName": "其他",
-                    "vulType": "0",
+                    "cnnvdId": "CNNVD-202606-1911",
+                    "cveId": "CVE-2026-11628",
+                    "vulLevel": "High",
+                    "publishDate": "2026-06-08",
+                    "vulTypeName": "其他",
                 },
                 {
                     "id": "record-1910",
                     "vulName": "Google Chrome 释放后重用漏洞",
-                    "cnnvdCode": "CNNVD-202606-1910",
-                    "cveCode": "CVE-2026-11629",
-                    "hazardLevel": "中危",
-                    "publishTime": "2026-06-08",
-                    "typeName": "其他",
-                    "vulType": "0",
+                    "cnnvdId": "CNNVD-202606-1910",
+                    "cveId": "CVE-2026-11629",
+                    "vulLevel": "Medium",
+                    "publishDate": "2026-06-08",
+                    "vulTypeName": "其他",
                 },
                 {
                     "id": "record-1909",
                     "vulName": "Older vulnerability",
-                    "cnnvdCode": "CNNVD-202606-1909",
-                    "publishTime": "2026-06-07",
-                    "vulType": "0",
+                    "cnnvdId": "CNNVD-202606-1909",
+                    "publishDate": "2026-06-07",
                 },
             ],
         },
@@ -2331,19 +2339,16 @@ def cnnvd_detail_payload(record_id: str) -> dict:
         "code": 200,
         "success": True,
         "data": {
-            "cnnvdDetail": {
-                "id": record_id,
-                "vulName": "Google Chrome 安全漏洞",
-                "cnnvdCode": "CNNVD-202606-1911",
-                "cveCode": "CVE-2026-11628",
-                "hazardLevel": "高危",
-                "vulType": "其他",
-                "publishTime": "2026-06-08",
-                "vulDesc": "Chrome vulnerability.",
-                "affectedProduct": "Google Chrome",
-                "patch": "https://example.test/patch",
-            },
-            "receviceVulDetail": None,
+            "id": record_id,
+            "vulName": "Google Chrome 安全漏洞",
+            "cnnvdId": "CNNVD-202606-1911",
+            "cveId": "CVE-2026-11628",
+            "vulLevel": "High",
+            "vulTypeName": "其他",
+            "publishDate": "2026-06-08",
+            "vulDesc": "Chrome vulnerability.",
+            "productName": "Google Chrome",
+            "officialPatchLink": "https://example.test/patch",
         },
     }
 

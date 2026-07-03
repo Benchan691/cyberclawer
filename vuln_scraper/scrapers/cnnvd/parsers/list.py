@@ -10,6 +10,7 @@ from vuln_scraper.scrapers.cnnvd.config import DEFAULT_PAGE_SIZE, SOURCE_URL
 
 
 HAZARD_LEVELS = {"1": "超危", "2": "高危", "3": "中危", "4": "低危"}
+LEVELS = {"Critical": "超危", "High": "高危", "Medium": "中危", "Low": "低危", "None": "无风险"}
 
 
 def parse_vulnerability_list(
@@ -32,20 +33,24 @@ def parse_vulnerability_list(
         if (entry := _entry_from_item(item, provider=provider, source_url=source_url)) is not None
     ]
     total_records = _optional_int(container.get("total")) or len(entries)
-    page_size = _optional_int(container.get("pageSize")) or DEFAULT_PAGE_SIZE
+    page_size = _optional_int(container.get("pageSize")) or _optional_int(container.get("size")) or DEFAULT_PAGE_SIZE
     total_pages = math.ceil(total_records / page_size) if total_records and page_size else None
     return ListPage(page=page, entries=entries, total_pages=total_pages, total_records=total_records)
 
 
 def _entry_from_item(item: dict[str, Any], *, provider: str, source_url: str | None) -> ListEntry | None:
-    cnnvd_code = _optional_str(item.get("cnnvdCode"))
+    cnnvd_code = _optional_str(item.get("cnnvdId")) or _optional_str(item.get("cnnvdCode"))
     title = _optional_str(item.get("vulName"))
     if not cnnvd_code or not title:
         return None
 
     code = cnnvd_code.removeprefix("CNNVD-")
-    hazard_level = _hazard_level(item.get("hazardLevel"))
-    vuln_type = _optional_str(item.get("typeName")) or _optional_str(item.get("vulType"))
+    hazard_level = _hazard_level(item.get("vulLevel")) or _hazard_level(item.get("hazardLevel"))
+    vuln_type = (
+        _optional_str(item.get("vulTypeName"))
+        or _optional_str(item.get("typeName"))
+        or _optional_str(item.get("vulType"))
+    )
     embedded_detail = dict(item)
     embedded_detail["_list_summary"] = True
 
@@ -53,7 +58,7 @@ def _entry_from_item(item: dict[str, Any], *, provider: str, source_url: str | N
         identity=VulnerabilityId(type="CNNVD", code=code),
         title=title,
         vuln_type=vuln_type,
-        disclosure_date=_iso_date(_optional_str(item.get("publishTime"))),
+        disclosure_date=_iso_date(_optional_str(item.get("publishDate")) or _optional_str(item.get("publishTime"))),
         status=hazard_level,
         provider=provider,
         source_url=source_url,
@@ -65,7 +70,7 @@ def _hazard_level(value: Any) -> str | None:
     text = _optional_str(value)
     if text in (None, "0"):
         return None
-    return HAZARD_LEVELS.get(text, text)
+    return HAZARD_LEVELS.get(text, LEVELS.get(text, text))
 
 
 def _iso_date(value: str | None) -> str | None:

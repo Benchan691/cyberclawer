@@ -3,27 +3,21 @@
   "success": true,
   "message": "操作成功",
   "data": {
-    "cnnvdDetail": {
-      "id": "record-1911",
-      "vulName": "Google Chrome 安全漏洞",
-      "cnnvdCode": "CNNVD-202606-1911",
-      "cveCode": "CVE-2026-11628",
-      "publishTime": "2026-06-08 00:00:00",
-      "isOfficial": 1,
-      "vendor": "Google",
-      "hazardLevel": 2,
-      "vulType": "其他",
-      "vulTypeName": "其他",
-      "vulDesc": "Google Chrome是一款Web浏览器。\r\n该漏洞源于释放后重用。",
-      "affectedProduct": "Chrome Desktop\r\nChromium",
-      "affectedVendor": "Google",
-      "productDesc": "Web browser",
-      "affectedSystem": "Windows\r\nmacOS",
-      "referUrl": "来源: Google\r\n链接:https://example.test/advisory",
-      "patch": "https://example.test/patch",
-      "createTime": "2026-06-08 00:00:00",
-      "updateTime": "2026-06-09 00:00:00"
-    },
-    "receviceVulDetail": null
+    "id": "record-1911",
+    "vulName": "Google Chrome 安全漏洞",
+    "cnnvdId": "CNNVD-202606-1911",
+    "cveId": "CVE-2026-11628",
+    "vulLevel": "High",
+    "vulTypeName": "其他",
+    "mappedVulType": "5",
+    "publishDate": "2026-06-08 00:00:00",
+    "updateTime": "2026-06-09 00:00:00",
+    "vendorName": "Google",
+    "productName": "Chrome",
+    "vulDesc": "Google Chrome是一款Web浏览器。该漏洞源于释放后重用。",
+    "vulDetail": "释放后重用漏洞。",
+    "repairSuggest": "升级到最新版本。",
+    "officialPatchLink": "https://example.test/patch",
+    "productSummary": "Web browser"
   }
 }

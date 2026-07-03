@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import secrets
+import string
+import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.cnnvd.config import (
@@ -10,10 +14,15 @@ from vuln_scraper.scrapers.cnnvd.config import (
     DEFAULT_PAGE_SIZE,
     DETAIL_API_URL,
     LIST_API_URL,
+    SIGN_API_URL,
     SOURCE_URL,
 )
 from vuln_scraper.scrapers.cnnvd.parsers.detail import CNNVDDetailRecord, parse_vulnerability_detail
 from vuln_scraper.scrapers.cnnvd.parsers.list import parse_vulnerability_list
+
+
+APP_ID = "6i8417579268034679HXvp0Kb6r1C2A9"
+NONCE_ALPHABET = string.ascii_letters + string.digits
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +50,7 @@ class CNNVDProvider:
             "Content-Type": "application/json;charset=UTF-8",
             "Origin": BASE_URL,
             "Referer": SOURCE_URL,
+            "User-Agent": "Mozilla/5.0",
         }
 
     def list_json_request(self, page: int, *, checkpoint: object | None = None) -> dict[str, Any]:
@@ -49,35 +59,59 @@ class CNNVDProvider:
             "url": LIST_API_URL,
             "headers": self.request_headers(),
             "json": {
-                "pageIndex": max(1, page),
+                "sortOrder": "desc",
+                "sortField": "publishDate",
+                "page": max(1, page),
                 "pageSize": DEFAULT_PAGE_SIZE,
-                "keyword": "",
-                "hazardLevel": "",
-                "vulType": "",
             },
         }
 
     def detail_json_requests(self, entry: ListEntry, *, detail_url: str) -> list[dict[str, Any]]:
         list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
         record_id = list_detail.get("id")
-        cnnvd_code = list_detail.get("cnnvdCode") or entry.display_id
-        cve_code = list_detail.get("cveCode")
-        vul_type = list_detail.get("vulType") or "0"
-        payloads = [
-            {"id": record_id, "cnnvdCode": cnnvd_code, "cveCode": cve_code, "vulType": vul_type},
-            {"id": record_id, "vulType": vul_type},
-            {"cnnvdCode": cnnvd_code, "vulType": vul_type},
-        ]
-        headers = self.request_headers()
+        if not record_id:
+            raise ValueError(f"CNNVD list entry is missing detail id: {entry.display_id}")
         return [
             {
                 "method": "POST",
                 "url": DETAIL_API_URL,
-                "headers": headers,
-                "json": {key: value for key, value in payload.items() if value is not None},
+                "headers": self.request_headers(),
+                "json": {"id": record_id},
             }
-            for payload in payloads
         ]
+
+    async def finalize_json_request(self, client: Any, request: dict[str, Any]) -> dict[str, Any]:
+        request = dict(request)
+        headers = dict(request.get("headers") or {})
+        method = str(request.get("method") or "GET").upper()
+        url = str(request.get("url") or "")
+        timestamp = str(int(time.time() * 1000))
+        nonce = "".join(secrets.choice(NONCE_ALPHABET) for _ in range(32))
+        sign_input = method + urlsplit(url).path + timestamp + nonce
+        sign_result = await client.request_json(
+            "POST",
+            SIGN_API_URL,
+            headers={
+                **self.request_headers(),
+                "X-Appid": APP_ID,
+                "X-Timestamp": timestamp,
+                "X-Nonce": nonce,
+            },
+            json_body={"signStr": sign_input},
+        )
+        sign = sign_result.data.get("data") if isinstance(sign_result.data, dict) else None
+        if not sign:
+            raise ValueError("CNNVD sign response did not contain a signature")
+        headers.update(
+            {
+                "X-Appid": APP_ID,
+                "X-Timestamp": timestamp,
+                "X-Nonce": nonce,
+                "X-Sign": str(sign),
+            }
+        )
+        request["headers"] = headers
+        return request
 
     def parse_list(self, data: Any, *, page: int) -> ListPage:
         return parse_vulnerability_list(data, page=page, provider=self.key, source_url=self.source_url)

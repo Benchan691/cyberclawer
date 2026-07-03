@@ -8,29 +8,27 @@
       {
         "id": "record-1911",
         "vulName": "Google Chrome 安全漏洞",
-        "cnnvdCode": "CNNVD-202606-1911",
-        "cveCode": "CVE-2026-11628",
-        "hazardLevel": 2,
-        "createTime": "2026-06-09",
-        "publishTime": "2026-06-08",
+        "cnnvdId": "CNNVD-202606-1911",
+        "cveId": "CVE-2026-11628",
+        "vulLevel": "High",
+        "publishDate": "2026-06-08",
         "updateTime": "2026-06-09",
-        "typeName": "其他",
-        "vulType": "0"
+        "vulTypeName": "其他",
+        "vulDesc": "Chrome vulnerability."
       },
       {
         "id": "record-1910",
         "vulName": "Google Chrome 释放后重用漏洞",
-        "cnnvdCode": "CNNVD-202606-1910",
-        "cveCode": "2026-11629",
-        "hazardLevel": 3,
-        "createTime": "2026-06-09",
-        "publishTime": "2026-06-08",
+        "cnnvdId": "CNNVD-202606-1910",
+        "cveId": "2026-11629",
+        "vulLevel": "Medium",
+        "publishDate": "2026-06-08",
         "updateTime": "2026-06-09",
-        "typeName": null,
-        "vulType": "0"
+        "vulTypeName": null,
+        "mappedVulType": "5"
       }
     ],
-    "pageIndex": 1,
+    "page": 1,
     "pageSize": 10
   }
 }

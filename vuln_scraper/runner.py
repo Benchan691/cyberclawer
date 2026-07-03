@@ -777,6 +777,10 @@ class ScraperRunner:
         return self.provider.parse_list(result.html, page=page)
 
     async def _fetch_json_request(self, client: ScraperClient, request: dict[str, Any]) -> Any:
+        finalize_json_request = getattr(self.provider, "finalize_json_request", None)
+        if finalize_json_request is not None:
+            finalized = finalize_json_request(client, request)
+            request = await finalized if inspect.isawaitable(finalized) else finalized
         method = str(request.get("method") or "GET")
         url = str(request.get("url") or "")
         if not url:

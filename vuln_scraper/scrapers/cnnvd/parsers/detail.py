@@ -22,11 +22,13 @@ def _detail_payload(payload: Any) -> dict[str, Any]:
     if isinstance(payload, dict):
         data = payload.get("data")
         if isinstance(data, dict):
+            if data.get("cnnvdId") or data.get("cnnvdCode") or data.get("vulName"):
+                return dict(data)
             for key in ("cnnvdDetail", "receviceVulDetail"):
                 item = data.get(key)
                 if isinstance(item, dict):
                     return dict(item)
-        if payload.get("cnnvdCode") or payload.get("vulName"):
+        if payload.get("cnnvdId") or payload.get("cnnvdCode") or payload.get("vulName"):
             return dict(payload)
     raise ValueError("CNNVD detail response did not contain a vulnerability object")
 

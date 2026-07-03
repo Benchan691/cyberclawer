@@ -24,8 +24,10 @@ def test_parse_cnnvd_list_maps_records_and_pagination() -> None:
     assert first.status == "高危"
     assert first.disclosure_date == "2026-06-08"
     assert first.embedded_detail["id"] == "record-1911"
-    assert first.embedded_detail["cnnvdCode"] == "CNNVD-202606-1911"
-    assert first.embedded_detail["hazardLevel"] == 2
+    assert first.embedded_detail["cnnvdId"] == "CNNVD-202606-1911"
+    assert first.embedded_detail["cveId"] == "CVE-2026-11628"
+    assert first.embedded_detail["vulLevel"] == "High"
+    assert first.embedded_detail["updateTime"] == "2026-06-09"
     assert first.to_record(first.embedded_detail)["cve_code"] == "2026-11628"
 
 
@@ -34,11 +36,11 @@ def test_parse_cnnvd_detail_returns_raw_inner_object() -> None:
 
     detail = parse_vulnerability_detail(payload).to_dict()
 
-    assert detail == payload["data"]["cnnvdDetail"]
+    assert detail == payload["data"]
     assert detail["id"] == "record-1911"
     assert detail["vulName"] == "Google Chrome 安全漏洞"
-    assert detail["cnnvdCode"] == "CNNVD-202606-1911"
-    assert detail["hazardLevel"] == 2
+    assert detail["cnnvdId"] == "CNNVD-202606-1911"
+    assert detail["vulLevel"] == "High"
 
 
 def test_parse_cnnvd_received_detail_variant() -> None:
