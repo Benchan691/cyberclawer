@@ -23,6 +23,10 @@ class FetchError(ScrapeError):
     """Raised when a page cannot be fetched after retries."""
 
 
+class CaptchaRequiredError(FetchError):
+    """Raised when a provider requires human captcha verification."""
+
+
 class WAFChallengeError(FetchError):
     """Raised when Aliyun returns a JavaScript signature challenge."""
 
@@ -121,13 +125,25 @@ class ScraperClient:
         self.backoff_jitter = max(0.0, backoff_jitter)
         self.rate_limiter = AsyncRateLimiter(delay)
         self.browser_fetcher = browser_fetcher
+        self._timeout = timeout
+        self._proxy = proxy.strip() if proxy and proxy.strip() else None
+        self._default_headers = dict(headers or DEFAULT_HEADERS)
+        self._client = self._build_http_client()
+
+    def _build_http_client(self) -> httpx.AsyncClient:
         client_kwargs: dict[str, Any] = {
-            "headers": dict(headers or DEFAULT_HEADERS),
-            "timeout": httpx.Timeout(timeout),
+            "headers": dict(self._default_headers),
+            "timeout": httpx.Timeout(self._timeout),
             "follow_redirects": True,
         }
-        apply_httpx_proxy_kwargs(client_kwargs, proxy)
-        self._client = httpx.AsyncClient(**client_kwargs)
+        apply_httpx_proxy_kwargs(client_kwargs, self._proxy)
+        return httpx.AsyncClient(**client_kwargs)
+
+    async def refresh_session(self, headers: Mapping[str, str] | None = None) -> None:
+        await self._client.aclose()
+        if headers is not None:
+            self._default_headers = dict(headers)
+        self._client = self._build_http_client()
 
     async def __aenter__(self) -> "ScraperClient":
         return self

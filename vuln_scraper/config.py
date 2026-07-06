@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import tomllib
 import socket
 from dataclasses import dataclass, replace
@@ -33,6 +34,42 @@ DEFAULT_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+
+USER_AGENT_POOL: tuple[str, ...] = (
+    DEFAULT_USER_AGENT,
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.5 Safari/605.1.15"
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) "
+        "Gecko/20100101 Firefox/127.0"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
+    ),
+)
+
+
+def random_user_agent(*, exclude: str | None = None) -> str:
+    choices = [ua for ua in USER_AGENT_POOL if ua != exclude]
+    if not choices:
+        return random.choice(USER_AGENT_POOL)
+    return random.choice(choices)
+
 
 DEFAULT_HEADERS = {
     "User-Agent": DEFAULT_USER_AGENT,

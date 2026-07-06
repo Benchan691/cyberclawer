@@ -41,6 +41,7 @@ class BrowserHTMLFetcher:
         self._browser = None
         self._context = None
         self._persistent_context = False
+        self._manual_page = None
 
     async def __aenter__(self) -> "BrowserHTMLFetcher":
         try:
@@ -87,6 +88,8 @@ class BrowserHTMLFetcher:
         await self.aclose()
 
     async def aclose(self) -> None:
+        if self._manual_page is not None and not self._manual_page.is_closed():
+            await self._manual_page.close()
         if self._context is not None:
             await self._context.close()
         if self._browser is not None and not self._persistent_context:
@@ -119,6 +122,30 @@ class BrowserHTMLFetcher:
             )
         finally:
             await page.close()
+
+    async def verify(self, url: str) -> BrowserFetchResult:
+        if self._context is None:
+            raise RuntimeError("BrowserHTMLFetcher must be used as an async context manager.")
+
+        if self._manual_page is None or self._manual_page.is_closed():
+            self._manual_page = await self._context.new_page()
+        page = self._manual_page
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+        return BrowserFetchResult(
+            html=await page.content(),
+            url=page.url,
+            status_code=response.status if response else None,
+            cookies=await self._context.cookies(url),
+        )
+
+    async def cookies(self, url: str) -> list[dict[str, Any]]:
+        if self._context is None:
+            raise RuntimeError("BrowserHTMLFetcher must be used as an async context manager.")
+        return await self._context.cookies(url)
 
     async def _content_ready(self, page) -> bool:
         try:

@@ -5,6 +5,7 @@ import math
 import re
 from typing import Any
 
+from vuln_scraper.client import CaptchaRequiredError
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
 from vuln_scraper.scrapers.cnnvd.config import DEFAULT_PAGE_SIZE, SOURCE_URL
 
@@ -21,6 +22,8 @@ def parse_vulnerability_list(
     source_url: str | None = SOURCE_URL,
 ) -> ListPage:
     payload = _coerce_json(data)
+    if isinstance(payload, dict):
+        _raise_if_captcha_required(payload)
     container = payload.get("data") if isinstance(payload, dict) else {}
     if not isinstance(container, dict):
         container = {}
@@ -51,7 +54,7 @@ def _entry_from_item(item: dict[str, Any], *, provider: str, source_url: str | N
         or _optional_str(item.get("typeName"))
         or _optional_str(item.get("vulType"))
     )
-    embedded_detail = dict(item)
+    embedded_detail = {key: _clean_text(value) for key, value in item.items()}
     embedded_detail["_list_summary"] = True
 
     return ListEntry(
@@ -93,8 +96,21 @@ def _optional_int(value: Any) -> int | None:
 def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
+    text = _clean_text(value).strip()
     return text or None
+
+
+def _clean_text(value: Any) -> Any:
+    if isinstance(value, str):
+        return re.sub(r"</?mark>", "", value)
+    return value
+
+
+def _raise_if_captcha_required(payload: dict[str, Any]) -> None:
+    message = str(payload.get("message") or payload.get("msg") or "")
+    code = str(payload.get("code") or "")
+    if code == "4010" or "人机验证" in message:
+        raise CaptchaRequiredError(f"CNNVD captcha required: {message or code}")
 
 
 def _coerce_json(data: Any) -> Any:

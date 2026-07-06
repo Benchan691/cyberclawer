@@ -76,6 +76,27 @@ def test_backoff_scales_with_attempt() -> None:
     assert asyncio.run(run()) == 2.0
 
 
+def test_refresh_session_replaces_http_client_and_clears_cookies() -> None:
+    async def run() -> tuple[str | None, bool, str | None]:
+        client = ScraperClient(
+            delay=0,
+            retries=0,
+            headers={"User-Agent": "initial-ua"},
+        )
+        client._client.cookies.set("session", "old", domain="example.test", path="/")
+        old_client_id = id(client._client)
+        await client.refresh_session({"User-Agent": "rotated-ua"})
+        new_client_id = id(client._client)
+        request = client._client.build_request("GET", "https://example.test/")
+        await client.aclose()
+        return request.headers.get("User-Agent"), old_client_id != new_client_id, request.headers.get("cookie")
+
+    user_agent, replaced, cookie_header = asyncio.run(run())
+    assert user_agent == "rotated-ua"
+    assert replaced
+    assert not cookie_header
+
+
 def test_browser_fetch_cookies_are_reused_in_memory() -> None:
     client = ScraperClient(delay=0, retries=0)
     client.browser_fetcher = FakeBrowserFetcher(

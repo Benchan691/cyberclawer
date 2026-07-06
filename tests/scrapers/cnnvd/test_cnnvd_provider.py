@@ -1,8 +1,9 @@
 import asyncio
 
 from vuln_scraper.models import ListEntry, VulnerabilityId
+from vuln_scraper.config import DEFAULT_USER_AGENT
 from vuln_scraper.scrapers import CNNVDProvider, get_provider, provider_keys
-from vuln_scraper.scrapers.cnnvd.config import DETAIL_API_URL, LIST_API_URL, SIGN_API_URL, SOURCE_URL
+from vuln_scraper.scrapers.cnnvd.config import DETAIL_API_URL, DETAIL_URL, LIST_API_URL, SIGN_API_URL, SOURCE_URL
 
 
 class FakeJSONResult:
@@ -27,11 +28,15 @@ def test_cnnvd_provider_registry_and_defaults() -> None:
     assert provider.content_type == "json"
     assert not provider.browser_fallback
     assert provider.default_mongo_collection == "cnnvd"
+    assert provider.default_concurrency == 1
+    assert provider.captcha_retries == 1
+    assert provider.captcha_retry_delay == 0
+    assert provider.user_agent == DEFAULT_USER_AGENT
     assert provider.stop_on_first_known
 
 
 def test_cnnvd_provider_urls_and_requests() -> None:
-    provider = CNNVDProvider()
+    provider = CNNVDProvider(user_agent="test-ua")
 
     assert provider.list_url(1) == LIST_API_URL
     assert provider.detail_url("CNNVD-202606-1911") == SOURCE_URL
@@ -45,6 +50,7 @@ def test_cnnvd_provider_urls_and_requests() -> None:
         "page": 2,
         "pageSize": 50,
     }
+    assert list_request["headers"]["User-Agent"] == "test-ua"
 
     entry = ListEntry(
         identity=VulnerabilityId(type="CNNVD", code="202606-1911"),
@@ -61,8 +67,29 @@ def test_cnnvd_provider_urls_and_requests() -> None:
     )
     requests = provider.detail_json_requests(entry, detail_url=provider.detail_url(entry.display_id))
 
-    assert [request["url"] for request in requests] == [DETAIL_API_URL]
-    assert [request["json"] for request in requests] == [{"id": "record-1911"}]
+    assert [request["url"] for request in requests] == [DETAIL_API_URL, DETAIL_API_URL]
+    assert [request["json"] for request in requests] == [{"id": "record-1911"}, {"id": "record-1911"}]
+    assert provider.detail_url_for_entry(entry) == f"{DETAIL_URL}?vulId=record-1911"
+
+
+def test_cnnvd_detail_request_requires_non_empty_json_id() -> None:
+    provider = CNNVDProvider()
+    entry = ListEntry(
+        identity=VulnerabilityId(type="CNNVD", code="202606-1911"),
+        title="Example",
+        vuln_type=None,
+        disclosure_date=None,
+        status=None,
+        provider="cnnvd",
+        embedded_detail={"id": "  "},
+    )
+
+    try:
+        provider.detail_json_requests(entry, detail_url=provider.detail_url_for_entry(entry))
+    except ValueError as exc:
+        assert "missing JSON id" in str(exc)
+    else:
+        raise AssertionError("missing CNNVD JSON id should fail before HTTP")
 
 
 def test_cnnvd_provider_signs_json_requests() -> None:

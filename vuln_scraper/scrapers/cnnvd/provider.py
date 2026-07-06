@@ -5,13 +5,15 @@ import secrets
 import string
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
+from vuln_scraper.config import DEFAULT_USER_AGENT
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.cnnvd.config import (
     BASE_URL,
     DEFAULT_COLLECTION,
     DEFAULT_PAGE_SIZE,
+    DETAIL_URL,
     DETAIL_API_URL,
     LIST_API_URL,
     SIGN_API_URL,
@@ -33,7 +35,11 @@ class CNNVDProvider:
     browser_fallback: bool = False
     content_type: str = "json"
     default_request_delay: float = 1.0
+    default_concurrency: int = 1
+    captcha_retries: int = 1
+    captcha_retry_delay: float = 0
     stop_on_first_known: bool = True
+    user_agent: str = DEFAULT_USER_AGENT
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_API_URL
@@ -44,13 +50,20 @@ class CNNVDProvider:
             raise ValueError(f"invalid CNNVD vulnerability identifier: {identity_display!r}")
         return SOURCE_URL
 
+    def detail_url_for_entry(self, entry: ListEntry) -> str:
+        list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
+        record_id = _detail_record_id(list_detail)
+        if not record_id:
+            return self.detail_url(entry.display_id)
+        return f"{DETAIL_URL}?vulId={record_id}"
+
     def request_headers(self) -> dict[str, str]:
         return {
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json;charset=UTF-8",
             "Origin": BASE_URL,
             "Referer": SOURCE_URL,
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": self.user_agent,
         }
 
     def list_json_request(self, page: int, *, checkpoint: object | None = None) -> dict[str, Any]:
@@ -68,17 +81,16 @@ class CNNVDProvider:
 
     def detail_json_requests(self, entry: ListEntry, *, detail_url: str) -> list[dict[str, Any]]:
         list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
-        record_id = list_detail.get("id")
+        record_id = _detail_record_id(list_detail) or _detail_record_id_from_url(detail_url)
         if not record_id:
-            raise ValueError(f"CNNVD list entry is missing detail id: {entry.display_id}")
-        return [
-            {
-                "method": "POST",
-                "url": DETAIL_API_URL,
-                "headers": self.request_headers(),
-                "json": {"id": record_id},
-            }
-        ]
+            raise ValueError(f"CNNVD list entry is missing JSON id for detail request: {entry.display_id}")
+        request = {
+            "method": "POST",
+            "url": DETAIL_API_URL,
+            "headers": self.request_headers(),
+            "json": {"id": record_id},
+        }
+        return [request, dict(request)]
 
     async def finalize_json_request(self, client: Any, request: dict[str, Any]) -> dict[str, Any]:
         request = dict(request)
@@ -118,3 +130,19 @@ class CNNVDProvider:
 
     def parse_detail(self, data: Any) -> CNNVDDetailRecord:
         return parse_vulnerability_detail(data)
+
+
+def _detail_record_id(list_detail: dict[str, Any]) -> str | None:
+    value = list_detail.get("id")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _detail_record_id_from_url(detail_url: str) -> str | None:
+    values = parse_qs(urlsplit(detail_url).query).get("vulId")
+    if not values:
+        return None
+    text = values[0].strip()
+    return text or None

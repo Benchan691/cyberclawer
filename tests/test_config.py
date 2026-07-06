@@ -8,6 +8,7 @@ from vuln_scraper.config import (
     DEFAULT_RETRIES,
     MAX_RESULT_LIMIT,
     ScraperSettings,
+    USER_AGENT_POOL,
     default_scrape_settings,
     load_mongo_config,
     load_scrapers_config,
@@ -15,6 +16,7 @@ from vuln_scraper.config import (
     mongo_collection_for_provider,
     mongo_collections_from_config,
     apply_httpx_proxy_kwargs,
+    random_user_agent,
     resolve_proxy_url,
     retry_config_for_provider,
 )
@@ -399,3 +401,15 @@ def test_catch_up_provider_keys_rejects_non_list(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="providers must be a list"):
         catch_up_provider_keys(config_file)
+
+
+def test_random_user_agent_returns_pool_member() -> None:
+    ua = random_user_agent()
+    assert ua in USER_AGENT_POOL
+
+
+def test_random_user_agent_excludes_current() -> None:
+    for candidate in USER_AGENT_POOL:
+        rotated = random_user_agent(exclude=candidate)
+        assert rotated != candidate
+        assert rotated in USER_AGENT_POOL

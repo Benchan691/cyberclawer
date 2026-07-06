@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from vuln_scraper.client import CaptchaRequiredError
 from vuln_scraper.scrapers.cnnvd.parsers.detail import parse_vulnerability_detail
 from vuln_scraper.scrapers.cnnvd.parsers.list import parse_vulnerability_list
 
@@ -59,3 +62,51 @@ def test_parse_cnnvd_received_detail_variant() -> None:
     detail = parse_vulnerability_detail(payload).to_dict()
 
     assert detail == payload["data"]["receviceVulDetail"]
+
+
+def test_parse_cnnvd_list_strips_search_mark_tags() -> None:
+    page = parse_vulnerability_list(
+        {
+            "data": {
+                "total": 1,
+                "records": [
+                    {
+                        "id": "99153750",
+                        "vulName": "Wikimedia MediaWiki 跨站脚本漏洞",
+                        "cnnvdId": "<mark>CNNVD</mark>-<mark>2026</mark>-<mark>62853948</mark>",
+                        "cveId": "CVE-<mark>2026</mark>-58032",
+                        "publishDate": "2026-07-01",
+                    }
+                ],
+            }
+        },
+        page=1,
+    )
+
+    entry = page.entries[0]
+    assert entry.display_id == "CNNVD-2026-62853948"
+    assert entry.to_record(entry.embedded_detail)["cve_code"] == "2026-58032"
+
+
+def test_parse_cnnvd_detail_accepts_direct_data_with_id() -> None:
+    payload = {
+        "code": 200,
+        "data": {
+            "id": "99153750",
+            "productId": "170945",
+            "cnnvdId": "CNNVD-2026-62853948",
+            "cveId": "CVE-2026-58032",
+        },
+    }
+
+    assert parse_vulnerability_detail(payload).to_dict() == payload["data"]
+
+
+def test_parse_cnnvd_detail_reports_captcha_required() -> None:
+    with pytest.raises(CaptchaRequiredError, match="需要人机验证"):
+        parse_vulnerability_detail({"code": 4010, "success": False, "message": "需要人机验证"})
+
+
+def test_parse_cnnvd_list_reports_captcha_required() -> None:
+    with pytest.raises(CaptchaRequiredError, match="需要人机验证"):
+        parse_vulnerability_list({"code": 4010, "success": False, "message": "需要人机验证"}, page=1)

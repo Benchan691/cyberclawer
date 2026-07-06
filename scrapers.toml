@@ -11,7 +11,7 @@
 # huawei_sa, infosec, juniper, msrc, paloalto, qianxin, ransomwarelive, splunk, zeroday
 
 [scrapers.catch_up]
-providers = ["cnnvd", "cnvd"]
+providers = ["cnnvd"]
 
 [scrapers.defaults]
 retries = 3

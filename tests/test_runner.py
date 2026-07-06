@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import copy
 import json
 from datetime import datetime, timedelta
@@ -7,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from vuln_scraper.client import FetchResult
+from vuln_scraper.client import CaptchaRequiredError, FetchResult
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import Checkpoint, ScraperRunner
 from vuln_scraper.scrapers import CiscoProvider
@@ -1134,6 +1135,7 @@ def test_cnnvd_detail_requests_stop_after_first_success(tmp_path) -> None:
 
     assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
     assert output["vulnerabilities"][0]["details"]["cnnvd"] == cnnvd_detail_payload("record-1911")["data"]
+    assert output["vulnerabilities"][0]["source"]["detail_url"].endswith("/frontend/detail?vulId=record-1911")
     assert client.detail_payloads == [{"id": "record-1911"}]
 
 
@@ -1229,6 +1231,138 @@ def test_cnnvd_detail_requests_use_internal_id(tmp_path) -> None:
 
     assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
     assert client.detail_payloads == [{"id": "record-1911"}]
+
+
+def test_cnnvd_detail_api_error_is_not_fallback(tmp_path) -> None:
+    client = FakeCNNVDClient(detail_api_error=True)
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "cnnvd.json",
+        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
+        limit=1,
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
+
+    detail = output["vulnerabilities"][0]["details"]["cnnvd"]
+    assert detail["_list_summary"] is True
+    assert len(output["failed"]) == 1
+    assert "CNNVD detail API error 5001" in output["failed"][0]["error"]
+    assert "request_json={'id': 'record-1911'}" in output["failed"][0]["error"]
+
+
+def test_cnnvd_detail_captcha_refreshes_session_and_retries(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(
+        "vuln_scraper.runner.random_user_agent",
+        lambda *, exclude=None: "rotated-ua",
+    )
+    client = FakeCNNVDClient(captcha_required=1)
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "cnnvd.json",
+        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
+        limit=1,
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(settings, provider=CNNVDProvider(user_agent="initial-ua"))._run_with_client(client)
+    )
+
+    assert output["failed"] == []
+    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
+    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
+    assert client.refresh_count == 1
+    assert client.user_agents == ["initial-ua", "rotated-ua"]
+
+
+def test_cnnvd_list_captcha_refreshes_session_and_retries(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(
+        "vuln_scraper.runner.random_user_agent",
+        lambda *, exclude=None: "rotated-ua",
+    )
+    client = FakeCNNVDClient(list_captcha_required=1)
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "cnnvd.json",
+        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
+        limit=1,
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(settings, provider=CNNVDProvider(user_agent="initial-ua"))._run_with_client(client)
+    )
+
+    assert output["failed"] == []
+    assert client.list_request_count == 2
+    assert client.refresh_count == 1
+    assert client.list_user_agents == ["initial-ua", "rotated-ua"]
+
+
+def test_cnnvd_captcha_required_refreshes_session_until_success(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rotations = iter(["rotated-ua-1", "rotated-ua-2"])
+
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(
+        "vuln_scraper.runner.random_user_agent",
+        lambda *, exclude=None: next(rotations),
+    )
+    client = FakeCNNVDClient(captcha_required=2)
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "cnnvd.json",
+        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
+        limit=1,
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(
+        ScraperRunner(
+            settings,
+            provider=CNNVDProvider(user_agent="initial-ua", captcha_retries=2),
+        )._run_with_client(client)
+    )
+
+    assert output["failed"] == []
+    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
+    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}, {"id": "record-1911"}]
+    assert client.refresh_count == 2
+    assert client.user_agents == ["initial-ua", "rotated-ua-1", "rotated-ua-2"]
+
+
+def test_cnnvd_retries_transient_unparseable_detail_response(tmp_path) -> None:
+    client = FakeCNNVDClient(empty_detail_once=True)
+    settings = ScraperSettings(
+        data_dir=tmp_path,
+        output_file=tmp_path / "cnnvd.json",
+        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
+        limit=1,
+        request_delay=0,
+        retries=0,
+    )
+
+    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
+
+    assert output["failed"] == []
+    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
+    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
 
 
 def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
@@ -1752,26 +1886,75 @@ class FakeHikvisionClient:
 
 
 class FakeCNNVDClient:
-    def __init__(self, *, fail_combined: bool = False) -> None:
-        self.fail_combined = fail_combined
+    def __init__(
+        self,
+        *,
+        detail_api_error: bool = False,
+        empty_detail_once: bool = False,
+        captcha_required: bool | int = False,
+        list_captcha_required: bool | int = False,
+    ) -> None:
+        self.detail_api_error = detail_api_error
+        self.empty_detail_once = empty_detail_once
+        self.captcha_required = captcha_required
+        self.list_captcha_required = list_captcha_required
         self.list_request_count = 0
         self.detail_ids_seen: list[str] = []
         self.detail_payloads: list[dict] = []
+        self.user_agents: list[str | None] = []
+        self.list_user_agents: list[str | None] = []
+        self.refresh_count = 0
+        self.refreshed_headers: list[dict[str, str] | None] = []
+
+    async def refresh_session(self, headers=None) -> None:
+        self.refresh_count += 1
+        self.refreshed_headers.append(dict(headers) if headers else None)
 
     async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
+        user_agent = (headers or {}).get("User-Agent")
+        if url.endswith("/searchVul"):
+            self.list_user_agents.append(user_agent)
+        elif url.endswith("/searchVulById"):
+            self.user_agents.append(user_agent)
         if url.endswith("/tourist/sign"):
             return FakeJSONResult({"code": 200, "data": "test-signature"}, url)
         if url.endswith("/searchVul"):
             self.list_request_count += 1
+            if self._should_return_list_captcha():
+                return FakeJSONResult({"code": 4010, "success": False, "message": "需要人机验证", "data": None}, url)
             return FakeJSONResult(cnnvd_list_payload(), url)
 
         payload = dict(json_body or data or {})
         self.detail_payloads.append(payload)
-        if self.fail_combined and "cnnvdCode" in payload and "id" in payload:
-            return FakeJSONResult({"success": False, "data": ["invalid"]}, url)
+        if self.empty_detail_once:
+            self.empty_detail_once = False
+            return FakeJSONResult({"code": 200, "success": True, "data": None}, url)
+        if self.detail_api_error:
+            return FakeJSONResult(
+                {"code": 5001, "success": False, "message": "参数错误[文档 ID 不能为空]", "data": None},
+                url,
+            )
+        if self._should_return_detail_captcha():
+            return FakeJSONResult({"code": 4010, "success": False, "message": "需要人机验证", "data": None}, url)
         record_id = payload.get("id") or "record-1911"
         self.detail_ids_seen.append(record_id)
         return FakeJSONResult(cnnvd_detail_payload(record_id), url)
+
+    def _should_return_detail_captcha(self) -> bool:
+        if self.captcha_required is True:
+            return True
+        if self.captcha_required:
+            self.captcha_required = int(self.captcha_required) - 1
+            return True
+        return False
+
+    def _should_return_list_captcha(self) -> bool:
+        if self.list_captcha_required is True:
+            return True
+        if self.list_captcha_required:
+            self.list_captcha_required = int(self.list_captcha_required) - 1
+            return True
+        return False
 
 
 class FakeCNVDClient:

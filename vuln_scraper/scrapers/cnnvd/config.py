@@ -1,5 +1,6 @@
 BASE_URL = "https://www.cnnvd.org.cn"
 SOURCE_URL = f"{BASE_URL}/frontend/loophole"
+DETAIL_URL = f"{BASE_URL}/frontend/detail"
 API_BASE_URL = f"{BASE_URL}/cnnvdweb"
 LIST_API_URL = f"{API_BASE_URL}/homePage/searchVul"
 DETAIL_API_URL = f"{API_BASE_URL}/homePage/searchVulById"

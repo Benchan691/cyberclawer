@@ -5,14 +5,21 @@ import inspect
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .browser import BrowserHTMLFetcher
-from .client import FetchResult, ScraperClient, FetchError, looks_like_captcha_gate, looks_like_waf_challenge
-from .config import ScraperSettings, error_log_path_for_settings
+from .client import (
+    CaptchaRequiredError,
+    FetchError,
+    FetchResult,
+    ScraperClient,
+    looks_like_captcha_gate,
+    looks_like_waf_challenge,
+)
+from .config import ScraperSettings, error_log_path_for_settings, random_user_agent
 from .error_log import ScraperErrorLog, install_run_log_handler
 from .models import ListEntry
 from .mongo import (
@@ -258,6 +265,9 @@ class ScraperRunner:
             self._emit(phase="list", page=page)
             try:
                 list_page = await self._fetch_list_page(client, url, page)
+            except CaptchaRequiredError as exc:
+                logger.error("captcha required for %s list page %s at %s: %s", self.provider.key, page, url, exc)
+                raise
             except FetchError as exc:
                 self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 self.stop_reason = "error"
@@ -346,6 +356,9 @@ class ScraperRunner:
             self._emit(phase="list", page=page)
             try:
                 list_page = await self._fetch_list_page(client, url, page)
+            except CaptchaRequiredError as exc:
+                logger.error("captcha required for %s list page %s at %s: %s", self.provider.key, page, url, exc)
+                raise
             except FetchError as exc:
                 self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 self.stop_reason = "error"
@@ -429,6 +442,9 @@ class ScraperRunner:
             self._emit(phase="list", page=page)
             try:
                 list_page = await self._fetch_list_page(client, url, page)
+            except CaptchaRequiredError as exc:
+                logger.error("captcha required for %s list page %s at %s: %s", self.provider.key, page, url, exc)
+                raise
             except FetchError as exc:
                 self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 self.stop_reason = "error"
@@ -692,6 +708,9 @@ class ScraperRunner:
             self._emit(phase="list", page=page)
             try:
                 list_page = await self._fetch_list_page(client, url, page)
+            except CaptchaRequiredError as exc:
+                logger.error("captcha required for %s list page %s at %s: %s", self.provider.key, page, url, exc)
+                raise
             except FetchError as exc:
                 self._record_failure(self._list_failure_identity(), url, exc, phase="list")
                 break
@@ -754,27 +773,43 @@ class ScraperRunner:
         await asyncio.gather(*(scrape_one(entry) for entry in targets))
 
     async def _fetch_list_page(self, client: ScraperClient, url: str, page: int) -> Any:
-        if getattr(self.provider, "content_type", "html") == "json":
-            request_factory = getattr(self.provider, "list_json_request", None)
-            if request_factory is not None:
-                request = request_factory(page, checkpoint=self.checkpoint)
-                result = await self._fetch_json_request(client, request)
-            else:
-                headers = await self._provider_request_headers()
-                request_method = str(getattr(self.provider, "request_method", "GET")).upper()
-                if request_method == "POST":
-                    payload_factory = getattr(self.provider, "request_payload", None)
-                    payload = payload_factory(page) if callable(payload_factory) else None
-                    result = await client.post_json(url, json=payload, headers=headers)
-                else:
-                    result = await client.get_json(url, headers=headers)
-            parse_kwargs: dict[str, Any] = {"page": page}
-            if self.provider.key == "cve" and self._updated_since is not None:
-                parse_kwargs["updated_since"] = self._updated_since
-            return self.provider.parse_list(result.data, **parse_kwargs)
+        attempt = 0
+        while True:
+            try:
+                if getattr(self.provider, "content_type", "html") == "json":
+                    request_factory = getattr(self.provider, "list_json_request", None)
+                    if request_factory is not None:
+                        request = request_factory(page, checkpoint=self.checkpoint)
+                        result = await self._fetch_json_request(client, request)
+                    else:
+                        headers = await self._provider_request_headers()
+                        request_method = str(getattr(self.provider, "request_method", "GET")).upper()
+                        if request_method == "POST":
+                            payload_factory = getattr(self.provider, "request_payload", None)
+                            payload = payload_factory(page) if callable(payload_factory) else None
+                            result = await client.post_json(url, json=payload, headers=headers)
+                        else:
+                            result = await client.get_json(url, headers=headers)
+                    parse_kwargs: dict[str, Any] = {"page": page}
+                    if self.provider.key == "cve" and self._updated_since is not None:
+                        parse_kwargs["updated_since"] = self._updated_since
+                    return self.provider.parse_list(result.data, **parse_kwargs)
 
-        result = await self._fetch_provider_html(client, url)
-        return self.provider.parse_list(result.html, page=page)
+                result = await self._fetch_provider_html(client, url)
+                return self.provider.parse_list(result.html, page=page)
+            except CaptchaRequiredError as exc:
+                if attempt + 1 >= self._captcha_attempts():
+                    raise
+                await self._wait_before_captcha_retry(
+                    client,
+                    exc,
+                    phase="list",
+                    url=url,
+                    page=page,
+                )
+                attempt += 1
+
+        raise FetchError(f"captcha retry attempts exhausted for {url}")
 
     async def _fetch_json_request(self, client: ScraperClient, request: dict[str, Any]) -> Any:
         finalize_json_request = getattr(self.provider, "finalize_json_request", None)
@@ -884,7 +919,23 @@ class ScraperRunner:
             self.records_by_id[entry.key] = entry.to_record(detail, detail_url=url)
             self.checkpoint.completed_identity_keys.add(entry.key)
             self.checkpoint.failed.pop(entry.key, None)
+        except CaptchaRequiredError as exc:
+            logger.error(
+                "captcha required for %s detail %s at %s: %s",
+                self.provider.key,
+                entry.key,
+                url,
+                exc,
+            )
+            raise
         except Exception as exc:
+            detail_failure_fallback = getattr(self.provider, "detail_failure_fallback", None)
+            fallback_detail = detail_failure_fallback(entry, error=exc, detail_url=url) if detail_failure_fallback else None
+            if fallback_detail is not None:
+                self.records_by_id[entry.key] = entry.to_record(fallback_detail, detail_url=url)
+                self.checkpoint.completed_identity_keys.add(entry.key)
+                self.checkpoint.failed.pop(entry.key, None)
+                return
             self.records_by_id[entry.key] = entry.to_record(None, detail_url=url)
             self._record_failure(entry, url, exc, phase="detail")
         finally:
@@ -904,11 +955,29 @@ class ScraperRunner:
                 raise FetchError("provider JSON detail requests did not include any requests")
             last_error: Exception | None = None
             for request in requests:
-                try:
-                    result = await self._fetch_json_request(client, request)
-                    return result, self.provider.parse_detail(result.data).to_dict()
-                except Exception as exc:
-                    last_error = exc
+                attempt = 0
+                while True:
+                    try:
+                        result = await self._fetch_json_request(client, request)
+                        return result, self.provider.parse_detail(result.data).to_dict()
+                    except CaptchaRequiredError as exc:
+                        if attempt + 1 >= self._captcha_attempts():
+                            raise
+                        await self._wait_before_captcha_retry(
+                            client,
+                            exc,
+                            phase="detail",
+                            url=detail_url,
+                            identity=entry.key,
+                        )
+                        request["headers"] = self.provider.request_headers()
+                        attempt += 1
+                    except Exception as exc:
+                        response_snippet = ""
+                        if "result" in locals():
+                            response_snippet = f"; response={_short_repr(result.data)}"
+                        last_error = FetchError(f"{exc}; request_json={request.get('json')!r}{response_snippet}")
+                        break
             raise FetchError(f"all provider JSON detail requests failed: {last_error}") from last_error
 
         request_factory = getattr(self.provider, "detail_json_request", None)
@@ -989,6 +1058,50 @@ class ScraperRunner:
             return expanded_ids
         return [entry.key]
 
+    def _captcha_attempts(self) -> int:
+        return max(1, int(getattr(self.provider, "captcha_retries", 0) or 0) + 1)
+
+    def _rotate_provider_user_agent(self) -> None:
+        if not hasattr(self.provider, "user_agent"):
+            return
+        current = self.provider.user_agent
+        new_ua = random_user_agent(exclude=current)
+        self.provider = replace(self.provider, user_agent=new_ua)
+        logger.warning(
+            "rotated user-agent for %s after verification required: %s -> %s",
+            self.provider.key,
+            current,
+            new_ua,
+        )
+
+    async def _refresh_captcha_session(self, client: ScraperClient) -> None:
+        self._rotate_provider_user_agent()
+        refresh_session = getattr(client, "refresh_session", None)
+        if refresh_session is None:
+            return
+        request_headers = getattr(self.provider, "request_headers", None)
+        headers = request_headers() if request_headers is not None else None
+        refreshed = refresh_session(headers)
+        if inspect.isawaitable(refreshed):
+            await refreshed
+
+    async def _wait_before_captcha_retry(
+        self,
+        client: ScraperClient,
+        error: CaptchaRequiredError,
+        **context: Any,
+    ) -> None:
+        delay = float(getattr(self.provider, "captcha_retry_delay", 10.0) or 0)
+        await self._refresh_captcha_session(client)
+        logger.warning(
+            "captcha required for %s %s; retrying in %.1fs: %s",
+            self.provider.key,
+            " ".join(f"{key}={value}" for key, value in context.items()),
+            delay,
+            error,
+        )
+        await asyncio.sleep(delay)
+
     def _detail_url_for_entry(self, entry: ListEntry) -> str | None:
         detail_url_for_entry = getattr(self.provider, "detail_url_for_entry", None)
         if detail_url_for_entry is not None:
@@ -1062,3 +1175,8 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp_path.replace(path)
+
+
+def _short_repr(value: Any, *, limit: int = 500) -> str:
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit] + "..."
