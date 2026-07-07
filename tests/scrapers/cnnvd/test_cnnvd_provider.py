@@ -1,5 +1,7 @@
 import asyncio
 
+import vuln_scraper.scrapers.cnnvd.provider as cnnvd_provider
+from vuln_scraper.client import FetchError
 from vuln_scraper.models import ListEntry, VulnerabilityId
 from vuln_scraper.config import DEFAULT_USER_AGENT
 from vuln_scraper.scrapers import CNNVDProvider, get_provider, provider_keys
@@ -15,7 +17,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.requests = []
 
-    async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
+    async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
         self.requests.append({"method": method, "url": url, "headers": headers, "json": json_body})
         return FakeJSONResult({"code": 200, "data": "test-signature"})
 
@@ -108,3 +110,21 @@ def test_cnnvd_provider_signs_json_requests() -> None:
     sign_request = client.requests[0]
     assert sign_request["url"] == SIGN_API_URL
     assert sign_request["json"]["signStr"].startswith("POST/cnnvdweb/homePage/searchVul")
+
+
+def test_cnnvd_provider_falls_back_to_direct_sign_request(monkeypatch) -> None:
+    class FailingSignClient(FakeClient):
+        async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
+            self.requests.append({"method": method, "url": url, "headers": headers, "json": json_body})
+            raise FetchError("Failed to fetch https://www.cnnvd.org.cn/cnnvdweb/tourist/sign: 404 Not Found")
+
+    async def fake_direct_sign_request(headers, sign_input):
+        return FakeJSONResult({"code": 200, "data": "fallback-signature"})
+
+    monkeypatch.setattr(cnnvd_provider, "_direct_sign_request", fake_direct_sign_request)
+    provider = CNNVDProvider()
+    client = FailingSignClient()
+    signed = asyncio.run(provider.finalize_json_request(client, provider.list_json_request(1)))
+
+    assert signed["headers"]["X-Sign"] == "fallback-signature"
+    assert len(client.requests) == 1

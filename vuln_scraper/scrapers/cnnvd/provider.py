@@ -7,7 +7,10 @@ import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
+
 from vuln_scraper.config import DEFAULT_USER_AGENT
+from vuln_scraper.client import FetchError
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.cnnvd.config import (
     BASE_URL,
@@ -100,17 +103,22 @@ class CNNVDProvider:
         timestamp = str(int(time.time() * 1000))
         nonce = "".join(secrets.choice(NONCE_ALPHABET) for _ in range(32))
         sign_input = method + urlsplit(url).path + timestamp + nonce
-        sign_result = await client.request_json(
-            "POST",
-            SIGN_API_URL,
-            headers={
-                **self.request_headers(),
-                "X-Appid": APP_ID,
-                "X-Timestamp": timestamp,
-                "X-Nonce": nonce,
-            },
-            json_body={"signStr": sign_input},
-        )
+        sign_headers = {
+            **self.request_headers(),
+            "X-Appid": APP_ID,
+            "X-Timestamp": timestamp,
+            "X-Nonce": nonce,
+        }
+        try:
+            sign_result = await client.request_json(
+                "POST",
+                SIGN_API_URL,
+                headers=sign_headers,
+                json_body={"signStr": sign_input},
+                retries=0,
+            )
+        except FetchError:
+            sign_result = await _direct_sign_request(sign_headers, sign_input)
         sign = sign_result.data.get("data") if isinstance(sign_result.data, dict) else None
         if not sign:
             raise ValueError("CNNVD sign response did not contain a signature")
@@ -131,6 +139,18 @@ class CNNVDProvider:
     def parse_detail(self, data: Any) -> CNNVDDetailRecord:
         return parse_vulnerability_detail(data)
 
+    async def direct_json_request(self, request: dict[str, Any]) -> Any:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.request(
+                str(request.get("method") or "GET").upper(),
+                str(request.get("url") or ""),
+                headers=dict(request.get("headers") or {}),
+                json=request.get("json"),
+                data=request.get("data"),
+            )
+            response.raise_for_status()
+            return _JSONResult(response.json())
+
 
 def _detail_record_id(list_detail: dict[str, Any]) -> str | None:
     value = list_detail.get("id")
@@ -146,3 +166,15 @@ def _detail_record_id_from_url(detail_url: str) -> str | None:
         return None
     text = values[0].strip()
     return text or None
+
+
+async def _direct_sign_request(headers: dict[str, str], sign_input: str) -> Any:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        response = await client.post(SIGN_API_URL, headers=headers, json={"signStr": sign_input})
+        response.raise_for_status()
+        return _JSONResult(response.json())
+
+
+class _JSONResult:
+    def __init__(self, data: Any) -> None:
+        self.data = data

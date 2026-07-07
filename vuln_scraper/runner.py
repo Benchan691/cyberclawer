@@ -821,15 +821,22 @@ class ScraperRunner:
         if not url:
             raise FetchError("provider JSON request did not include a URL")
         headers = dict(request.get("headers") or {})
-        if method.upper() == "GET" and "json" not in request and "data" not in request:
-            return await client.get_json(url, headers=headers)
-        return await client.request_json(
-            method,
-            url,
-            headers=headers,
-            json_body=request.get("json"),
-            data=request.get("data"),
-        )
+        try:
+            if method.upper() == "GET" and "json" not in request and "data" not in request:
+                return await client.get_json(url, headers=headers)
+            return await client.request_json(
+                method,
+                url,
+                headers=headers,
+                json_body=request.get("json"),
+                data=request.get("data"),
+            )
+        except FetchError:
+            direct_json_request = getattr(self.provider, "direct_json_request", None)
+            if direct_json_request is None:
+                raise
+            direct_result = direct_json_request(request)
+            return await direct_result if inspect.isawaitable(direct_result) else direct_result
 
     async def _provider_request_headers(self) -> dict[str, str]:
         async_request_headers = getattr(self.provider, "async_request_headers", None)

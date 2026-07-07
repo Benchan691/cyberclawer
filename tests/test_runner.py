@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from vuln_scraper.client import CaptchaRequiredError, FetchResult
+from vuln_scraper.client import CaptchaRequiredError, FetchError, FetchResult
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import Checkpoint, ScraperRunner
 from vuln_scraper.scrapers import CiscoProvider
@@ -1376,7 +1376,7 @@ def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
         def __init__(self) -> None:
             self.headers = None
 
-        async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
+        async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
             self.headers = headers
             return FakeJSONResult({"ok": True}, url)
 
@@ -1389,6 +1389,30 @@ def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
     asyncio.run(runner._fetch_json_request(client, {"method": "POST", "url": "https://example.test", "json": {}}))
 
     assert client.headers == {"X-Test": "finalized"}
+
+
+def test_json_request_uses_provider_direct_fallback_after_fetch_error(tmp_path) -> None:
+    class Provider(CNNVDProvider):
+        async def finalize_json_request(self, client, request):
+            return request
+
+        async def direct_json_request(self, request):
+            return FakeJSONResult({"ok": True}, request["url"])
+
+    class Client:
+        async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
+            raise FetchError("HTTP 404 for https://example.test")
+
+    runner = ScraperRunner(
+        ScraperSettings(data_dir=tmp_path, output_file=tmp_path / "out.json", checkpoint_file=tmp_path / "cp.json"),
+        provider=Provider(),
+    )
+
+    result = asyncio.run(
+        runner._fetch_json_request(Client(), {"method": "POST", "url": "https://example.test", "json": {}})
+    )
+
+    assert result.data == {"ok": True}
 
 
 def test_cnvd_mongo_sync_stops_at_first_known_record_and_forces_browser(tmp_path) -> None:
@@ -1910,7 +1934,7 @@ class FakeCNNVDClient:
         self.refresh_count += 1
         self.refreshed_headers.append(dict(headers) if headers else None)
 
-    async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
+    async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
         user_agent = (headers or {}).get("User-Agent")
         if url.endswith("/searchVul"):
             self.list_user_agents.append(user_agent)
