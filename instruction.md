@@ -115,6 +115,6 @@ tests/scrapers/<provider>/
 ## 5) Quick verification commands
 
 ```bash
-PYTHONPATH=. uv run pytest -q
-PYTHONPATH=. uv run pytest -q tests/scrapers/<provider>
+PYTHONPATH=. pytest -q
+PYTHONPATH=. pytest -q tests/scrapers/<provider>
 ```

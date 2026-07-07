@@ -255,7 +255,7 @@ Each scraper owns its URL config, provider, and parsers.
 Run tests:
 
 ```bash
-PYTHONPATH=. uv run pytest -q
+PYTHONPATH=. pytest -q
 ```
 
 ## Operational Notes
