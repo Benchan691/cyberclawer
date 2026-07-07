@@ -1280,6 +1280,7 @@ def test_cnnvd_detail_captcha_refreshes_session_and_retries(tmp_path, monkeypatc
     assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
     assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
     assert client.refresh_count == 1
+    assert client.refresh_count == 1
     assert client.user_agents == ["initial-ua", "rotated-ua"]
 
 
@@ -1347,7 +1348,7 @@ def test_cnnvd_captcha_required_refreshes_session_until_success(tmp_path, monkey
     assert client.user_agents == ["initial-ua", "rotated-ua-1", "rotated-ua-2"]
 
 
-def test_cnnvd_retries_transient_unparseable_detail_response(tmp_path) -> None:
+def test_cnnvd_retries_transient_unparseable_detail_response(tmp_path, caplog: pytest.LogCaptureFixture) -> None:
     client = FakeCNNVDClient(empty_detail_once=True)
     settings = ScraperSettings(
         data_dir=tmp_path,
@@ -1363,6 +1364,9 @@ def test_cnnvd_retries_transient_unparseable_detail_response(tmp_path) -> None:
     assert output["failed"] == []
     assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
     assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
+    assert client.refresh_count == 1
+    assert "unparseable detail response for cnnvd:202606-1911" in caplog.text
+    assert "'data': None" in caplog.text
 
 
 def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:

@@ -963,6 +963,7 @@ class ScraperRunner:
             last_error: Exception | None = None
             for request in requests:
                 attempt = 0
+                refreshed_after_unparseable = False
                 while True:
                     try:
                         result = await self._fetch_json_request(client, request)
@@ -980,6 +981,21 @@ class ScraperRunner:
                         request["headers"] = self.provider.request_headers()
                         attempt += 1
                     except Exception as exc:
+                        if (
+                            not refreshed_after_unparseable
+                            and "did not contain a vulnerability object" in str(exc)
+                        ):
+                            response_snippet = _short_repr(result.data) if "result" in locals() else "<no response>"
+                            logger.warning(
+                                "unparseable detail response for %s at %s: %s",
+                                entry.key,
+                                detail_url,
+                                response_snippet,
+                            )
+                            await self._refresh_captcha_session(client)
+                            request["headers"] = self.provider.request_headers()
+                            refreshed_after_unparseable = True
+                            continue
                         response_snippet = ""
                         if "result" in locals():
                             response_snippet = f"; response={_short_repr(result.data)}"
