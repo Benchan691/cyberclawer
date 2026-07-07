@@ -37,7 +37,7 @@ def _detail_payload(payload: Any) -> dict[str, Any]:
                     return dict(item)
         if _looks_like_detail(payload):
             return dict(payload)
-    raise ValueError("CNNVD detail response did not contain a vulnerability object")
+    raise ValueError(f"CNNVD detail response did not contain a vulnerability object: {_short_repr(payload)}")
 
 
 def _raise_if_captcha_required(payload: dict[str, Any]) -> None:
@@ -67,3 +67,8 @@ def _coerce_json(data: Any) -> Any:
     if isinstance(data, str):
         return json.loads(data)
     return data
+
+
+def _short_repr(value: Any, *, limit: int = 500) -> str:
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit] + "..."

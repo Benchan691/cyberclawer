@@ -110,3 +110,8 @@ def test_parse_cnnvd_detail_reports_captcha_required() -> None:
 def test_parse_cnnvd_list_reports_captcha_required() -> None:
     with pytest.raises(CaptchaRequiredError, match="需要人机验证"):
         parse_vulnerability_list({"code": 4010, "success": False, "message": "需要人机验证"}, page=1)
+
+
+def test_parse_cnnvd_detail_error_includes_raw_payload() -> None:
+    with pytest.raises(ValueError, match="'data': None"):
+        parse_vulnerability_detail({"code": 200, "success": True, "data": None})
