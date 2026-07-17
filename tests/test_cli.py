@@ -32,13 +32,6 @@ def test_cli_parses_backfill_severity_subcommand() -> None:
     assert one_args.dry_run is True
 
 
-def test_cli_parses_tui_subcommand() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["tui"])
-
-    assert args.command == "tui"
-
-
 def test_cli_parses_run_subcommand() -> None:
     parser = build_parser()
     args = parser.parse_args(
@@ -80,19 +73,6 @@ def test_main_without_subcommand_exits() -> None:
         main([])
 
     assert exc.value.code == 2
-
-
-def test_main_tui_dispatches(monkeypatch) -> None:
-    called = {"tui": False}
-
-    def fake_tui() -> None:
-        called["tui"] = True
-
-    monkeypatch.setattr("vuln_scraper.scrape_tui.run_scrape_tui", fake_tui)
-
-    main(["tui"])
-
-    assert called["tui"]
 
 
 def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:

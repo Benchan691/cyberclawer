@@ -52,7 +52,6 @@ side paths) can use a proxy without affecting the MongoDB connection. Set
 # .env
 SCRAPER_PROXY=http://127.0.0.1:7890
 
-vuln-scrape tui
 vuln-scrape run avd --limit 10 --proxy http://127.0.0.1:7890
 ```
 
@@ -69,8 +68,8 @@ All scrapers use one MongoDB database, with one collection per scraper.
 
 | Scraper folder | MongoDB collection | Ingest CLI |
 | --- | --- | --- |
-| `vuln_scraper/scrapers/avd/` | `avd` | `vuln-scrape run avd --limit 100` / `vuln-scrape tui` |
-| `vuln_scraper/scrapers/hkcert/` | `hkcert` | `vuln-scrape tui` / `vuln-scrape catch-up` |
+| `vuln_scraper/scrapers/avd/` | `avd` | `vuln-scrape run avd --limit 100` / `vuln-scrape catch-up` |
+| `vuln_scraper/scrapers/hkcert/` | `hkcert` | same |
 | `vuln_scraper/scrapers/cve/` | `cve` | same |
 | `vuln_scraper/scrapers/cisco/` | `cisco` | same |
 | `vuln_scraper/scrapers/zeroday/` | `zeroday` | same |
@@ -98,23 +97,23 @@ conflict = "prompt"
 
 [mongodb.collections]
 avd = "avd"
-hkcert = "hkcert"
-cve = "cve"
 cisco = "cisco"
-zeroday = "zeroday"
-govcert = "govcert"
+cnnvd = "cnnvd"
+cnvd = "cnvd"
+cve = "cve"
 github_advisory = "github_advisory"
+govcert = "govcert"
+hikvision = "hikvision"
+hkcert = "hkcert"
 huawei_sa = "huawei_sa"
+infosec = "infosec"
+juniper = "juniper"
+msrc = "msrc"
 paloalto = "paloalto"
 qianxin = "qianxin"
 ransomwarelive = "ransomwarelive"
-infosec = "infosec"
 splunk = "splunk"
-hikvision = "hikvision"
-cnnvd = "cnnvd"
-cnvd = "cnvd"
-juniper = "juniper"
-msrc = "msrc"
+zeroday = "zeroday"
 ```
 
 Precedence for connection settings is CLI flags, environment variables
@@ -187,12 +186,6 @@ Available provider keys: `avd`, `cisco`, `cnnvd`, `cnvd`, `cve`, `github_advisor
 `qianxin`, `ransomwarelive`, `splunk`, `zeroday`.
 
 ## Usage
-
-Interactive scrape, choosing scraper and amount:
-
-```bash
-vuln-scrape tui
-```
 
 Catch up every provider: scrape newest-first from each collection and sync records
 whose normalized `updated_time` is today or newer, using the Asia/Hong_Kong calendar

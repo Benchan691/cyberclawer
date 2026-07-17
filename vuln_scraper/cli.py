@@ -63,11 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
     )
 
-    subparsers.add_parser(
-        "tui",
-        help="Interactive scrape: choose scraper and amount, sync to MongoDB.",
-    )
-
     catch_up_parser = subparsers.add_parser(
         "catch-up",
         help="Scrape and sync each provider repeatedly until MongoDB overlap.",
@@ -252,12 +247,6 @@ def main(argv: list[str] | None = None) -> None:
             f"skipped={mongo.get('skipped', 0)} "
             f"conflicts={mongo.get('conflicts', 0)}"
         )
-        return
-
-    if args.command == "tui":
-        from .scrape_tui import run_scrape_tui
-
-        run_scrape_tui()
         return
 
     if args.command == "catch-up":
