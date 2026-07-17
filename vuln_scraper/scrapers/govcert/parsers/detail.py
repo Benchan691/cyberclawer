@@ -83,7 +83,7 @@ def _sections(container: Tag | None) -> dict[str, str]:
         return {}
 
     sections: dict[str, str] = {}
-    for heading in container.find_all("h4"):
+    for heading in container.find_all(("h2", "h4")):
         label = clean_text(heading).rstrip(":").casefold()
         key = SECTION_KEYS.get(label)
         if key is None:
@@ -92,7 +92,7 @@ def _sections(container: Tag | None) -> dict[str, str]:
         nodes: list[Tag] = []
         for sibling in heading.next_siblings:
             if isinstance(sibling, Tag):
-                if sibling.name == "h4":
+                if sibling.name in {"h2", "h4"}:
                     break
                 if clean_multiline(sibling):
                     nodes.append(sibling)

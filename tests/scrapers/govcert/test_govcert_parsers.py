@@ -88,3 +88,18 @@ def test_parse_detail_page_handles_missing_optional_sections() -> None:
     assert detail["more_information_links"] == []
     assert detail["tags"] == []
     assert detail["raw_sections"] == {}
+
+
+def test_parse_detail_page_accepts_current_h2_section_headings() -> None:
+    detail = parse_detail_page("""
+        <h1 id="doc_title">Security Alert (A26-07-29): Apache Tomcat</h1>
+        <div class="noneditable">
+          <h2>Description:</h2><p>A remote attacker could exploit the issue.</p>
+          <h2>Affected Systems:</h2><ul><li>Apache Tomcat 9.0</li></ul>
+          <h2>Recommendation:</h2><p>Install the update.</p>
+        </div>
+    """).to_dict()
+
+    assert detail["description"] == "A remote attacker could exploit the issue."
+    assert detail["affected_systems"] == ["Apache Tomcat 9.0"]
+    assert detail["recommendation"] == "Install the update."
