@@ -47,9 +47,9 @@ Removed from stored documents: `cve_code`, `related_cve_ids`, `vuln_type`, `deta
 
 ## Details
 
-Provider detail fields stay under `details.<provider>`. CVE details keep parsed CVE v5 fields such as `source_identifier`, `last_modified`, `descriptions`, `metrics`, `weaknesses`, `references`, `configurations`, `affected`, and `cve_tags`.
+Provider detail fields stay under `details.<provider>`. CVE details keep parsed CVE v5 fields such as `source_identifier`, `last_modified`, `descriptions`, `references`, `configurations`, `affected`, and `cve_tags`.
 
-For CVE records, `cve_id`, `title`, `published`, `vuln_status`, `affected_products`, and `raw` are removed because top-level fields or parsed `affected`/`configurations` cover them. UIs derive affected product labels at read time.
+For CVE records, `cve_id`, `title`, `published`, `vuln_status`, `metrics`, `weaknesses`, `affected_products`, and `raw` are removed because top-level fields or parsed `affected`/`configurations` cover them. UIs derive affected product labels at read time.
 
 CNVD keeps `details.cnvd.raw_fields`; it is a parse source, not just a duplicate API blob.
 

@@ -90,8 +90,8 @@ def test_parse_cve_v5_normalizes_details_without_raw_dupes() -> None:
     assert detail["last_modified"] == "2026-06-05T07:31:30.257Z"
     assert detail["vuln_status"] == "PUBLISHED"
     assert detail["descriptions"][0]["value"] == "A remote code execution vulnerability."
-    assert detail["metrics"]["cvss_v40"][0]["cvssData"]["baseSeverity"] == "CRITICAL"
-    assert detail["weaknesses"][0]["descriptions"][0]["cweId"] == "CWE-284"
+    assert "metrics" not in detail
+    assert "weaknesses" not in detail
     assert detail["references"] == [{"url": "https://example.test/advisory"}]
     assert detail["affected"][0]["product"] == "Joomla Extension"
     assert "affected_products" not in detail
@@ -113,7 +113,8 @@ def test_parse_cve_v5_accepts_missing_optional_containers() -> None:
 
     assert detail["cve_id"] == "CVE-2026-1000"
     assert detail["descriptions"] == []
-    assert detail["metrics"] == {}
+    assert "metrics" not in detail
+    assert "weaknesses" not in detail
     assert "affected_products" not in detail
 
 
