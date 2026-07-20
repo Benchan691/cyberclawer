@@ -138,6 +138,39 @@ def test_provider_builds_cvelist_v5_urls_and_normalized_entry() -> None:
     assert "raw" not in record["details"]["cve"]
 
 
+def test_provider_uses_cna_title_for_fetched_cve_record() -> None:
+    provider = CVEProvider()
+    cve_id = "CVE-2026-12206"
+    entry = parse_cve_list(
+        [delta_batch("2026-06-15T01:30:08.215Z", new=[delta_entry(cve_id)])],
+        page=1,
+    ).entries[0]
+    detail = provider.parse_detail(
+        cve_record(cve_id, title="Grit42 Grit data_table_entity.rb DataTableEntity sql injection")
+    ).to_dict()
+
+    provider.finalize_detail(detail, entry=entry, detail_url=provider.cve_url(cve_id))
+    record = entry.to_record(detail, detail_url=provider.cve_url(cve_id))
+
+    assert detail["title"] == "Grit42 Grit data_table_entity.rb DataTableEntity sql injection"
+    assert record["title"] == detail["title"]
+
+
+def test_provider_sets_missing_cna_title_to_null() -> None:
+    provider = CVEProvider()
+    cve_id = "CVE-2026-12206"
+    entry = parse_cve_list(
+        [delta_batch("2026-06-15T01:30:08.215Z", new=[delta_entry(cve_id)])],
+        page=1,
+    ).entries[0]
+    detail = provider.parse_detail(cve_record(cve_id, title="")).to_dict()
+
+    provider.finalize_detail(detail, entry=entry, detail_url=provider.cve_url(cve_id))
+    record = entry.to_record(detail, detail_url=provider.cve_url(cve_id))
+
+    assert record["title"] is None
+
+
 def delta_batch(
     fetch_time: str,
     *,

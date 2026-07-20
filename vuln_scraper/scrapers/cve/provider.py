@@ -13,7 +13,6 @@ from vuln_scraper.scrapers.cve.config import (
 )
 from vuln_scraper.scrapers.cve.parsers.detail import (
     CVEDetailRecord,
-    english_description,
     parse_cve_detail_response,
 )
 from vuln_scraper.scrapers.cve.parsers.list import parse_cve_list, parse_cve_list_updated_since
@@ -63,6 +62,16 @@ class CVEProvider:
     def parse_detail(self, data: Any) -> CVEDetailRecord:
         return parse_cve_detail_response(data)
 
+    def finalize_detail(
+        self,
+        detail: dict[str, Any],
+        *,
+        entry: ListEntry,
+        detail_url: str,
+    ) -> dict[str, Any]:
+        entry.title = detail.get("title")
+        return detail
+
     def entry_from_record(self, data: Any, *, detail_url: str) -> ListEntry:
         detail = self.parse_detail(data).to_dict()
         cve_id = detail.get("cve_id")
@@ -71,7 +80,7 @@ class CVEProvider:
             raise ValueError("CVE v5 record did not contain a valid cveMetadata.cveId")
         return ListEntry(
             identity=VulnerabilityId(type="CVE", code=code),
-            title=detail.get("title") or english_description(detail) or str(cve_id),
+            title=detail.get("title"),
             vuln_type=None,
             disclosure_date=detail.get("published"),
             status=detail.get("vuln_status"),
