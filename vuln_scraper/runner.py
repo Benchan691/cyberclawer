@@ -4,11 +4,53 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+# #region agent log
+_DEBUG_LOG_PATHS = (
+    Path("/Users/chankokpan/Documents/cyberclawer/.cursor/debug-152cba.log"),
+    Path("data/debug-152cba.log"),
+    Path(".cursor/debug-152cba.log"),
+)
+
+
+def _agent_debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    payload = {
+        "sessionId": "152cba",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    logger_ref = logging.getLogger(__name__)
+    logger_ref.info(
+        "DEBUG_TITLE %s %s %s",
+        hypothesis_id,
+        message,
+        json.dumps(data, ensure_ascii=False, default=str),
+    )
+    line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
+    for path in _DEBUG_LOG_PATHS:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+        except Exception:
+            pass
+
+
+# #endregion
 
 from .browser import BrowserHTMLFetcher
 from .client import (
@@ -924,6 +966,21 @@ class ScraperRunner:
             if raw_tables:
                 detail["raw_tables"] = raw_tables
             self.records_by_id[entry.key] = entry.to_record(detail, detail_url=url)
+            # #region agent log
+            if self.provider.key == "cve":
+                stored = self.records_by_id[entry.key]
+                _agent_debug_log(
+                    "D",
+                    "runner.py:_scrape_detail",
+                    "after_to_record",
+                    {
+                        "identity": entry.key,
+                        "entry_title": entry.title,
+                        "record_title": stored.get("title"),
+                        "detail_title": detail.get("title"),
+                    },
+                )
+            # #endregion
             self.checkpoint.completed_identity_keys.add(entry.key)
             self.checkpoint.failed.pop(entry.key, None)
         except CaptchaRequiredError as exc:
@@ -1014,10 +1071,35 @@ class ScraperRunner:
         for entry in entries:
             if entry.key not in self.list_order:
                 self.list_order.append(entry.key)
-            existing_detail = self.records_by_id.get(entry.key, {}).get("details", {}).get(entry.provider)
+            previous = self.records_by_id.get(entry.key)
+            existing_detail = (
+                previous.get("details", {}).get(entry.provider) if isinstance(previous, dict) else None
+            )
             effective_detail = existing_detail if existing_detail is not None else entry.embedded_detail
             detail_url = self._detail_url_for_entry(entry)
             self.records_by_id[entry.key] = entry.to_record(effective_detail, detail_url=detail_url)
+            # #region agent log
+            if self.provider.key == "cve" and previous is not None:
+                new_title = self.records_by_id[entry.key].get("title")
+                prev_title = previous.get("title")
+                if prev_title != new_title:
+                    _agent_debug_log(
+                        "A",
+                        "runner.py:_merge_list_entries",
+                        "title_reset_on_merge",
+                        {
+                            "identity": entry.key,
+                            "previous_title": prev_title,
+                            "list_entry_title": entry.title,
+                            "new_title": new_title,
+                            "kept_existing_detail": existing_detail is not None
+                            and not (
+                                isinstance(existing_detail, dict)
+                                and existing_detail.get("_list_summary")
+                            ),
+                        },
+                    )
+            # #endregion
 
     def _build_output(self) -> dict[str, Any]:
         if self.selected_ids or self.selection_finalized:
@@ -1033,6 +1115,29 @@ class ScraperRunner:
             for identity in ordered_ids[: self.settings.limit]
             if identity in self.records_by_id
         ]
+        # #region agent log
+        if self.provider.key == "cve":
+            sample = [
+                {"identity": f"{item.get('type')}:{item.get('code')}", "title": item.get("title")}
+                for item in vulnerabilities[:5]
+            ]
+            selected_missing = [
+                identity
+                for identity in ordered_ids[: self.settings.limit]
+                if identity not in self.records_by_id
+            ]
+            _agent_debug_log(
+                "B",
+                "runner.py:_build_output",
+                "sync_batch_titles",
+                {
+                    "selected_count": len(ordered_ids),
+                    "vuln_count": len(vulnerabilities),
+                    "sample": sample,
+                    "selected_missing_records": selected_missing[:5],
+                },
+            )
+        # #endregion
         return {
             "scraped_at": datetime.now(UTC).isoformat(),
             "source": {"provider": self.provider.key, "url": self.provider.source_url},

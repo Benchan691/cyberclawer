@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import copy
+import json
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -14,6 +18,47 @@ from .timestamps import document_published_time, document_updated_time
 
 
 MongoClientFactory = Callable[[str], Any]
+logger = logging.getLogger(__name__)
+
+# #region agent log
+_DEBUG_LOG_PATHS = (
+    Path("/Users/chankokpan/Documents/cyberclawer/.cursor/debug-152cba.log"),
+    Path("data/debug-152cba.log"),
+    Path(".cursor/debug-152cba.log"),
+)
+
+
+def _agent_debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    payload = {
+        "sessionId": "152cba",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    logger.info(
+        "DEBUG_TITLE %s %s %s",
+        hypothesis_id,
+        message,
+        json.dumps(data, ensure_ascii=False, default=str),
+    )
+    line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
+    for path in _DEBUG_LOG_PATHS:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+        except Exception:
+            pass
+
+
+# #endregion
 
 
 @dataclass(slots=True)
@@ -413,14 +458,53 @@ def _sync_one(
 ) -> None:
     identity = document["_id"]
     existing = collection.find_one({"_id": identity})
+    # #region agent log
+    if str(document.get("type") or "").lower() == "cve":
+        _agent_debug_log(
+            "C",
+            "mongo.py:_sync_one",
+            "before_write",
+            {
+                "identity": identity,
+                "db": getattr(getattr(collection, "database", None), "name", None),
+                "collection": getattr(collection, "name", None),
+                "new_title": document.get("title"),
+                "existing_title": None if existing is None else existing.get("title"),
+                "mongo_conflict": settings.mongo_conflict,
+                "exists": existing is not None,
+            },
+        )
+    # #endregion
     if existing is None:
         collection.insert_one(document)
         result.inserted += 1
+        # #region agent log
+        if str(document.get("type") or "").lower() == "cve":
+            _agent_debug_log(
+                "D",
+                "mongo.py:_sync_one",
+                "inserted",
+                {"identity": identity, "title": document.get("title")},
+            )
+        # #endregion
         return
 
     if _documents_match(existing, document):
         result.skipped += 1
         result.unchanged += 1
+        # #region agent log
+        if str(document.get("type") or "").lower() == "cve":
+            _agent_debug_log(
+                "C",
+                "mongo.py:_sync_one",
+                "skipped_match",
+                {
+                    "identity": identity,
+                    "new_title": document.get("title"),
+                    "existing_title": existing.get("title"),
+                },
+            )
+        # #endregion
         return
 
     result.conflicts += 1
@@ -429,8 +513,35 @@ def _sync_one(
             document["classification"] = existing["classification"]
         collection.replace_one({"_id": identity}, document, upsert=True)
         result.overwritten += 1
+        # #region agent log
+        if str(document.get("type") or "").lower() == "cve":
+            _agent_debug_log(
+                "D",
+                "mongo.py:_sync_one",
+                "overwritten",
+                {
+                    "identity": identity,
+                    "new_title": document.get("title"),
+                    "existing_title": existing.get("title"),
+                },
+            )
+        # #endregion
     else:
         result.skipped += 1
+        # #region agent log
+        if str(document.get("type") or "").lower() == "cve":
+            _agent_debug_log(
+                "C",
+                "mongo.py:_sync_one",
+                "skipped_no_overwrite",
+                {
+                    "identity": identity,
+                    "new_title": document.get("title"),
+                    "existing_title": existing.get("title"),
+                    "mongo_conflict": settings.mongo_conflict,
+                },
+            )
+        # #endregion
 
 
 def _documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool:
