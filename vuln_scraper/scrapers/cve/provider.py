@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,8 @@ from vuln_scraper.scrapers.cve.parsers.detail import (
     parse_cve_detail_response,
 )
 from vuln_scraper.scrapers.cve.parsers.list import parse_cve_list, parse_cve_list_updated_since
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +72,16 @@ class CVEProvider:
         entry: ListEntry,
         detail_url: str,
     ) -> dict[str, Any]:
-        entry.title = detail.get("title")
+        list_title = entry.title
+        cna_title = detail.get("title")
+        entry.title = cna_title
+        logger.info(
+            "cve title applied identity=%s list_title=%r cna_title=%r detail_url=%s",
+            entry.key,
+            list_title,
+            cna_title,
+            detail_url,
+        )
         return detail
 
     def entry_from_record(self, data: Any, *, detail_url: str) -> ListEntry:
