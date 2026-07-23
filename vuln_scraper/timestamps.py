@@ -7,76 +7,6 @@ from zoneinfo import ZoneInfo
 
 LOCAL_TIMEZONE = ZoneInfo("Asia/Hong_Kong")
 
-_PUBLISHED_PATHS: dict[str, tuple[str, ...]] = {
-    "avd": ("disclosure_date", "details.avd.attack_metrics.disclosure_date"),
-    "hkcert": ("details.hkcert.release_date", "disclosure_date"),
-    "cve": ("details.cve.published", "disclosure_date"),
-    "cisco": ("details.cisco.first_published", "disclosure_date"),
-    "zeroday": ("details.zeroday.disclosed_date", "disclosure_date"),
-    "govcert": ("details.govcert.published_date", "disclosure_date"),
-    "github_advisory": ("details.github_advisory.published_at", "disclosure_date"),
-    "huawei_sa": ("details.huawei_sa.publishDate", "disclosure_date"),
-    "paloalto": ("details.paloalto.published_date", "disclosure_date"),
-    "qianxin": ("details.qianxin.published_date", "details.qianxin.published_at", "disclosure_date"),
-    "ransomwarelive": ("details.ransomwarelive.attackdate", "disclosure_date"),
-    "infosec": ("details.infosec.published_date", "disclosure_date"),
-    "splunk": ("details.splunk.published_date", "disclosure_date"),
-    "hikvision": (
-        "details.hikvision.initial_release_date",
-        "details.hikvision.published_date",
-        "disclosure_date",
-    ),
-    "cnnvd": ("details.cnnvd.publishDate", "details.cnnvd.publishTime", "disclosure_date"),
-    "cnvd": ("details.cnvd.published_date", "disclosure_date"),
-    "juniper": ("details.juniper.published_date", "disclosure_date"),
-    "msrc": ("details.msrc.initial_release_date", "disclosure_date"),
-}
-
-_UPDATED_PATHS: dict[str, tuple[str, ...]] = {
-    "avd": ("disclosure_date",),
-    "hkcert": ("details.hkcert.last_update_date", "details.hkcert.release_date", "disclosure_date"),
-    "cve": ("details.cve.last_modified", "details.cve.published", "disclosure_date"),
-    "cisco": ("details.cisco.last_updated", "details.cisco.first_published", "disclosure_date"),
-    "zeroday": ("details.zeroday.patched_date", "details.zeroday.disclosed_date", "disclosure_date"),
-    "govcert": ("details.govcert.published_date", "disclosure_date"),
-    "github_advisory": (
-        "details.github_advisory.updated_at",
-        "details.github_advisory.published_at",
-        "disclosure_date",
-    ),
-    "huawei_sa": ("details.huawei_sa.publishDate", "disclosure_date"),
-    "paloalto": ("details.paloalto.updated_date", "details.paloalto.published_date", "disclosure_date"),
-    "qianxin": (
-        "details.qianxin.updated_date",
-        "details.qianxin.updated_at",
-        "details.qianxin.published_date",
-        "details.qianxin.published_at",
-        "disclosure_date",
-    ),
-    "ransomwarelive": (
-        "details.ransomwarelive.discovered",
-        "details.ransomwarelive.attackdate",
-        "disclosure_date",
-    ),
-    "infosec": ("details.infosec.published_date", "disclosure_date"),
-    "splunk": ("details.splunk.last_modified", "details.splunk.published_date", "disclosure_date"),
-    "hikvision": (
-        "details.hikvision.updated_date",
-        "details.hikvision.initial_release_date",
-        "details.hikvision.published_date",
-        "disclosure_date",
-    ),
-    "cnnvd": (
-        "details.cnnvd.updateTime",
-        "details.cnnvd.publishDate",
-        "details.cnnvd.publishTime",
-        "disclosure_date",
-    ),
-    "cnvd": ("details.cnvd.updated_date", "details.cnvd.published_date", "disclosure_date"),
-    "juniper": ("details.juniper.updated_date", "details.juniper.published_date", "disclosure_date"),
-    "msrc": ("details.msrc.current_release_date", "details.msrc.initial_release_date", "disclosure_date"),
-}
-
 _DATETIME_FORMATS = (
     "%Y-%m-%dT%H:%M:%S.%f%z",
     "%Y-%m-%dT%H:%M:%S%z",
@@ -111,11 +41,11 @@ def window_start(days: int = 1, tz: ZoneInfo = LOCAL_TIMEZONE) -> datetime:
 
 
 def document_published_time(record: dict[str, Any]) -> str | None:
-    return _document_timestamp(record, _PUBLISHED_PATHS)
+    return _document_timestamp(record, "published")
 
 
 def document_updated_time(record: dict[str, Any]) -> str | None:
-    return _document_timestamp(record, _UPDATED_PATHS)
+    return _document_timestamp(record, "updated")
 
 
 def record_updated_at_or_after(record: dict[str, Any], boundary: datetime) -> bool | None:
@@ -152,10 +82,24 @@ def normalize_timestamp(value: Any) -> str | None:
     return parsed.isoformat() if parsed is not None else None
 
 
-def _document_timestamp(record: dict[str, Any], mapping: dict[str, tuple[str, ...]]) -> str | None:
-    provider = str(record.get("type") or "").strip().lower()
-    for path in mapping.get(provider, ("disclosure_date",)):
-        value = _path_value(record, path)
+def _document_timestamp(record: dict[str, Any], kind: str) -> str | None:
+    from .schema_v2 import PROVIDER_SCHEMAS
+
+    provider = str(record.get("type") or record.get("provider") or "").strip().lower()
+    schema = PROVIDER_SCHEMAS.get(provider)
+    envelope_field = "published_at" if kind == "published" else "updated_at"
+    fields = getattr(schema, f"{kind}_fields", ()) if schema else ()
+    details = record.get("details") if isinstance(record.get("details"), dict) else {}
+    if isinstance(details.get(provider), dict):
+        details = details[provider]
+    candidates = [record.get(envelope_field)]
+    candidates.extend(_path_value(details, path) for path in fields)
+    if kind == "updated":
+        candidates.append(record.get("published_at"))
+        if schema:
+            candidates.extend(_path_value(details, path) for path in schema.published_fields)
+    candidates.append(record.get("disclosure_date"))
+    for value in candidates:
         normalized = normalize_timestamp(value)
         if normalized is not None:
             return normalized

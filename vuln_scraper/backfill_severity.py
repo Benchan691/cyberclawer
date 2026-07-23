@@ -24,11 +24,12 @@ class BackfillSeverityResult:
 def backfill_collection_severity(
     collection: Any,
     *,
+    provider: str | None = None,
     batch_size: int = 500,
     dry_run: bool = False,
 ) -> tuple[int, int, int]:
     if not dry_run:
-        _ensure_indexes(collection)
+        _ensure_indexes(collection, provider)
 
     scanned = 0
     updated = 0
@@ -90,6 +91,7 @@ def backfill_severity(
 
         scanned, updated, unchanged = backfill_collection_severity(
             database[collection_name],
+            provider=key,
             batch_size=batch_size,
             dry_run=dry_run,
         )

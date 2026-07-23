@@ -33,8 +33,9 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def utc_now_iso() -> str:
-    return utc_now().isoformat()
+def utc_now_iso() -> datetime:
+    """Return a BSON-native UTC datetime (name retained for API compatibility)."""
+    return utc_now()
 
 
 def current_taxonomy_version() -> str:

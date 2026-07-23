@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 
 import pytest
 
@@ -17,18 +18,16 @@ def test_build_mongo_document_requires_type_and_code() -> None:
         build_mongo_document({"title": "missing id"}, output_payload())
 
 
-def test_build_mongo_document_sets_lowercase_identity_and_cve_codes() -> None:
+def test_build_mongo_document_emits_closed_v2_envelope() -> None:
     document = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
 
     assert document["_id"] == "avd:2026-10001"
-    assert document["type"] == "avd"
+    assert document["schema_version"] == 2
     assert document["code"] == "2026-10001"
-    assert "cve_code" not in document
-    assert document["cve_codes"] == ["2026-10001"]
-    assert "vuln_type" not in document
-    assert "cross_refs" not in document
-    assert document["source"] == "test-source"
-    assert document["severity"] == ""
+    assert document["cve_ids"] == ["CVE-2026-10001"]
+    assert document["source"] == {"url": "https://example.test"}
+    assert document["details"] == {"source_status": "CVE PoC"}
+    assert not {"type", "cve_code", "cve_codes", "vuln_type", "status"} & document.keys()
 
 
 def test_build_mongo_document_sets_normalized_severity() -> None:
@@ -89,17 +88,10 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
     )
 
     assert result.inserted == 1
-    assert collection.indexes == [
-        ([("type", 1), ("code", 1)], True),
-        ("cve_codes", False),
-        ("related_cves.cve_code", False),
-        ("disclosure_date", False),
-        ("published_time", False),
-        ("updated_time", False),
-        ("status", False),
-        ("severity", False),
+    assert [item[1]["name"] for item in collection.indexes] == [
+        "observed_desc", "cve_ids", "severity_observed", "published_desc"
     ]
-    assert collection.documents["avd:2026-10001"]["type"] == "avd"
+    assert collection.documents["avd:2026-10001"]["schema_version"] == 2
 
 
 def test_build_mongo_document_sets_normalized_timestamps() -> None:
@@ -111,8 +103,8 @@ def test_build_mongo_document_sets_normalized_timestamps() -> None:
         output_payload(),
     )
 
-    assert document["published_time"] == "2026-06-17T16:00:00+00:00"
-    assert document["updated_time"] == "2026-06-17T16:00:00+00:00"
+    assert document["published_at"] == datetime(2026, 6, 17, 16, tzinfo=timezone.utc)
+    assert document["updated_at"] == datetime(2026, 6, 17, 16, tzinfo=timezone.utc)
 
 
 def test_sync_stores_all_raw_output_records() -> None:
@@ -132,8 +124,7 @@ def test_sync_stores_all_raw_output_records() -> None:
 
     assert result.inserted == 2
     assert set(collection.documents) == {"avd:2026-10001", "avd:2026-10002"}
-    assert "cve_code" not in collection.documents["avd:2026-10002"]
-    assert collection.documents["avd:2026-10002"]["cve_codes"] == []
+    assert "cve_ids" not in collection.documents["avd:2026-10002"]
 
 
 def test_sync_skips_conflicts_when_not_interactive() -> None:
@@ -175,14 +166,13 @@ def test_sync_prompt_can_overwrite_conflict(monkeypatch) -> None:
     assert collection.documents["avd:2026-10001"]["title"] == "new"
 
 
-def test_documents_content_match_ignores_scrape_metadata() -> None:
+def test_documents_content_match_ignores_observation_metadata() -> None:
     existing = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
-    existing["scraped_at"] = "2026-01-01T00:00:00+00:00"
-    existing["source"] = {"provider": "avd", "url": "https://old.example.test"}
-    existing["detail_url"] = "https://old.example.test/detail"
+    existing["observed_at"] = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    existing["source"] = {"url": "https://old.example.test"}
     incoming = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
 
-    assert not documents_match(existing, incoming)
+    assert documents_match(existing, incoming)
     assert documents_content_match(existing, incoming)
 
 
@@ -203,7 +193,7 @@ def test_build_mongo_document_strips_hkcert_views() -> None:
     }
     document = build_mongo_document(hkcert_record("example-bulletin", details=details), output_payload())
 
-    assert "views" not in document["details"]["hkcert"]
+    assert "views" not in document["details"]
 
 
 def test_build_mongo_document_derives_hkcert_cve_codes_from_identifiers() -> None:
@@ -222,11 +212,10 @@ def test_build_mongo_document_derives_hkcert_cve_codes_from_identifiers() -> Non
         output_payload(),
     )
 
-    assert "cve_code" not in document
-    assert document["cve_codes"] == ["2025-48595", "2025-48633"]
+    assert document["cve_ids"] == ["CVE-2025-48595", "CVE-2025-48633"]
 
 
-def test_sync_links_hkcert_cve_codes_to_existing_cve_documents() -> None:
+def test_sync_does_not_materialize_related_cve_documents() -> None:
     hkcert_collection = FakeCollection()
     cve_collection = FakeCollection()
     cve_collection.documents["cve:2025-48595"] = {
@@ -261,13 +250,12 @@ def test_sync_links_hkcert_cve_codes_to_existing_cve_documents() -> None:
 
     assert result.inserted == 1
     document = hkcert_collection.documents["hkcert:android-multiple-vulnerabilities"]
+    assert document["cve_ids"] == ["CVE-2025-48595", "CVE-2025-48633"]
     assert "related_cve_ids" not in document
-    assert document["related_cves"] == [
-        {"collection": "cve", "document_id": "cve:2025-48595", "cve_code": "2025-48595"}
-    ]
+    assert "related_cves" not in document
 
 
-def test_sync_preserves_classification_on_overwrite() -> None:
+def test_sync_discards_classification_outside_cve_collection() -> None:
     collection = FakeCollection()
     existing = build_mongo_document(record("2026-10001", title="old"), output_payload())
     existing["classification"] = {"status": "classified", "vendor": "Cisco", "product": "IOS XE"}
@@ -282,7 +270,7 @@ def test_sync_preserves_classification_on_overwrite() -> None:
 
     assert result.overwritten == 1
     assert collection.documents["avd:2026-10001"]["title"] == "new"
-    assert collection.documents["avd:2026-10001"]["classification"] == existing["classification"]
+    assert "classification" not in collection.documents["avd:2026-10001"]
 
 
 def test_build_mongo_document_strips_raw_detail_fields() -> None:
@@ -306,8 +294,9 @@ def test_build_mongo_document_strips_raw_detail_fields() -> None:
         output_payload(),
     )
 
-    assert document["cve_codes"] == ["2026-10001"]
-    assert document["details"]["cve"] == {
+    assert "cve_ids" not in document
+    assert document["details"] == {
+        "title": "duplicate",
         "affected": [{"vendor": "Cisco", "product": "IOS XE"}]
     }
 
@@ -330,7 +319,7 @@ def test_sync_skips_unchanged_hkcert_when_only_views_change() -> None:
     assert result.unchanged == 1
     assert result.skipped == 1
     assert result.overwritten == 0
-    assert "views" not in collection.documents["hkcert:example-bulletin"]["details"]["hkcert"]
+    assert "views" not in collection.documents["hkcert:example-bulletin"]["details"]
 
 
 def test_documents_content_match_ignores_qianxin_read_num_and_navigation() -> None:
@@ -380,7 +369,7 @@ def test_sync_skips_unchanged_qianxin_when_only_read_num_changes() -> None:
 def test_sync_skips_unchanged_documents() -> None:
     collection = FakeCollection()
     existing = build_mongo_document(record("2026-10001"), output_payload())
-    existing["scraped_at"] = "older-run"
+    existing["observed_at"] = datetime(2025, 1, 1, tzinfo=timezone.utc)
     collection.documents["avd:2026-10001"] = existing
     settings = ScraperSettings(mongo_enabled=True, mongo_conflict="overwrite")
 
@@ -436,7 +425,7 @@ def qianxin_record(code: str, *, details: dict[str, dict] | None = None, title: 
 def output_payload(vulnerabilities: list[dict] | None = None) -> dict:
     return {
         "scraped_at": "2026-06-01T00:00:00+00:00",
-        "source": "test-source",
+        "source": {"url": "https://example.test"},
         "vulnerabilities": vulnerabilities or [],
     }
 
@@ -482,11 +471,11 @@ class FakeDatabase:
 class FakeCollection:
     def __init__(self) -> None:
         self.documents: dict[str, dict] = {}
-        self.indexes: list[tuple[str, bool]] = []
+        self.indexes: list[tuple[object, dict]] = []
         self.database = None
 
-    def create_index(self, field: str, unique: bool = False) -> None:
-        self.indexes.append((field, unique))
+    def create_index(self, field: object, **options) -> None:
+        self.indexes.append((field, options))
 
     def find_one(self, query: dict) -> dict | None:
         for document in self.documents.values():

@@ -996,7 +996,7 @@ def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
         "CVE",
         "Severity",
     ]
-    assert "raw_tables" not in collection.documents["splunk:SVD-2026-0516"]["details"]["splunk"]
+    assert "raw_tables" not in collection.documents["splunk:SVD-2026-0516"]["details"]
     assert output["mongo_sync"]["inserted"] == 2
     assert set(collection.documents) == {"splunk:SVD-2026-0516", "splunk:SVD-2026-0501", "splunk:SVD-2026-0500"}
     assert client.detail_ids_seen == ["SVD-2026-0516", "SVD-2026-0501"]
@@ -1458,7 +1458,16 @@ def test_cnvd_mongo_sync_stops_at_first_known_record_and_forces_browser(tmp_path
     assert client.force_browser_seen == [False, False]
 
 
-def test_juniper_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
+def test_juniper_mongo_sync_stops_at_first_known_record(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
+        lambda page_uri="/s/global-search/@uri": {
+            "organizationId": "junipernetworks",
+            "accessToken": "test-token",
+        },
+    )
     client = FakeJuniperClient()
     collection = FakeMongoCollection(
         {
@@ -2783,11 +2792,11 @@ class FakeMongoCollection:
         fail_insert_once_for: str | None = None,
     ) -> None:
         self.documents = copy.deepcopy(documents or {})
-        self.indexes: list[tuple[str, bool]] = []
+        self.indexes: list[tuple[object, dict]] = []
         self.fail_insert_once_for = fail_insert_once_for
 
-    def create_index(self, field: str, unique: bool = False) -> None:
-        self.indexes.append((field, unique))
+    def create_index(self, field: object, **options) -> None:
+        self.indexes.append((field, options))
 
     def find(self, query: dict | None = None, projection: dict | None = None):
         query = query or {}

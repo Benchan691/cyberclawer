@@ -1,128 +1,78 @@
-# MongoDB Layout
+# MongoDB Vulnerability Schema v2
 
-## Overview
+The `vulnerabilities` database keeps one physical collection per provider and one
+`<provider>_review` view. Existing document `_id` values and review-view names are
+stable across migration.
 
-The scraper writes one MongoDB database from `mongodb.toml` (`vulnerabilities` by default). Each scraper owns one collection. Document `_id` is `{type}:{code}`, for example `cve:2026-1000`.
-
-## Collections
-
-| Scraper | Collection |
-| --- | --- |
-| avd | avd |
-| cisco | cisco |
-| cnnvd | cnnvd |
-| cnvd | cnvd |
-| cve | cve |
-| github_advisory | github_advisory |
-| govcert | govcert |
-| hikvision | hikvision |
-| hkcert | hkcert |
-| huawei_sa | huawei_sa |
-| infosec | infosec |
-| juniper | juniper |
-| msrc | msrc |
-| paloalto | paloalto |
-| qianxin | qianxin |
-| ransomwarelive | ransomwarelive |
-| splunk | splunk |
-| zeroday | zeroday |
-
-## Common Document
-
-| Field | Notes |
-| --- | --- |
-| `_id` | `{type}:{code}` |
-| `type` | Provider key |
-| `code` | Provider-native ID |
-| `title` | Display title |
-| `cve_codes` | Normalized bare CVE codes, e.g. `2026-1000` |
-| `disclosure_date`, `published_time`, `updated_time` | Source and normalized timestamps |
-| `severity`, `status` | Normalized severity and source status |
-| `details` | Provider-specific detail block |
-| `source` | Provider URL metadata |
-| `scraped_at` | Scrape run timestamp |
-| `related_cves` | Links to matching `cve` collection documents |
-
-Removed from stored documents: `cve_code`, `related_cve_ids`, `vuln_type`, `details.*.raw`, `details.*.raw_tables`, `details.*.raw_sections`, and non-CNVD `raw_fields`.
-
-## Details
-
-Provider detail fields stay under `details.<provider>`. CVE details keep parsed CVE v5 fields such as `source_identifier`, `last_modified`, `descriptions`, `references`, `configurations`, `affected`, and `cve_tags`.
-
-For CVE records, `cve_id`, `title`, `published`, `vuln_status`, `metrics`, `weaknesses`, `affected_products`, and `raw` are removed because top-level fields or parsed `affected`/`configurations` cover them. UIs derive affected product labels at read time.
-
-CNVD keeps `details.cnvd.raw_fields`; it is a parse source, not just a duplicate API blob.
-
-## Classification
-
-Only the `cve` collection is classified. The scraper preserves `classification` during overwrite; classifier workers own updates.
-
-`method` is optional on classified records: `dictionary` (local CPE CSV lookup) or `zero_shot` (embedding match).
-
-Classified:
+## Stored document
 
 ```json
 {
-  "status": "classified",
-  "vendor": "Cisco",
-  "product": "IOS XE",
-  "cpe": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
-  "confidence": 0.91,
-  "method": "dictionary",
-  "dictionary_version": "a1b2c3d4",
-  "classifier_version": 2,
-  "updated_at": "2026-06-23T12:00:00+00:00"
-}
-```
-
-Unclassified:
-
-```json
-{
-  "status": "unclassified",
-  "reason": "confidence below threshold",
-  "confidence": 0.42,
-  "candidate": {
-    "vendor": "Cisco",
-    "product": "IOS XE",
-    "cpe": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*"
+  "_id": "cve:2026-1000",
+  "schema_version": 2,
+  "code": "2026-1000",
+  "title": "CVE-2026-1000",
+  "severity": "High",
+  "change_type": "new",
+  "published_at": {"$date": "2026-07-01T00:00:00Z"},
+  "updated_at": {"$date": "2026-07-02T00:00:00Z"},
+  "observed_at": {"$date": "2026-07-02T01:00:00Z"},
+  "source": {
+    "url": "https://example.test/catalog",
+    "detail_url": "https://example.test/CVE-2026-1000"
   },
-  "dictionary_version": "a1b2c3d4",
-  "classifier_version": 2,
-  "updated_at": "2026-06-23T12:00:00+00:00"
+  "details": {
+    "descriptions": [],
+    "references": [],
+    "affected": []
+  }
 }
 ```
 
-Failed:
+Non-CVE providers may also contain canonical, prefixed `cve_ids`. The `cve`
+collection derives its identifier from `code` and therefore does not store a
+redundant singleton array. `classification` is allowed only on CVE documents.
 
-```json
-{
-  "status": "failed",
-  "error": "message",
-  "attempts": 3,
-  "classifier_version": 2,
-  "updated_at": "2026-06-23T12:00:00+00:00"
-}
-```
+Optional values are omitted instead of being stored as empty strings, nulls,
+empty arrays, or empty objects. Provider payloads live directly under `details`;
+there is no `details.<provider>` wrapper.
 
-## Links And Indexes
+Schema-v1 fields such as `type`, `status`, `cve_code`, `cve_codes`,
+`related_cves`, `disclosure_date`, and `scraped_at` are not stored.
 
-`related_cves` links advisories to `cve` records by matching `cve_codes`. New indexes are `type/code` unique, `cve_codes`, `related_cves.cve_code`, `disclosure_date`, `published_time`, `updated_time`, `status`, and `severity`.
+## Relationships and indexes
+
+Related CVEs are resolved at read time from `cve_ids`; links are not materialized
+inside advisory documents.
+
+Each provider collection has:
+
+- `observed_at` descending with `_id` descending
+- partial `severity` plus `observed_at`
+- partial `published_at`
+- partial `cve_ids` for non-CVE providers
+- partial `classification.status` for CVE
+
+Strict MongoDB validators enforce the common envelope while leaving the
+provider-specific `details` object open.
 
 ## Migration
 
-Run dry first:
+Inspect the migration without writing:
 
 ```bash
-vuln-scrape migrate-mongo --dry-run
-vuln-scrape migrate-mongo --database vulnerabilities
+vuln-scrape migrate-mongo --target-version 2 --dry-run
 ```
 
-The migration is idempotent: it unsets legacy fields, normalizes `cve_codes`, removes non-CVE classification, and converts CVE classification v1 fields to v2.
-
-To fix wrong CVE vendor/product classifications after a dictionary change, run:
+Apply during a maintenance window after pausing scraper, retention, and
+classification writers:
 
 ```bash
-vuln-scrape reclassify-cve --dry-run
-vuln-scrape reclassify-cve --database vulnerabilities
+vuln-scrape migrate-mongo --target-version 2
 ```
+
+The command builds and validates `<provider>__v2` shadow collections, preserves
+document IDs and CVE classifications, swaps validated collections into place,
+recreates review views, and leaves timestamped `__backup_...` collections for
+rollback. Backups are intentionally removed only by an explicit operator action
+after the seven-day acceptance period.

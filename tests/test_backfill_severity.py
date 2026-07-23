@@ -30,7 +30,7 @@ def test_backfill_collection_severity_updates_missing_or_stale_values() -> None:
         ]
     )
 
-    scanned, updated, unchanged = backfill_collection_severity(collection)
+    scanned, updated, unchanged = backfill_collection_severity(collection, provider="cnnvd")
 
     assert scanned == 3
     assert updated == 2
@@ -38,7 +38,7 @@ def test_backfill_collection_severity_updates_missing_or_stale_values() -> None:
     assert collection.documents["cnnvd:202606-1911"]["severity"] == "High"
     assert collection.documents["cnvd:1"]["severity"] == "Medium"
     assert collection.documents["hikvision:1"]["severity"] == "High"
-    assert ("severity", False) in collection.indexes
+    assert any(options.get("name") == "severity_observed" for _, options in collection.indexes)
 
 
 def test_backfill_collection_severity_dry_run_does_not_write() -> None:
@@ -85,11 +85,11 @@ class FakeDatabase:
 class FakeBackfillCollection:
     def __init__(self, documents: list[dict]) -> None:
         self.documents = {document["_id"]: dict(document) for document in documents}
-        self.indexes: list[tuple[Any, bool]] = []
+        self.indexes: list[tuple[Any, dict]] = []
         self.bulk_writes: list[list] = []
 
-    def create_index(self, field: str, unique: bool = False) -> None:
-        self.indexes.append((field, unique))
+    def create_index(self, field: str, **options) -> None:
+        self.indexes.append((field, options))
 
     def find(self, query: dict, projection: dict | None = None):
         for document in self.documents.values():

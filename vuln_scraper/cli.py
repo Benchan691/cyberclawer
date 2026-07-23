@@ -154,6 +154,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report changes without writing to MongoDB.",
     )
     migrate_parser.add_argument(
+        "--target-version",
+        type=int,
+        default=2,
+        help="Target vulnerability schema version (currently 2).",
+    )
+    migrate_parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip shadow validation before cutover (not recommended).",
+    )
+    migrate_parser.add_argument(
+        "--database",
+        default=None,
+        help="MongoDB database name override.",
+    )
+
+    cleanup_parser = subparsers.add_parser(
+        "cleanup-mongo-backups",
+        help="Remove accepted v2 migration backups after the retention period.",
+    )
+    cleanup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List eligible backups without removing them.",
+    )
+    cleanup_parser.add_argument(
+        "--older-than-days",
+        type=_positive_int_arg,
+        default=7,
+        help="Only remove backups at least this old (minimum 7 days).",
+    )
+    cleanup_parser.add_argument(
         "--database",
         default=None,
         help="MongoDB database name override.",
@@ -399,6 +431,8 @@ def main(argv: list[str] | None = None) -> None:
             results = migrate_mongo(
                 database,
                 dry_run=args.dry_run,
+                target_version=args.target_version,
+                validate=not args.no_validate,
                 mongo_config_file=settings.mongo_config_file,
             )
         finally:
@@ -410,8 +444,39 @@ def main(argv: list[str] | None = None) -> None:
         updated = sum(result.updated for result in results)
         action = "would_update" if args.dry_run else "updated"
         for result in results:
-            print(f"{result.collection}: scanned={result.scanned} {action}={result.updated}")
+            suffix = (
+                f" backup={result.backup_collection}"
+                if result.backup_collection
+                else ""
+            )
+            print(
+                f"{result.collection}: scanned={result.scanned} "
+                f"{action}={result.updated} status={result.status}{suffix}"
+            )
         print(f"migrate-mongo: scanned={scanned} {action}={updated} collections={len(results)}")
+        return
+
+    if args.command == "cleanup-mongo-backups":
+        from .migrate_mongo import cleanup_mongo_backups
+        from .mongo import create_mongo_client
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[args.database or settings.mongo_database]
+            names = cleanup_mongo_backups(
+                database,
+                older_than_days=args.older_than_days,
+                dry_run=args.dry_run,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+        action = "eligible" if args.dry_run else "removed"
+        for name in names:
+            print(f"{action}: {name}")
+        print(f"cleanup-mongo-backups: {action}={len(names)}")
         return
 
     if args.command == "reclassify-cve":

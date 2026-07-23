@@ -15,14 +15,21 @@ from vuln_scraper.review_template import (
 
 
 def document(provider: str, detail: dict, *, cve_code: str | None = None) -> dict:
-    return {
+    code = (
+        cve_code.removeprefix("CVE-")
+        if provider == "cve" and cve_code
+        else "code"
+    )
+    result = {
         "_id": f"{provider}:code",
-        "type": provider,
-        "code": "code",
+        "schema_version": 2,
+        "code": code,
         "title": f"{provider} title",
-        "cve_code": cve_code,
-        "details": {provider: detail},
+        "details": detail,
     }
+    if provider != "cve" and cve_code:
+        result["cve_ids"] = [cve_code]
+    return result
 
 
 def test_review_template_uses_exact_seven_field_schema() -> None:
@@ -86,7 +93,7 @@ def test_hkcert_uses_risk_level_and_product_table_then_system_fallback() -> None
                     ],
                 },
             ),
-            "cve_codes": ["2026-1000", "2026-2000"],
+            "cve_ids": ["CVE-2026-1000", "CVE-2026-2000"],
         }
     )
     fallback_template = review_template_from_document(
@@ -209,25 +216,25 @@ def test_hikvision_prefers_summary_for_review_description() -> None:
     assert template["related_link"] == ["https://www.hikvision.com/advisory"]
 
     pipeline = json.dumps(review_view_pipeline("hikvision"))
-    assert "$details.hikvision.summary" in pipeline
-    assert pipeline.index("$details.hikvision.summary") < pipeline.index(
-        "$details.hikvision.description"
+    assert "$details.summary" in pipeline
+    assert pipeline.index("$details.summary") < pipeline.index(
+        "$details.description"
     )
 
 
-def test_cnvd_review_impacts_uses_document_status() -> None:
+def test_cnvd_review_impacts_uses_envelope_severity() -> None:
     template = review_template_from_document(
         {
             **document("cnvd", {"severity": "低", "affected_products": ["Product A"]}),
-            "status": "中",
+            "severity": "Medium",
         }
     )
 
     assert template["impacts"] == "Medium"
 
     pipeline = json.dumps(review_view_pipeline("cnvd"))
-    assert '"$status"' in pipeline
-    assert pipeline.index('"$status"') < pipeline.index("$details.cnvd.severity")
+    assert '"$severity"' in pipeline
+    assert '"$status"' not in pipeline
 
 
 def test_splunk_review_description_includes_description_tables() -> None:
@@ -278,7 +285,7 @@ def test_cnnvd_related_link_extracts_urls_from_refer_url() -> None:
     assert "https://example.test/patch" not in template["related_link"]
 
     pipeline = json.dumps(review_view_pipeline("cnnvd"))
-    assert "$details.cnnvd.referUrl" in pipeline
+    assert "$details.referUrl" in pipeline
     assert "regexFindAll" in pipeline
 
 

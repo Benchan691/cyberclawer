@@ -24,7 +24,7 @@ class VendorProductEvidence:
 
 
 def _cve_detail(document: dict[str, Any]) -> dict[str, Any]:
-    detail = (document.get("details") or {}).get("cve") or {}
+    detail = document.get("details") or {}
     return detail if isinstance(detail, dict) else {}
 
 

@@ -49,23 +49,21 @@ def config() -> dict[str, Any]:
 def test_extracts_cpe_evidence_from_cve_detail() -> None:
     document = {
         "details": {
-            "cve": {
-                "configurations": [
-                    {
-                        "nodes": [
-                            {
-                                "cpeMatch": [
-                                    {
-                                        "criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
-                                        "vulnerable": True,
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                "affected": [{"vendor": "Cisco", "product": "IOS XE"}],
-            }
+            "configurations": [
+                {
+                    "nodes": [
+                        {
+                            "cpeMatch": [
+                                {
+                                    "criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*",
+                                    "vulnerable": True,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "affected": [{"vendor": "Cisco", "product": "IOS XE"}],
         }
     }
 
@@ -79,21 +77,19 @@ def test_extract_vendor_product_evidence_from_structured_and_text_fields() -> No
     document = {
         "title": "Cisco IOS XE vulnerability",
         "details": {
-            "cve": {
-                "configurations": [
-                    {
-                        "nodes": [
-                            {
-                                "cpeMatch": [
-                                    {"criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*"}
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                "affected": [{"vendor": "Cisco", "product": "IOS XE"}],
-                "descriptions": [{"lang": "en", "value": "A flaw in Cisco IOS XE."}],
-            }
+            "configurations": [
+                {
+                    "nodes": [
+                        {
+                            "cpeMatch": [
+                                {"criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*"}
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "affected": [{"vendor": "Cisco", "product": "IOS XE"}],
+            "descriptions": [{"lang": "en", "value": "A flaw in Cisco IOS XE."}],
         },
     }
 
@@ -102,7 +98,7 @@ def test_extract_vendor_product_evidence_from_structured_and_text_fields() -> No
     assert any(item.source == "cve.configurations" and item.cpe for item in evidence)
     assert any(item.source == "cve.affected" and item.vendor == "Cisco" for item in evidence)
     assert any(item.source == "title" and item.text == "Cisco IOS XE vulnerability" for item in evidence)
-    assert english_description(document["details"]["cve"]) == "A flaw in Cisco IOS XE."
+    assert english_description(document["details"]) == "A flaw in Cisco IOS XE."
     assert any(item.source == "cve.description" for item in evidence)
 
 
@@ -111,7 +107,7 @@ def test_dictionary_lookup_matches_vendor_product_and_title() -> None:
 
     pair_hit = lookup.lookup(
         extract_vendor_product_evidence(
-            {"details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}}}
+            {"details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}}
         )
     )
     assert pair_hit is not None
@@ -126,7 +122,7 @@ def test_dictionary_lookup_matches_vendor_product_and_title() -> None:
 def test_classify_cve_document_uses_dictionary_without_zero_shot() -> None:
     document = {
         "_id": "cve:2026-1000",
-        "details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}},
+        "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
     }
 
     classification = classify_cve_document(document, config(), use_zero_shot=False)
@@ -151,16 +147,14 @@ def test_classify_cve_document_matches_redhat_cpe22_affected_cpes() -> None:
         "_id": "cve:2026-53701",
         "title": "CVE-2026-53701",
         "details": {
-            "cve": {
-                "affected": [
-                    {
-                        "vendor": "Red Hat",
-                        "product": "Red Hat Enterprise Linux 10",
-                        "cpes": ["cpe:/o:redhat:enterprise_linux:10"],
-                    }
-                ],
-                "configurations": [],
-            }
+            "affected": [
+                {
+                    "vendor": "Red Hat",
+                    "product": "Red Hat Enterprise Linux 10",
+                    "cpes": ["cpe:/o:redhat:enterprise_linux:10"],
+                }
+            ],
+            "configurations": [],
         },
     }
 
@@ -177,7 +171,7 @@ def test_daemon_classifies_via_dictionary() -> None:
         [
             {
                 "_id": "cve:2026-1000",
-                "details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}},
+                "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
             }
         ]
     )
@@ -234,21 +228,19 @@ def test_zero_shot_classifies_exact_cpe_match() -> None:
             {
                 "_id": "cve:2026-1000",
                 "details": {
-                    "cve": {
-                        "configurations": [
-                            {
-                                "nodes": [
-                                    {
-                                        "cpeMatch": [
-                                            {
-                                                "criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*"
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }
+                    "configurations": [
+                        {
+                            "nodes": [
+                                {
+                                    "cpeMatch": [
+                                        {
+                                            "criteria": "cpe:2.3:a:cisco:ios_xe:*:*:*:*:*:*:*:*"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
                 },
             }
         ]
@@ -293,7 +285,7 @@ def test_zero_shot_classifies_exact_cpe_match() -> None:
 
 def test_zero_shot_marks_low_confidence_matches_unclassified() -> None:
     collection = FakeCollection(
-        [{"_id": "cve:low", "details": {"cve": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}}}]
+        [{"_id": "cve:low", "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]}}]
     )
     classifier = StaticZeroShotClassifier(
         {

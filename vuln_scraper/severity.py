@@ -139,6 +139,8 @@ def _first_non_empty(*values: Any) -> Any:
 def _first_available(detail: dict[str, Any], paths: tuple[tuple[str, ...], ...]) -> Any:
     for path in paths:
         value = _path(detail, *path)
+        if isinstance(value, list):
+            value = next((item for item in value if _has_text(item)), None)
         if _has_text(value):
             return value
     return None

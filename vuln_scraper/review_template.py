@@ -32,11 +32,13 @@ _REVIEW_ARRAY_FIELDS = {"affected", "related_link"}
 
 def review_template_from_document(document: dict[str, Any]) -> dict[str, Any]:
     provider = _text(document.get("type")).lower()
+    if not provider:
+        provider = _text(document.get("_id")).partition(":")[0].lower()
     detail = _detail(document, provider)
     mapper = _MAPPERS.get(provider, _generic)
     mapped = mapper(document, detail)
     title = _text(mapped.get("title") or document.get("title"))
-    raw_impacts = _string(mapped.get("impacts"))
+    raw_impacts = _string(document.get("severity") or mapped.get("impacts"))
     impacts = normalize_severity(raw_impacts) if raw_impacts else ""
     return {
         "title": title,
@@ -63,7 +65,7 @@ def _avd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=detail.get("description"),
         impacts=detail.get("danger_level"),
         affected=affected,
-        cve=document.get("cve_code") or detail.get("cve_id"),
+        cve=_document_cve(document),
         recommendation=detail.get("solution"),
         related_link=_join(detail.get("reference_links")),
     )
@@ -85,8 +87,7 @@ def _hkcert(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         impacts=detail.get("risk_level") or _first_nested(products, "risk_level"),
         affected=affected,
         cve=(
-            _join(_prefixed_cve_codes(document.get("cve_codes")))
-            or _prefixed_cve_code(document.get("cve_code"))
+            _document_cve(document)
             or _join(_nested_values(detail.get("vulnerability_identifiers"), "cve_id"))
         ),
         recommendation=detail.get("solutions"),
@@ -109,7 +110,7 @@ def _cve(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=_join(_nested_values(detail.get("descriptions"), "value")),
         impacts=severity,
         affected=_cve_affected(detail),
-        cve=detail.get("cve_id") or document.get("code"),
+        cve=_document_cve(document),
         related_link=_join(_nested_values(detail.get("references"), "url")),
     )
 
@@ -120,7 +121,7 @@ def _cisco(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=_strip_cisco_paragraph_tags(detail.get("summary")),
         impacts=detail.get("sir") or detail.get("cvss_base_score"),
         affected=_join(detail.get("product_names")),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         related_link=_join([detail.get("publication_url"), detail.get("cvrf_url"), detail.get("csaf_url")]),
     )
 
@@ -140,7 +141,7 @@ def _github_advisory(document: dict[str, Any], detail: dict[str, Any]) -> dict[s
         description=detail.get("description") or detail.get("summary"),
         impacts=detail.get("severity"),
         affected=affected,
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=patched,
         related_link=_join(detail.get("references")),
     )
@@ -152,7 +153,7 @@ def _zeroday(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
         description=detail.get("description"),
         impacts="",
         affected=detail.get("vulnerable_component"),
-        cve=document.get("cve_code") or detail.get("cve_id"),
+        cve=_document_cve(document),
         recommendation=detail.get("patch_status"),
         related_link=_join(detail.get("reference_links")),
     )
@@ -164,7 +165,7 @@ def _govcert(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
         description=detail.get("description"),
         impacts="",
         affected=_join(detail.get("affected_systems")),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=detail.get("recommendation"),
         related_link=_join(detail.get("more_information_links")),
     )
@@ -184,7 +185,7 @@ def _huawei_sa(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, An
         description=detail.get("summary") or raw.get("summary"),
         impacts=detail.get("severity") or raw.get("severity"),
         affected="",
-        cve=document.get("cve_code")
+        cve=_document_cve(document)
         or _first(detail.get("cve_ids"))
         or _first_nested(vul, "cveId"),
         related_link=detail.get("allPath") if isinstance(detail.get("allPath"), str) else raw.get("allPath"),
@@ -203,7 +204,7 @@ def _paloalto(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any
         description=detail.get("description"),
         impacts=detail.get("severity"),
         affected=affected,
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=_join([detail.get("solution"), detail.get("workarounds")]),
         related_link=_join(detail.get("reference_links")),
     )
@@ -248,7 +249,7 @@ def _qianxin(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
                 other_components,
             ]
         ),
-        cve=document.get("cve_code")
+        cve=_document_cve(document)
         or vulnerability.get("cve_id")
         or assessment.get("cve_id")
         or _first(detail.get("cve_ids")),
@@ -263,7 +264,7 @@ def _ransomwarelive(document: dict[str, Any], detail: dict[str, Any]) -> dict[st
         description=detail.get("press"),
         impacts="",
         affected="",
-        cve=document.get("cve_code"),
+        cve=_document_cve(document),
         related_link=_join([detail.get("website"), detail.get("permalink"), detail.get("screenshot")]),
     )
 
@@ -316,7 +317,7 @@ def _splunk(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=_splunk_description(detail),
         impacts=detail.get("severity") or detail.get("severity_summary") or detail.get("severity_detail"),
         affected=_string(affected),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=_join([detail.get("solution"), detail.get("mitigations")]),
         related_link=_join(detail.get("reference_links")),
     )
@@ -328,7 +329,7 @@ def _hikvision(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, An
         description=detail.get("summary") or detail.get("description"),
         impacts=detail.get("severity"),
         affected=_join(detail.get("affected_products")),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=detail.get("solution"),
         related_link=_join(detail.get("reference_links")),
     )
@@ -340,7 +341,7 @@ def _cnnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=detail.get("vulDesc") or detail.get("productDesc"),
         impacts=detail.get("hazardLevel"),
         affected=_join([detail.get("affectedProduct"), detail.get("affectedVendor")]),
-        cve=document.get("cve_code") or detail.get("cveCode"),
+        cve=_document_cve(document),
         recommendation=detail.get("patch"),
         related_link=_extract_urls(detail.get("referUrl")),
     )
@@ -352,7 +353,7 @@ def _cnvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
         description=detail.get("description"),
         impacts=document.get("status") or detail.get("severity"),
         affected=_join(detail.get("affected_products")),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=detail.get("solution"),
         related_link=_join(detail.get("reference_links")),
     )
@@ -364,7 +365,7 @@ def _juniper(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
         description=detail.get("description") or detail.get("summary"),
         impacts=_path(detail, "raw_fields", "severity"),
         affected=_join(detail.get("products")),
-        cve=document.get("cve_code") or _first(detail.get("cve_ids")),
+        cve=_document_cve(document),
         recommendation=_join([detail.get("solution"), detail.get("workaround")]),
         related_link=_join(detail.get("reference_links")),
     )
@@ -375,7 +376,7 @@ def _generic(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]
         document,
         description=detail.get("description") or detail.get("summary"),
         impacts="",
-        cve=document.get("cve_code"),
+        cve=_document_cve(document),
     )
 
 
@@ -428,7 +429,16 @@ def _detail(document: dict[str, Any], provider: str) -> dict[str, Any]:
     if not isinstance(details, dict):
         return {}
     value = details.get(provider)
-    return value if isinstance(value, dict) else {}
+    if isinstance(value, dict):
+        return value
+    return details
+
+
+def _document_cve(document: dict[str, Any]) -> str:
+    if _text(document.get("_id")).startswith("cve:"):
+        code = _text(document.get("code"))
+        return f"CVE-{code}" if code and not code.upper().startswith("CVE-") else code
+    return _join(_prefixed_cve_codes(document.get("cve_ids")))
 
 
 def _string(value: Any) -> str:
@@ -710,7 +720,7 @@ def refresh_review_views(
 
 
 def review_view_pipeline(provider: str) -> list[dict[str, Any]]:
-    detail = f"$details.{provider}"
+    detail = "$details"
     fields = {
         "title": _mstr("$title"),
         "description": _mongo_description(provider, detail),
@@ -758,32 +768,7 @@ def _mongo_description(provider: str, detail: str) -> dict[str, Any]:
 
 
 def _mongo_impacts(provider: str, detail: str) -> dict[str, Any]:
-    sources: dict[str, list[Any]] = {
-        "avd": [f"{detail}.danger_level"],
-        "hkcert": [f"{detail}.risk_level", _mfirst_array_value(f"{detail}.table", "risk_level")],
-        "cve": [
-            _mfirst_nested(f"{detail}.metrics.cvss_v40", "cvssData.baseSeverity"),
-            _mfirst_nested(f"{detail}.metrics.cvss_v31", "cvssData.baseSeverity"),
-            _mfirst_nested(f"{detail}.metrics.cvss_v30", "cvssData.baseSeverity"),
-            _mfirst_nested(f"{detail}.metrics.cvss_v2", "baseSeverity"),
-        ],
-        "cisco": [f"{detail}.sir"],
-        "github_advisory": [f"{detail}.severity"],
-        "huawei_sa": [f"{detail}.severity", f"{detail}.raw.severity"],
-        "paloalto": [f"{detail}.severity"],
-        "qianxin": [
-            f"{detail}.level",
-            f"{detail}.description.threat_assessment.cvss_3_1_rating",
-            f"{detail}.description.vulnerability_information.risk.qianxin_cert_rating",
-            f"{detail}.description.vulnerability_information.risk.risk_level",
-        ],
-        "splunk": [f"{detail}.severity", f"{detail}.severity_summary", f"{detail}.severity_detail"],
-        "hikvision": [f"{detail}.severity"],
-        "cnnvd": [f"{detail}.hazardLevel"],
-        "cnvd": ["$status", f"{detail}.severity"],
-        "juniper": [f"{detail}.raw_fields.severity"],
-    }
-    return _mnormalize_severity(_mfirst(sources.get(provider, [])))
+    return _mstr("$severity")
 
 
 def _mnormalize_severity(value_expr: Any) -> dict[str, Any]:
@@ -927,40 +912,20 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
 
 
 def _mongo_cve(provider: str, detail: str) -> dict[str, Any]:
-    sources: dict[str, list[Any]] = {
-        "avd": ["$cve_code", f"{detail}.cve_id"],
-        "hkcert": [
-            _mprefixed_cve_codes("$cve_codes"),
-            _mprefixed_cve_code("$cve_code"),
-            _mjoin_values(f"{detail}.vulnerability_identifiers", "cve_id"),
-        ],
-        "cve": [f"{detail}.cve_id", "$code"],
-        "cisco": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "github_advisory": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "zeroday": ["$cve_code", f"{detail}.cve_id"],
-        "govcert": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "infosec": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "huawei_sa": [
-            "$cve_code",
-            _mfirst_item(f"{detail}.cve_ids"),
-            _mfirst_nested(f"{detail}.vul", "cveId"),
-            _mfirst_nested(f"{detail}.raw.vul", "cveId"),
-        ],
-        "paloalto": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "qianxin": [
-            "$cve_code",
-            f"{detail}.description.vulnerability_information.cve_id",
-            f"{detail}.description.threat_assessment.cve_id",
-            _mfirst_item(f"{detail}.cve_ids"),
-        ],
-        "ransomwarelive": ["$cve_code"],
-        "splunk": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "hikvision": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "cnnvd": ["$cve_code", f"{detail}.cveCode"],
-        "cnvd": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-        "juniper": ["$cve_code", _mfirst_item(f"{detail}.cve_ids")],
-    }
-    return _mfirst(sources.get(provider, ["$cve_code"]))
+    if provider == "cve":
+        return {
+            "$concat": [
+                "CVE-",
+                {
+                    "$replaceAll": {
+                        "input": _mstr("$code"),
+                        "find": "CVE-",
+                        "replacement": "",
+                    }
+                },
+            ]
+        }
+    return _mjoin("$cve_ids")
 
 
 def _mongo_recommendation(provider: str, detail: str) -> dict[str, Any]:
