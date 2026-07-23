@@ -5,6 +5,14 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+METRIC_KEY_MAP = {
+    "cvssV4_0": "cvss_v40",
+    "cvssV3_1": "cvss_v31",
+    "cvssV3_0": "cvss_v30",
+    "cvssV2_0": "cvss_v2",
+}
+
+
 @dataclass(slots=True)
 class CVEDetailRecord:
     cve_id: str | None = None
@@ -14,6 +22,7 @@ class CVEDetailRecord:
     last_modified: str | None = None
     vuln_status: str | None = None
     descriptions: list[dict[str, Any]] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
     references: list[dict[str, Any]] = field(default_factory=list)
     configurations: list[dict[str, Any]] = field(default_factory=list)
     affected: list[dict[str, Any]] = field(default_factory=list)
@@ -44,6 +53,7 @@ def parse_cve_detail(cve: dict[str, Any]) -> CVEDetailRecord:
         last_modified=_optional_str(metadata.get("dateUpdated")),
         vuln_status=_optional_str(metadata.get("state")),
         descriptions=_combined_list(containers, "descriptions"),
+        metrics=_normalize_metrics(_combined_list(containers, "metrics")),
         references=_dedupe_references(_combined_list(containers, "references")),
         configurations=_combined_list(containers, "cpeApplicability"),
         affected=affected,
@@ -68,6 +78,23 @@ def english_description(detail: dict[str, Any]) -> str | None:
         if isinstance(description, dict) and description.get("value"):
             return str(description["value"]).strip() or None
     return None
+
+
+def _normalize_metrics(metrics: Any) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for metric in _list_of_dicts(metrics):
+        for source_key, target_key in METRIC_KEY_MAP.items():
+            cvss_data = metric.get(source_key)
+            if not isinstance(cvss_data, dict):
+                continue
+            item = {
+                key: value
+                for key, value in metric.items()
+                if key not in METRIC_KEY_MAP
+            }
+            item["cvssData"] = dict(cvss_data)
+            normalized.setdefault(target_key, []).append(item)
+    return normalized
 
 
 def _containers(cve: dict[str, Any]) -> list[dict[str, Any]]:

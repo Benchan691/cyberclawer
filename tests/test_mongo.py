@@ -45,6 +45,39 @@ def test_build_mongo_document_sets_normalized_severity() -> None:
     assert document["severity"] == "High"
 
 
+@pytest.mark.parametrize(
+    ("metric_key", "base_severity", "expected"),
+    [
+        ("cvss_v40", "CRITICAL", "Critical"),
+        ("cvss_v31", "HIGH", "High"),
+        ("cvss_v30", "MEDIUM", "Medium"),
+        ("cvss_v2", "LOW", "Low"),
+    ],
+)
+def test_build_mongo_document_derives_cve_severity_from_normalized_metrics(
+    metric_key: str,
+    base_severity: str,
+    expected: str,
+) -> None:
+    document = build_mongo_document(
+        {
+            "type": "cve",
+            "code": "2026-10001",
+            "title": "CVE severity test",
+            "details": {
+                "cve": {
+                    "metrics": {
+                        metric_key: [{"cvssData": {"baseSeverity": base_severity}}]
+                    }
+                }
+            },
+        },
+        output_payload(),
+    )
+
+    assert document["severity"] == expected
+
+
 def test_sync_inserts_records_and_creates_indexes() -> None:
     collection = FakeCollection()
     settings = ScraperSettings(mongo_enabled=True)

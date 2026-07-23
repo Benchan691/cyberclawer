@@ -91,6 +91,7 @@ def _raw_severity_for_provider(provider: str, document: dict[str, Any], detail: 
                 ("metrics", "cvss_v40", "cvssData", "baseSeverity"),
                 ("metrics", "cvss_v31", "cvssData", "baseSeverity"),
                 ("metrics", "cvss_v30", "cvssData", "baseSeverity"),
+                ("metrics", "cvss_v2", "cvssData", "baseSeverity"),
                 ("metrics", "cvss_v2", "baseSeverity"),
             ),
         ),
