@@ -8,7 +8,6 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from vuln_scraper.config import apply_httpx_proxy_kwargs, resolve_proxy_url
 from vuln_scraper.models import ListPage
 from vuln_scraper.scrapers.cisco.config import (
     DEFAULT_COLLECTION,
@@ -105,11 +104,8 @@ class CiscoProvider:
         return token
 
     async def _fetch_access_token(self, client_id: str, client_secret: str) -> dict[str, Any]:
-        proxy = resolve_proxy_url()
-        client_kwargs: dict[str, Any] = {"timeout": httpx.Timeout(30.0)}
-        apply_httpx_proxy_kwargs(client_kwargs, proxy)
         try:
-            async with httpx.AsyncClient(**client_kwargs) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
                 response = await client.post(
                     TOKEN_URL,
                     headers={"Content-Type": "application/x-www-form-urlencoded"},

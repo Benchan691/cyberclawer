@@ -13,7 +13,7 @@ def test_fetch_avd_html_uses_sigchl_redirect(tmp_path) -> None:
     list_html = (FIXTURES / "list.html").read_text(encoding="utf-8")
     captured_urls: list[str] = []
 
-    def fake_fetch_via_redirect(url, *, headers=None, cookies=None, proxy_url=None, timeout=30.0):
+    def fake_fetch_via_redirect(url, *, headers=None, cookies=None, timeout=30.0):
         captured_urls.append(url)
         return list_html, f"{url}&timestamp__1384=cleared", []
 

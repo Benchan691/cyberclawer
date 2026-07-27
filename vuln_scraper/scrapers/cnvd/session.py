@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from vuln_scraper.config import configure_requests_session_proxy
 from vuln_scraper.scrapers.cnvd.config import BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -209,7 +208,6 @@ class CNVDSession:
     cookie_path: Path | None = None
     max_retries: int = MAX_RETRIES
     retry_delay: float = RETRY_DELAY
-    proxy_url: str | None = None
     _cookies: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     @classmethod
@@ -220,14 +218,12 @@ class CNVDSession:
         cookie_path: Path | None = None,
         max_retries: int = MAX_RETRIES,
         retry_delay: float = RETRY_DELAY,
-        proxy_url: str | None = None,
     ) -> CNVDSession:
         del data_dir
         return cls(
             cookie_path=cookie_path,
             max_retries=max_retries,
             retry_delay=retry_delay,
-            proxy_url=proxy_url,
         )
 
     @property
@@ -252,7 +248,6 @@ class CNVDSession:
         ctx = quickjs_mod.Context()
 
         with requests_mod.Session() as session:
-            configure_requests_session_proxy(session, self.proxy_url)
             session.headers.update({"User-Agent": USER_AGENT})
             if not refresh_cookies and self.cookie_path is not None:
                 load_cookies(session, self.cookie_path)

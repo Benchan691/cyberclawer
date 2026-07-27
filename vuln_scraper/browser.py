@@ -29,12 +29,10 @@ class BrowserHTMLFetcher:
         chrome_executable: str | None = None,
         user_data_dir: str | Path | None = None,
         manual_verification: bool = False,
-        proxy_url: str | None = None,
     ) -> None:
         self.headless = headless
         self.timeout_ms = timeout_ms
         self.chrome_executable = chrome_executable
-        self.proxy_url = proxy_url.strip() if proxy_url and proxy_url.strip() else None
         self.user_data_dir = Path(user_data_dir) if user_data_dir is not None else None
         self.manual_verification = manual_verification
         self._playwright = None
@@ -66,9 +64,6 @@ class BrowserHTMLFetcher:
             "viewport": {"width": 1440, "height": 1100},
             "extra_http_headers": {"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
         }
-        if self.proxy_url:
-            context_kwargs["proxy"] = {"server": self.proxy_url}
-            context_kwargs["ignore_https_errors"] = True
         if self.user_data_dir is not None:
             self.user_data_dir.mkdir(parents=True, exist_ok=True)
             self._context = await self._playwright.chromium.launch_persistent_context(

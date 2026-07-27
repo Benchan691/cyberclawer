@@ -162,7 +162,6 @@ class ScraperRunner:
                 chrome_executable=self.settings.chrome_executable,
                 user_data_dir=self.settings.browser_user_data_dir,
                 manual_verification=self.settings.manual_verification,
-                proxy_url=self.settings.proxy_url,
             )
             if self.settings.browser_fallback
             else None
@@ -185,7 +184,6 @@ class ScraperRunner:
             "backoff_jitter": self.settings.backoff_jitter,
             "timeout": self.settings.timeout,
             "headers": client_headers,
-            "proxy": self.settings.proxy_url,
         }
         if browser_fetcher is None:
             async with ScraperClient(**client_kwargs) as client:
@@ -578,7 +576,6 @@ class ScraperRunner:
                 self.settings.data_dir,
                 max_retries=self.settings.session_max_retries or 50,
                 retry_delay=self.settings.session_retry_delay or 0.3,
-                proxy_url=self.settings.proxy_url,
             )
             self._cnvd_session = session
 
@@ -670,10 +667,6 @@ class ScraperRunner:
                 "cookies": self._client_cookies_snapshot(client),
                 "timeout": self.settings.timeout,
             }
-            if self.settings.proxy_url:
-                # Only pass proxy_url when configured; this keeps test mocks simple.
-                fetch_kwargs["proxy_url"] = self.settings.proxy_url
-
             html, final_url, cookies = await asyncio.to_thread(
                 fetch_via_redirect,
                 url,

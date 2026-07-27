@@ -57,12 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum time to wait for headed manual verification.",
     )
-    run_parser.add_argument(
-        "--proxy",
-        default=None,
-        help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
-    )
-
     catch_up_parser = subparsers.add_parser(
         "catch-up",
         help="Scrape and sync each provider repeatedly until MongoDB overlap.",
@@ -113,12 +107,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum time to wait for headed manual verification.",
     )
-    catch_up_parser.add_argument(
-        "--proxy",
-        default=None,
-        help="HTTP(S) proxy URL for scraper outbound traffic (overrides SCRAPER_PROXY).",
-    )
-
     review_parser = subparsers.add_parser(
         "review",
         help="Create or refresh MongoDB review views for one or more providers.",
@@ -127,21 +115,6 @@ def build_parser() -> argparse.ArgumentParser:
         "providers",
         nargs="*",
         help="Provider key(s) to refresh. Omit to refresh all configured providers.",
-    )
-
-    backfill_parser = subparsers.add_parser(
-        "backfill-severity",
-        help="Set top-level severity on existing MongoDB vulnerability documents.",
-    )
-    backfill_parser.add_argument(
-        "providers",
-        nargs="*",
-        help="Provider key(s) to backfill. Omit to backfill all configured providers.",
-    )
-    backfill_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Report how many documents would change without writing to MongoDB.",
     )
 
     migrate_parser = subparsers.add_parser(
@@ -257,8 +230,6 @@ def main(argv: list[str] | None = None) -> None:
                     settings,
                     manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
                 )
-            if args.proxy:
-                settings = replace(settings, proxy_url=args.proxy)
             output = asyncio.run(ScraperRunner(settings, provider=provider).run())
         except (KeyError, ValueError) as exc:
             parser.error(str(exc))
@@ -295,8 +266,6 @@ def main(argv: list[str] | None = None) -> None:
                     settings,
                     manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
                 )
-            if args.proxy:
-                settings = replace(settings, proxy_url=args.proxy)
             settings = settings.normalized()
         except ValueError as exc:
             parser.error(str(exc))
@@ -362,62 +331,6 @@ def main(argv: list[str] | None = None) -> None:
         )
         if failed:
             raise SystemExit(1)
-        return
-
-    if args.command == "backfill-severity":
-        from .backfill_severity import backfill_severity
-        from .mongo import create_mongo_client
-        from .scrapers import get_provider
-
-        providers = list(args.providers)
-        try:
-            for key in providers:
-                get_provider(key)
-        except KeyError as exc:
-            parser.error(str(exc))
-
-        settings = default_scrape_settings(mongo_enabled=True).normalized()
-        client = create_mongo_client(settings.mongo_uri or "")
-        try:
-            database = client[settings.mongo_database]
-            results = backfill_severity(
-                database,
-                providers=providers or None,
-                mongo_config_file=settings.mongo_config_file,
-                dry_run=args.dry_run,
-            )
-        finally:
-            close = getattr(client, "close", None)
-            if close is not None:
-                close()
-
-        scanned = 0
-        updated = 0
-        unchanged = 0
-        skipped = 0
-        for result in results:
-            if result.skipped:
-                skipped += 1
-                print(
-                    f"{result.provider}: skipped {result.collection_name} ({result.message})"
-                )
-                continue
-            scanned += result.scanned
-            updated += result.updated
-            unchanged += result.unchanged
-            action = "would update" if args.dry_run else "updated"
-            print(
-                f"{result.provider}: scanned={result.scanned} "
-                f"{action}={result.updated} unchanged={result.unchanged} "
-                f"(collection={result.collection_name})"
-            )
-
-        prefix = "backfill-severity (dry-run)" if args.dry_run else "backfill-severity"
-        print(
-            f"{prefix}: scanned={scanned} "
-            f"{'would_update' if args.dry_run else 'updated'}={updated} "
-            f"unchanged={unchanged} skipped={skipped} total={len(results)}"
-        )
         return
 
     if args.command == "migrate-mongo":

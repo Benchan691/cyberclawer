@@ -20,16 +20,11 @@ def test_cli_parses_review_subcommand() -> None:
     assert one_args.providers == ["hikvision", "avd"]
 
 
-def test_cli_parses_backfill_severity_subcommand() -> None:
+def test_cli_rejects_removed_backfill_severity_subcommand() -> None:
     parser = build_parser()
-    all_args = parser.parse_args(["backfill-severity"])
-    one_args = parser.parse_args(["backfill-severity", "cnnvd", "--dry-run"])
 
-    assert all_args.command == "backfill-severity"
-    assert all_args.providers == []
-    assert all_args.dry_run is False
-    assert one_args.providers == ["cnnvd"]
-    assert one_args.dry_run is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["backfill-severity"])
 
 
 def test_cli_parses_run_subcommand() -> None:

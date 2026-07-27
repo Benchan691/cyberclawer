@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from .config import DEFAULT_HEADERS, apply_httpx_proxy_kwargs
+from .config import DEFAULT_HEADERS
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,6 @@ class ScraperClient:
         backoff_jitter: float = 0.4,
         timeout: float = 30.0,
         headers: Mapping[str, str] | None = None,
-        proxy: str | None = None,
         browser_fetcher: object | None = None,
     ) -> None:
         self.retries = max(0, retries)
@@ -126,7 +125,6 @@ class ScraperClient:
         self.rate_limiter = AsyncRateLimiter(delay)
         self.browser_fetcher = browser_fetcher
         self._timeout = timeout
-        self._proxy = proxy.strip() if proxy and proxy.strip() else None
         self._default_headers = dict(headers or DEFAULT_HEADERS)
         self._client = self._build_http_client()
 
@@ -136,7 +134,6 @@ class ScraperClient:
             "timeout": httpx.Timeout(self._timeout),
             "follow_redirects": True,
         }
-        apply_httpx_proxy_kwargs(client_kwargs, self._proxy)
         return httpx.AsyncClient(**client_kwargs)
 
     async def refresh_session(self, headers: Mapping[str, str] | None = None) -> None:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import random
 import tomllib
-import socket
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -89,65 +88,6 @@ def _env(name: str, *, legacy: str | None = None) -> str | None:
     return None
 
 
-def resolve_proxy_url(*, explicit: str | None = None) -> str | None:
-    if explicit and explicit.strip():
-        proxy = explicit.strip()
-        return proxy if _local_proxy_reachable(proxy) else None
-    for name in ("SCRAPER_PROXY", "HTTPS_PROXY", "HTTP_PROXY"):
-        value = _env(name)
-        if value and value.strip():
-            proxy = value.strip()
-            return proxy if _local_proxy_reachable(proxy) else None
-    return None
-
-
-def _local_proxy_reachable(proxy_url: str, *, timeout_seconds: float = 0.5) -> bool:
-    """
-    For local proxies only (127.0.0.1/localhost), treat connection-refused as "proxy off".
-    This prevents scrapers from failing when a local proxy is misconfigured or stopped.
-    """
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(proxy_url)
-        host = (parsed.hostname or "").lower()
-        if host not in {"127.0.0.1", "localhost", "::1"}:
-            return True
-        port = parsed.port
-        if port is None:
-            # Default ports for typical proxy schemes.
-            port = 443 if (parsed.scheme or "").lower() == "https" else 80
-
-        with socket.create_connection((host, port), timeout=timeout_seconds):
-            return True
-    except Exception:
-        return False
-
-
-def apply_httpx_proxy_kwargs(kwargs: dict[str, Any], proxy: str | None) -> None:
-    """Apply proxy settings to httpx.AsyncClient kwargs; disable TLS verify behind proxy."""
-    if not proxy or not proxy.strip():
-        return
-    kwargs["proxy"] = proxy.strip()
-    kwargs["trust_env"] = False
-    kwargs["verify"] = False
-
-
-def configure_requests_session_proxy(session: Any, proxy_url: str | None) -> None:
-    """Configure a requests.Session for proxy use; disable TLS verify behind proxy."""
-    if not proxy_url or not proxy_url.strip():
-        return
-    url = proxy_url.strip()
-    session.proxies.update({"http": url, "https": url})
-    session.verify = False
-    try:
-        import urllib3
-
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    except ImportError:
-        pass
-
-
 def default_chrome_executable() -> str | None:
     env_path = _env("SCRAPER_CHROME_PATH", legacy="AVD_CHROME_PATH")
     if env_path:
@@ -208,7 +148,6 @@ class ScraperSettings:
     manual_verification: bool = False
     manual_verification_timeout_ms: int = 300_000
     chrome_executable: str | None = None
-    proxy_url: str | None = None
 
     def for_provider(
         self,
@@ -370,7 +309,6 @@ class ScraperSettings:
             manual_verification=self.manual_verification,
             manual_verification_timeout_ms=self.manual_verification_timeout_ms,
             chrome_executable=chrome_executable,
-            proxy_url=resolve_proxy_url(explicit=self.proxy_url),
         )
 
 

@@ -41,27 +41,6 @@ set `HUAWEI_SA_X_CK` and `HUAWEI_SA_CSRF_TOKEN` if the endpoint requires browser
 session tokens. CNVD uses HTTP with an optional `cnvd` extra
 (`quickjs`, `ddddocr`, `requests`) to solve the site gate and persist cookies.
 
-## HTTP proxy
-
-Scraper outbound HTTP(S) traffic (API calls, HTML fetch, browser fallback, AVD/CNVD
-side paths) can use a proxy without affecting the MongoDB connection. Set
-`SCRAPER_PROXY` in the project `.env` (loaded at startup), or pass `--proxy` on
-`run` / `catch-up`:
-
-```bash
-# .env
-SCRAPER_PROXY=http://127.0.0.1:7890
-
-vuln-scrape run avd --limit 10 --proxy http://127.0.0.1:7890
-```
-
-If `SCRAPER_PROXY` is unset, `HTTPS_PROXY` and then `HTTP_PROXY` are used. Prefer
-`SCRAPER_PROXY` over global `HTTP_PROXY` when only scrapers should be proxied.
-
-When a proxy is configured, TLS certificate verification is disabled for scraper
-HTTP clients (common for HTTPS intercepting proxies). MongoDB connections are
-unchanged.
-
 ## MongoDB Layout
 
 All scrapers use one MongoDB database, with one collection per scraper.
@@ -121,26 +100,17 @@ Precedence for connection settings is CLI flags, environment variables
 work), `mongodb.toml`, then built-in defaults. The `[mongodb.collections]` table
 maps each scraper to its collection inside the configured database.
 
-For MongoDB Atlas, set `MONGO_URI` to your `mongodb+srv://` connection string
-(do not commit credentials into `mongodb.toml`):
-
-```bash
-export MONGO_URI='mongodb+srv://user:password@cluster.example.mongodb.net'
-```
-
 Each synced vulnerability document includes a top-level `severity` field with
 normalized English labels (`Critical`, `High`, `Medium`, `Low`, `Unknown`, or
 empty when unavailable). Provider-specific severity values remain under
 `details.<provider>`. Review views store the same normalized value in
-`impacts`. To backfill existing source collections without re-scraping:
+`impacts`. For legacy MongoDB collections that still need severity
+normalization, inspect or apply the schema migration instead:
 
 ```bash
-vuln-scrape backfill-severity
-vuln-scrape backfill-severity cnnvd hikvision --dry-run
+vuln-scrape migrate-mongo --target-version 2 --dry-run
+vuln-scrape migrate-mongo --target-version 2
 ```
-
-Then refresh review views with `vuln-scrape review`. Alternatively,
-re-scrape with `--mongo-conflict overwrite`.
 
 `scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
 the combined run log filename. Precedence is explicit `ScraperSettings` values,
