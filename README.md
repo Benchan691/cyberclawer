@@ -1,10 +1,10 @@
 # Vulnerability Bulletin Scrapers
 
-Terminal scrapers ingest vulnerability bulletins into MongoDB. There is no web UI.
+Terminal scrapers that ingest vulnerability bulletins into MongoDB. There is no web UI.
 
-## Install
+## Start guide
 
-Use Python 3.11 or newer.
+Requires Python 3.11+.
 
 ```bash
 python3.11 -m venv .venv
@@ -12,302 +12,87 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-For Aliyun AVD HTTP scraping (sigchl redirect bypass via quickjs), install:
+Optional extras:
 
 ```bash
-pip install -e '.[avd]'
+pip install -e '.[avd]'           # Aliyun AVD (sigchl via quickjs)
+pip install -e '.[browser]'       # Playwright (Hikvision; AVD fallback)
+pip install -e '.[cnvd]'          # CNVD gate (quickjs + captcha OCR)
+pip install -e '.[browser,avd]'   # common combo
 ```
 
-For scrapers that need a real browser or browser-assisted cookie capture
-(Hikvision; AVD as fallback), install the optional browser extra:
+Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONGO_DB`).
 
-```bash
-pip install -e '.[browser,avd]'
-```
+## Scrapers
 
-HKCERT, zero-day.cz, GovCERT.HK,
-InfoSec, Splunk, and Palo Alto Networks advisories are server-rendered HTML and
-do not use browser fallback. Aliyun AVD solves the `sigchl` challenge with
-quickjs on each list and detail URL, follows the generated redirect, then parses
-the cleared HTML. List row links from `tbody` are used as detail targets. The
-provider also accepts a raw Cookie header through `AVD_COOKIE`,
-`AVD_COOKIES`, or `ALIYUN_AVD_COOKIE`. Browser fallback still applies when the
-redirect response is blocked. Use `--no-browser-fallback` only when HTTP +
-quickjs clearance is sufficient on your network.
-Hikvision renders through the browser path. Juniper uses the Coveo search API
-(JSON). CVE sync consumes the CVEProject cvelistV5 delta log. Cisco PSIRT, CNNVD, and Qianxin sync
-call JSON APIs directly. Huawei SA sync calls Huawei's JSON advisory endpoint;
-set `HUAWEI_SA_X_CK` and `HUAWEI_SA_CSRF_TOKEN` if the endpoint requires browser
-session tokens. CNVD uses HTTP with an optional `cnvd` extra
-(`quickjs`, `ddddocr`, `requests`) to solve the site gate and persist cookies.
-
-## MongoDB Layout
-
-All scrapers use one MongoDB database, with one collection per scraper.
-
-| Scraper folder | MongoDB collection | Ingest CLI |
+| Key | Collection | Notes |
 | --- | --- | --- |
-| `vuln_scraper/scrapers/avd/` | `avd` | `vuln-scrape run avd --limit 100` / `vuln-scrape catch-up` |
-| `vuln_scraper/scrapers/hkcert/` | `hkcert` | same |
-| `vuln_scraper/scrapers/cve/` | `cve` | same |
-| `vuln_scraper/scrapers/cisco/` | `cisco` | same |
-| `vuln_scraper/scrapers/zeroday/` | `zeroday` | same |
-| `vuln_scraper/scrapers/govcert/` | `govcert` | same |
-| `vuln_scraper/scrapers/github_advisory/` | `github_advisory` | same |
-| `vuln_scraper/scrapers/huawei_sa/` | `huawei_sa` | same |
-| `vuln_scraper/scrapers/paloalto/` | `paloalto` | same |
-| `vuln_scraper/scrapers/qianxin/` | `qianxin` | same |
-| `vuln_scraper/scrapers/ransomwarelive/` | `ransomwarelive` | same |
-| `vuln_scraper/scrapers/infosec/` | `infosec` | same |
-| `vuln_scraper/scrapers/splunk/` | `splunk` | same |
-| `vuln_scraper/scrapers/hikvision/` | `hikvision` | same |
-| `vuln_scraper/scrapers/cnnvd/` | `cnnvd` | same |
-| `vuln_scraper/scrapers/cnvd/` | `cnvd` | `pip install -e '.[cnvd]'` then `vuln-scrape run cnvd --limit 100` |
-| `vuln_scraper/scrapers/juniper/` | `juniper` | same |
-| `vuln_scraper/scrapers/msrc/` | `msrc` | same |
+| `avd` | `avd` | Needs `.[avd]`; browser optional |
+| `cisco` | `cisco` | Needs `CISCO_OPENVULN_TOKEN` or client id/secret |
+| `cnnvd` | `cnnvd` | JSON API |
+| `cnvd` | `cnvd` | Needs `.[cnvd]` |
+| `cve` | `cve` | CVEProject cvelistV5 |
+| `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
+| `govcert` | `govcert` | HTML |
+| `hikvision` | `hikvision` | Needs `.[browser]` |
+| `hkcert` | `hkcert` | HTML |
+| `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
+| `infosec` | `infosec` | HTML |
+| `juniper` | `juniper` | Coveo JSON API |
+| `msrc` | `msrc` | Microsoft CVRF API |
+| `paloalto` | `paloalto` | HTML |
+| `qianxin` | `qianxin` | JSON API |
+| `ransomwarelive` | `ransomwarelive` | Needs `RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY` |
+| `splunk` | `splunk` | HTML |
+| `zeroday` | `zeroday` | HTML |
 
-`mongodb.toml`:
+## MongoDB layout
+
+One database, one collection per scraper. Configure in [`mongodb.toml`](mongodb.toml):
 
 ```toml
 [mongodb]
 uri = "mongodb://localhost:27017"
 database = "vulnerabilities"
-conflict = "prompt"
+conflict = "overwrite"
 
 [mongodb.collections]
 avd = "avd"
 cisco = "cisco"
-cnnvd = "cnnvd"
-cnvd = "cnvd"
-cve = "cve"
-github_advisory = "github_advisory"
-govcert = "govcert"
-hikvision = "hikvision"
-hkcert = "hkcert"
-huawei_sa = "huawei_sa"
-infosec = "infosec"
-juniper = "juniper"
-msrc = "msrc"
-paloalto = "paloalto"
-qianxin = "qianxin"
-ransomwarelive = "ransomwarelive"
-splunk = "splunk"
-zeroday = "zeroday"
+# ... one entry per scraper key
 ```
 
-Precedence for connection settings is CLI flags, environment variables
-(`MONGO_URI`, `MONGO_DB`, `MONGO_COLLECTION`; legacy `AVD_MONGO_*` names still
-work), `mongodb.toml`, then built-in defaults. The `[mongodb.collections]` table
-maps each scraper to its collection inside the configured database.
+Precedence: env vars (`MONGO_URI`, `MONGO_DB`) > `mongodb.toml` > defaults.
 
-Each synced vulnerability document includes a top-level `severity` field with
-normalized English labels (`Critical`, `High`, `Medium`, `Low`, `Unknown`, or
-empty when unavailable). Provider-specific severity values remain under
-`details.<provider>`. Review views store the same normalized value in
-`impacts`. For legacy MongoDB collections that still need severity
-normalization, inspect or apply the schema migration instead:
+Document shape, indexes, and migration: see [`database.md`](database.md).
+
+## Usage
+
+Run one scraper:
 
 ```bash
-vuln-scrape migrate-mongo --target-version 2 --dry-run
-vuln-scrape migrate-mongo --target-version 2
+vuln-scrape run hkcert --limit 100
+vuln-scrape run avd --limit 100
+vuln-scrape run cnvd --limit 100
 ```
 
-`scrapers.toml` configures per-scraper HTTP retries, exponential backoff, and
-the combined run log filename. Precedence is explicit `ScraperSettings` values,
-then `[scrapers.<provider>]`, then `[scrapers.defaults]`, then built-in defaults.
+Catch up all (or configured) scrapers for today's Asia/Hong_Kong window:
 
-```toml
-[scrapers.defaults]
-retries = 3
-backoff_base = 1.0
-backoff_max = 30.0
-backoff_jitter = 0.4
-error_log = "scraper-errors.log"
-
-[scrapers.cnvd]
-retries = 5
-backoff_base = 2.0
-session_max_retries = 50
-session_retry_delay = 0.3
+```bash
+vuln-scrape catch-up
+vuln-scrape catch-up --limit 200 --days 7
 ```
 
-During a scrape, INFO-or-higher logger messages are appended as JSON lines to
-`{data_dir}/scraper-errors.log` (or the configured name). Explicit scrape
-failures also append structured `record_type="failure"` JSON lines.
-Set `error_log = ""` under `[scrapers.defaults]` to disable file logging.
-
-To limit which scrapers `catch-up` runs, add a provider list under `[scrapers.catch_up]` in
-`scrapers.toml`. Omit that section to run every scraper, or set `providers = ["all"]`.
-
-```toml
-[scrapers.catch_up]
-providers = ["all"]
-```
-
-Or list only the scrapers you want:
+Limit which scrapers `catch-up` runs in [`scrapers.toml`](scrapers.toml):
 
 ```toml
 [scrapers.catch_up]
 providers = ["hkcert", "cve", "cnvd"]
 ```
 
-Available provider keys: `avd`, `cisco`, `cnnvd`, `cnvd`, `cve`, `github_advisory`,
-`govcert`, `hikvision`, `hkcert`, `huawei_sa`, `infosec`, `juniper`, `msrc`, `paloalto`,
-`qianxin`, `ransomwarelive`, `splunk`, `zeroday`.
-
-## Usage
-
-Catch up every provider: scrape newest-first from each collection and sync records
-whose normalized `updated_time` is today or newer, using the Asia/Hong_Kong calendar
-day (`00:00:00` local time). Existing records inside that today window are
-overwritten so source-side updates are refreshed even when IDs already exist.
-The scraper stops a provider when a fetched page has parseable timestamps and all
-records on that page are older than today. CVE catch-up uses the same today window:
-it filters the CVEProject delta log to entries updated today, then respects `--limit`.
+Other commands:
 
 ```bash
-vuln-scrape catch-up
-vuln-scrape catch-up --batch-size 5 --limit 200 --max-runs-per-provider 50
+vuln-scrape review
+vuln-scrape migrate-mongo --target-version 2 --dry-run
 ```
-
-`--limit` caps total today-window records per provider. `--batch-size` is retained
-for CLI compatibility but timestamp catch-up runs once per provider.
-
-Run one scraper once, for example AVD (browser extra recommended) or CNVD (requires the `cnvd` extra):
-
-```bash
-pip install -e '.[browser]'
-vuln-scrape run avd --limit 100
-
-pip install -e '.[cnvd]'
-vuln-scrape run cnvd --limit 100
-```
-
-## Document Shape
-
-See [`database.md`](database.md) for the canonical MongoDB layout, classification v2 shape, indexes, and migration command.
-
-## Development
-
-Scrapers live under:
-
-```text
-vuln_scraper/scrapers/
-  __init__.py
-  avd/
-  cisco/
-  cnnvd/
-  cve/
-  govcert/
-  github_advisory/
-  hikvision/
-  hkcert/
-  huawei_sa/
-  infosec/
-  juniper/
-  msrc/
-  cnvd/
-  qianxin/
-  ransomwarelive/
-  splunk/
-  zeroday/
-```
-
-Each scraper owns its URL config, provider, and parsers.
-
-Run tests:
-
-```bash
-PYTHONPATH=. pytest -q
-```
-
-## Operational Notes
-
-These scrapers are for personal or research use. Keep conservative request pacing
-and stop if a site returns rate-limit or challenge responses persistently. HKCERT
-bulletin pages are public,
-server-rendered HTML at [Security Bulletin](https://www.hkcert.org/security-bulletin).
-zero-day.cz records are scraped from [Zero-day Vulnerability Database](https://www.zero-day.cz/database/);
-Mongo sync treats that feed as newest-first and stops once it reaches a stored
-record to avoid historical backfill.
-GovCERT.HK security alerts are scraped from [Security Alerts](https://www.govcert.gov.hk/en/alerts.php)
-and use the same newest-first sync stop behavior. Huawei SA advisories are
-retrieved from Huawei's enterprise security advisory JSON endpoint with a POST
-payload equivalent to the standalone Huawei bulletin script.
-GitHub reviewed advisories are ingested from the
-[Global Security Advisories REST API](https://docs.github.com/en/rest/security-advisories/global-advisories)
-using `type=reviewed`, `sort=published`, `direction=desc`, and `per_page=100`.
-Set `GITHUB_TOKEN` to send a bearer token for higher GitHub API rate limits;
-without it, the scraper uses public unauthenticated access. Mongo sync stops at
-the first stored advisory.
-InfoSec security alerts are scraped from [Security Alerts and Advisories](https://www.infosec.gov.hk/en/news-events/security-alerts-and-advisories)
-year pages and use linked GovCERT detail pages for full advisory content.
-Palo Alto Networks advisories are scraped from [Security Advisories](https://security.paloaltonetworks.com/)
-and use the same newest-first sync stop behavior.
-Qianxin risk notices are ingested from the JSON endpoints behind
-[漏洞通告](https://ti.qianxin.com/vulnerability/notice-list): `article-notice`
-for newest-first lists and `article-detail` for article HTML. Mongo sync stops
-at the first stored notice.
-Splunk advisories are scraped from [Splunk Security Advisories](https://advisory.splunk.com/).
-The homepage advisory table is newest-first, and detail pages under
-`/advisories/SVD-...` provide CVE, CVSS, CWE, package remediation, product
-status, solution, and severity fields. Mongo sync stops once it reaches a stored
-Splunk advisory.
-Hikvision advisories are scraped from [Security Advisory](https://www.hikvision.com/hk/support/cybersecurity/security-advisory/).
-The public page may return a Tencent EdgeOne JavaScript challenge, so this
-provider uses browser rendering by default and stops Mongo sync at the first
-stored advisory.
-Aliyun AVD high-risk advisories are scraped from
-[AVD 高危漏洞](https://avd.aliyun.com/high-risk/list). Install `pip install -e '.[avd]'`.
-Each list and detail fetch runs the sigchl inline script in quickjs, follows the
-redirect URL (`timestamp__1384=...`), and parses that HTML. Detail pages use the
-`tbody` row link href when present. Playwright remains a fallback when redirect
-clearance fails. Optional env cookie: `AVD_COOKIE` / `AVD_COOKIES` /
-`ALIYUN_AVD_COOKIE`.
-CNNVD vulnerabilities are ingested from the JSON endpoints behind
-[漏洞信息](https://www.cnnvd.org.cn/home/loophole): `homePage/cnnvdVulList` for
-newest-first lists and `cnnvdVul/getCnnnvdDetailOnDatasource` for details.
-Detail requests use the list record ID, CNNVD code, CVE code, and vulnerability
-type, with reduced compatibility payloads as fallbacks. The runner consumes
-every ID from each fetched list page before requesting the next page.
-Mongo sync stops at the first stored vulnerability.
-CNVD flaws are scraped from [漏洞列表](https://www.cnvd.org.cn/flaw/list) over HTTP.
-Install the CNVD gate dependencies with `pip install -e '.[cnvd]'`. On each run
-the scraper refreshes session cookies in memory (Jiasule clearance + captcha OCR)
-and passes them to httpx—no cookie JSON file is required. List and detail pages
-are synced into the `cnvd` MongoDB collection; Mongo sync stops at the first
-stored flaw. To authenticate and scrape in one step, run
-`python vuln_scraper/scrapers/cnvd/crawler_ng/getter.py --data-dir data --limit 100`.
-Juniper advisories are ingested from the Coveo search API behind the
-[Support Portal security advisory search](https://supportportal.juniper.net/s/global-search/%40uri#f-sf_primarysourcename=Knowledge&f-sf_articletype=Security%20Advisories).
-List and detail requests POST to Coveo; HTML parsers remain as a fallback when
-JSON is unavailable. Mongo sync stops at the first stored advisory.
-MSRC vulnerabilities are ingested from the
-[Microsoft Security Response Center update guide](https://msrc.microsoft.com/update-guide/vulnerability)
-through the CVRF API. The scraper lists monthly updates from `/Updates`, fetches
-each `/cvrf/{id}` document as JSON, and stores one MongoDB record per CVE.
-Ransomware.live victims are ingested from the
-[API PRO](https://api-pro.ransomware.live/) `/victims/recent` endpoint. Set
-`RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY`; the scraper sends it as
-`X-API-KEY`. These can be exported in the shell or placed in a project `.env`
-file. The API PRO
-documentation currently lists a 500,000 requests/month quota per key. Mongo sync
-treats this feed as newest-first and stops once it reaches a stored victim.
-
-The CVE scraper uses the
-[CVEProject cvelistV5 delta log](https://github.com/CVEProject/cvelistV5).
-Each `run` reads the delta log newest-first, skips CVEs already stored in MongoDB,
-and fetches up to the requested limit of new records from GitHub. Mongo sync uses
-the same conflict handling as other providers. During `catch-up`, CVE filters the
-delta log to entries updated today (Asia/Hong_Kong), respects `--limit`, and
-overwrites matching records like other providers.
-
-The Cisco scraper uses the [PSIRT OpenVuln API](https://developer.cisco.com/docs/psirt/).
-Cisco requires an access token for every OpenVuln API request. Set
-`CISCO_OPENVULN_TOKEN` to use an existing Bearer token, or set
-`CISCO_OPENVULN_CLIENT_ID` (or `CISCO_OPENVULN_CLIENT_KEY`) and
-`CISCO_OPENVULN_CLIENT_SECRET` so the scraper can obtain and cache an OAuth
-client-credentials token from Cisco. The shorter `CISCO_CLIENT_ID`,
-`CISCO_CLIENT_KEY`, and `CISCO_CLIENT_SECRET` names are also accepted. These can
-be exported in the shell or placed in a project `.env` file (loaded automatically
-when you run `vuln-scrape`).
