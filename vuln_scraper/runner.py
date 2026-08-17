@@ -888,6 +888,9 @@ class ScraperRunner:
                 result = await self._fetch_provider_html(client, url)
                 raw_detail_content = result.html
                 detail = self.provider.parse_detail(result.html).to_dict()
+            enrich_detail = getattr(self.provider, "enrich_detail", None)
+            if enrich_detail is not None:
+                detail = await enrich_detail(client, detail, entry=entry, detail_url=url)
             finalize_detail = getattr(self.provider, "finalize_detail", None)
             if finalize_detail is not None:
                 detail = finalize_detail(detail, entry=entry, detail_url=url)

@@ -85,6 +85,14 @@ PROVIDER_SCHEMAS: dict[str, ProviderSchema] = {
         updated_fields=("last_modified",),
         volatile_fields=("vuln_status", "affected_products"),
     ),
+    "fortiguard": ProviderSchema(
+        identity_fields=("advisory_id",),
+        title_fields=("title",),
+        cve_fields=("cve_ids",),
+        severity_fields=("severity",),
+        published_fields=("published_date",),
+        source_fields=("csaf_url", "cvrf_url"),
+    ),
     "github_advisory": ProviderSchema(
         identity_fields=("ghsa_id",),
         cve_fields=("cve_id", "cve_ids"),

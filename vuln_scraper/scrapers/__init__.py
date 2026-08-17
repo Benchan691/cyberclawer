@@ -8,6 +8,7 @@ from vuln_scraper.scrapers.cisco.provider import CiscoAuthError, CiscoProvider
 from vuln_scraper.scrapers.cnnvd.provider import CNNVDProvider
 from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
 from vuln_scraper.scrapers.cve.provider import CVEProvider
+from vuln_scraper.scrapers.fortiguard.provider import FortiguardProvider
 from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
 from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.hikvision.provider import HikvisionProvider
@@ -51,6 +52,7 @@ PROVIDERS: dict[str, type[ScraperProvider]] = {
     "github_advisory": GitHubAdvisoryProvider,
     "huawei_sa": HuaweiSAProvider,
     "paloalto": PaloAltoProvider,
+    "fortiguard": FortiguardProvider,
     "qianxin": QianxinProvider,
     "ransomwarelive": RansomwareLiveProvider,
     "infosec": InfoSecProvider,

@@ -32,6 +32,7 @@ Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONG
 | `cnnvd` | `cnnvd` | JSON API |
 | `cnvd` | `cnvd` | Needs `.[cnvd]` |
 | `cve` | `cve` | CVEProject cvelistV5 |
+| `fortiguard` | `fortiguard` | Fortinet PSIRT HTML; downloads CSAF JSON from each advisory |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
 | `govcert` | `govcert` | HTML |
 | `hikvision` | `hikvision` | Needs `.[browser]` |

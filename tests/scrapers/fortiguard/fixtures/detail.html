@@ -1,0 +1,130 @@
+<!DOCTYPE html><html><body>
+<h1 class="title" style="word-break: unset !important;">FGFM Authentication Weakening via CLI Configuration</h1>
+<section class="content">
+<div class="container-xxl">
+<div class="row">
+<div class="col-lg-9 order-lg-1 order-sm-2 order-2">
+<div class="detail-item" lang="en">
+<h3>Summary</h3>
+<p>An Authentication Bypass Using an Alternate Path or Channel [CWE-288] vulnerability in FortiManager and FortiManager Cloud may allow a remote unauthenticated attacker to impersonate any FortiGate managed by the FortiManager with a specific CLI option set via crafted FGFM requests if the attacker has a valid certificate.</p>
+</div>
+<div class="detail-item" lang="en">
+<div class="table-responsive">
+<table class="table table-borderless table-striped table-dark">
+<thead>
+<tr>
+<th>Version</th>
+<th>Affected</th>
+<th>Solution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FortiManager 8.0</td>
+<td>Not affected</td>
+<td>Not Applicable</td>
+</tr>
+<tr>
+<td>FortiManager 7.6</td>
+<td>7.6.1</td>
+<td>Upgrade to 7.6.2 or above</td>
+</tr>
+<tr>
+<td>FortiManager 7.4</td>
+<td>7.4.3 through 7.4.5</td>
+<td>Upgrade to 7.4.6 or above</td>
+</tr>
+<tr>
+<td>FortiManager 7.2</td>
+<td>7.2.5 through 7.2.9</td>
+<td>Upgrade to 7.2.10 or above</td>
+</tr>
+<tr>
+<td>FortiManager Cloud 7.6</td>
+<td>7.6.1</td>
+<td>Upgrade to 7.6.2 or above</td>
+</tr>
+<tr>
+<td>FortiManager Cloud 7.4</td>
+<td>7.4.3 through 7.4.5</td>
+<td>Upgrade to 7.4.6 or above</td>
+</tr>
+<tr>
+<td>FortiManager Cloud 7.2</td>
+<td>7.2.5 through 7.2.9</td>
+<td>Upgrade to 7.2.10 or above</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="detail-item" lang="en">
+<p>As workaround <code>fgfm-peercert-withoutsn</code> should be disabled :</p><p>config system global<br/>  set fgfm-peercert-withoutsn disable<br/>end</p>
+</div>
+<div class="detail-item" lang="en">
+<h3>Timeline</h3>
+<p>2026-08-12: Initial publication</p>
+</div>
+</div>
+<div class="col-lg-3 order-lg-2 order-sm-1 order-1">
+<div class="sidebar">
+<table class="table table-responsive table-borderless meta" lang="en">
+<tr>
+<td>IR Number</td>
+<td>FG-IR-26-160</td>
+</tr>
+<tr>
+<td>Published Date</td>
+<td>Aug 12, 2026</td>
+</tr>
+<tr>
+<td>Component</td>
+<td>OTHERS</td>
+</tr>
+<tr>
+<td>Severity</td>
+<td> <i aria-hidden="true" class="fa fa-exclamation-triangle" style="color:#FF5733;font-size:15px; vertical-align: middle;"></i>
+         High
+</td>
+</tr>
+<tr>
+<td>Discovered</td>
+<td>Internal</td>
+</tr>
+<tr>
+<td>Attack Type</td>
+<td>Unauthenticated</td>
+</tr>
+<tr>
+<td>Known Exploited</td>
+<td>No</td>
+</tr>
+<tr>
+<td>CVSSv3 Score</td>
+<td><a href=" https://nvd.nist.gov/vuln-metrics/cvss/v3-calculator?vector=AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P/RL:O/RC:C&amp;version=3.1" target="_blank">7.3</a>
+</td>
+</tr>
+<tr>
+<td>Impact</td>
+<td>Improper access control</td>
+</tr>
+<tr>
+<td>CVE ID</td>
+<td>
+<button class="fg-green cve-button" data-bs-content="Loading..." data-bs-custom-class="cve-popover" data-bs-placement="auto" data-bs-toggle="cve-popover" data-bs-trigger="click" data-cveid="CVE-2026-70468" data-cvelink="https://www.cve.org/CVERecord?id=CVE-2026-70468" rel="nofollow noopener noreferrer" target="_blank" type="button">CVE-2026-70468</button>
+</td>
+</tr>
+<tr>
+<td>Download</td>
+<td>
+<p><a href="/psirt/cvrf/FG-IR-26-160"><i aria-hidden="true" class="fa fa-download"></i> CVRF</a></p>
+<p><a href="/psirt/csaf/FG-IR-26-160?csaf_url=https://filestore.fortinet.com/fortiguard/psirt/csaf_fgfm-authentication-weakening-via-cli-configuration_fg-ir-26-160.json"><i aria-hidden="true" class="fa fa-download"></i> CSAF</a></p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+</div>
+</section>
+</body></html>
