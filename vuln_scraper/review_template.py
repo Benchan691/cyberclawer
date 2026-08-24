@@ -126,6 +126,26 @@ def _cisco(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _fortiguard(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    affected = _join_dicts(
+        detail.get("affected_products"),
+        lambda item: _parts(item.get("version"), item.get("affected")),
+    )
+    recommendation = _join_dicts(
+        detail.get("affected_products"),
+        lambda item: _parts(item.get("solution")),
+    )
+    return _base(
+        document,
+        description=detail.get("summary"),
+        impacts=detail.get("severity"),
+        affected=affected,
+        cve=_document_cve(document) or _join(detail.get("cve_ids")),
+        recommendation=recommendation,
+        related_link=_join([detail.get("cvrf_url"), detail.get("csaf_url")]),
+    )
+
+
 def _github_advisory(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     vulnerabilities = _dicts(detail.get("vulnerabilities"))
     affected = _join(
@@ -582,6 +602,7 @@ _MAPPERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] 
     "hkcert": _hkcert,
     "cve": _cve,
     "cisco": _cisco,
+    "fortiguard": _fortiguard,
     "github_advisory": _github_advisory,
     "zeroday": _zeroday,
     "govcert": _govcert,
@@ -739,6 +760,7 @@ def _mongo_description(provider: str, detail: str) -> dict[str, Any]:
         "hkcert": [f"{detail}.summary", f"{detail}.intro"],
         "cve": [_mjoin_values(f"{detail}.descriptions", "value")],
         "cisco": [_mstrip_cisco_paragraph_tags(f"{detail}.summary")],
+        "fortiguard": [f"{detail}.summary"],
         "github_advisory": [f"{detail}.description", f"{detail}.summary"],
         "zeroday": [f"{detail}.description"],
         "govcert": [f"{detail}.description"],
@@ -829,6 +851,11 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
         )
     if provider == "cisco":
         return _mjoin(f"{detail}.product_names")
+    if provider == "fortiguard":
+        return _mjoin_mapped(
+            f"{detail}.affected_products",
+            _mconcat_parts(["$$item.version", "$$item.affected"]),
+        )
     if provider == "github_advisory":
         return _mjoin_mapped(
             f"{detail}.vulnerabilities",
@@ -932,6 +959,9 @@ def _mongo_recommendation(provider: str, detail: str) -> dict[str, Any]:
     sources: dict[str, list[Any]] = {
         "avd": [f"{detail}.solution"],
         "hkcert": [f"{detail}.solutions"],
+        "fortiguard": [
+            _mjoin_mapped(f"{detail}.affected_products", _mstr("$$item.solution"))
+        ],
         "github_advisory": [
             _mjoin_mapped(f"{detail}.vulnerabilities", _mstr("$$item.first_patched_version"))
         ],
@@ -958,6 +988,8 @@ def _mongo_related_link(provider: str, detail: str) -> dict[str, Any]:
         return _mjoin_many(
             [f"{detail}.publication_url", f"{detail}.cvrf_url", f"{detail}.csaf_url"]
         )
+    if provider == "fortiguard":
+        return _mjoin_many([f"{detail}.cvrf_url", f"{detail}.csaf_url"])
     if provider == "ransomwarelive":
         return _mjoin_many(
             [f"{detail}.website", f"{detail}.permalink", f"{detail}.screenshot"]

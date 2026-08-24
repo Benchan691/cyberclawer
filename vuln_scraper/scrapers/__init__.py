@@ -22,6 +22,7 @@ from vuln_scraper.scrapers.qianxin.provider import QianxinProvider
 from vuln_scraper.scrapers.ransomwarelive.provider import RansomwareLiveProvider
 from vuln_scraper.scrapers.splunk.provider import SplunkProvider
 from vuln_scraper.scrapers.zeroday.provider import ZeroDayProvider
+from vuln_scraper.scrapers.zimbra.provider import ZimbraProvider
 
 
 class ScraperProvider(Protocol):
@@ -62,6 +63,7 @@ PROVIDERS: dict[str, type[ScraperProvider]] = {
     "cnvd": CNVDProvider,
     "juniper": JuniperProvider,
     "msrc": MSRCProvider,
+    "zimbra": ZimbraProvider,
 }
 
 

@@ -46,6 +46,7 @@ Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONG
 | `ransomwarelive` | `ransomwarelive` | Needs `RANSOMWARE_LIVE_API_KEY` or `RANSOM_API_KEY` |
 | `splunk` | `splunk` | HTML |
 | `zeroday` | `zeroday` | HTML |
+| `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
 ## MongoDB layout
 

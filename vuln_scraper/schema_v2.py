@@ -182,6 +182,12 @@ PROVIDER_SCHEMAS: dict[str, ProviderSchema] = {
         published_fields=("disclosed_date",),
         updated_fields=("patched_date",),
     ),
+    "zimbra": ProviderSchema(
+        identity_fields=("version",),
+        title_fields=("title",),
+        published_fields=("release_date",),
+        source_fields=("reference_links",),
+    ),
 }
 
 

@@ -8,7 +8,7 @@
 #
 # Available provider keys:
 # avd, cisco, cnnvd, cnvd, cve, github_advisory, govcert, hikvision, hkcert,
-# huawei_sa, infosec, juniper, msrc, paloalto, qianxin, ransomwarelive, splunk, zeroday
+# huawei_sa, infosec, juniper, msrc, paloalto, qianxin, ransomwarelive, splunk, zeroday, zimbra
 
 [scrapers.catch_up]
 providers = ["all"]

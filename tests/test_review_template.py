@@ -375,6 +375,21 @@ def test_providers_without_normalized_products_have_blank_affected(provider: str
     ("provider", "detail", "severity", "affected"),
     [
         ("cisco", {"sir": "Critical", "product_names": ["IOS XE"]}, "Critical", "IOS XE"),
+        (
+            "fortiguard",
+            {
+                "severity": "High",
+                "affected_products": [
+                    {
+                        "version": "FortiWeb 8.0",
+                        "affected": "8.0.0 through 8.0.2",
+                        "solution": "Upgrade to 8.0.3 or above",
+                    },
+                ],
+            },
+            "High",
+            "FortiWeb 8.0 8.0.0 through 8.0.2",
+        ),
         ("huawei_sa", {"severity": "High", "vul": [{"cveId": "CVE-1"}]}, "High", ""),
         ("paloalto", {"severity": "HIGH", "products": ["PAN-OS"]}, "High", "PAN-OS"),
         ("qianxin", {"level": "Critical", "description": {}}, "Critical", ""),
@@ -428,6 +443,7 @@ def test_provider_severity_and_affected_sources(
         "hkcert",
         "cve",
         "cisco",
+        "fortiguard",
         "github_advisory",
         "zeroday",
         "govcert",
