@@ -37,6 +37,7 @@ Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONG
 | `govcert` | `govcert` | HTML |
 | `hikvision` | `hikvision` | Needs `.[browser]` |
 | `hkcert` | `hkcert` | HTML |
+| `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
 | `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
 | `infosec` | `infosec` | HTML |
 | `juniper` | `juniper` | Coveo JSON API |
@@ -47,6 +48,8 @@ Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONG
 | `splunk` | `splunk` | HTML |
 | `zeroday` | `zeroday` | HTML |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
+
+The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.com/hpesc/public/api/document/sec_bull_rss_feed) for the latest 50 Critical alerts, then fetches each bulletin from the [HPE document API](https://support.hpe.com/hpesc/public/api/document). It uses ordinary HTTP requests only; the original `docDisplay` URL is retained in each bulletin detail.
 
 ## MongoDB layout
 

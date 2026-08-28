@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+  <head>
+    <title>HPESBNW05119 rev.1 - Multiple Vulnerabilities in HPE Aruba Networking Private 5G Core</title>
+  </head>
+  <body>
+    <div id="docDisplayForSearch">
+      <div class="title">
+        <h1>HPESBNW05119 rev.1 - Multiple Vulnerabilities in HPE Aruba Networking Private 5G Core</h1>
+      </div>
+      <span class="metadata-span">Document Subtype: Security Bulletin</span>
+      <span class="metadata-span">Document ID: hpesbnw05119en_us</span>
+      <span class="metadata-span">Last Updated: 2026-08-07</span>
+      <span class="metadata-span">Release Date: 2026-08-07</span>
+      <span class="metadata-span">Document Version: 1</span>
+      <div class="potential_security_impact">
+        <p><b>Potential Security Impact:</b> Remote access restriction bypass</p>
+      </div>
+      <div class="source">
+        <p><b>Source:</b> Hewlett Packard Enterprise, HPE Product Security Response Team</p>
+      </div>
+      <div class="vulnerability.summary">
+        <h2>VULNERABILITY SUMMARY</h2>
+        <p><b>NOTE:</b> A signed text copy is available at <a href="https://csaf.example.test/hpe.txt">CSAF text</a>.</p>
+        <p><b>Summary</b></p>
+        <p>HPE has released a patch for two security vulnerabilities.</p>
+        <p><b>Affected Products</b></p>
+        <p>HPE Private 5G Core 1.26.1.2 and below</p>
+        <p><b>Unaffected Products</b></p>
+        <p>HPE Private 5G Core 1.26.1.3 and above</p>
+        <p><b>Details</b></p>
+        <p><b>Authentication bypass (CVE-2026-54763)</b></p>
+        <p>Internal Reference: VULN-715<br />Severity: Critical<br />CVSS v3.1 Base Score: 10.0<br />CVSS v3.1 Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N</p>
+        <p><b>Privilege escalation (CVE-2026-33377)</b></p>
+        <p>Internal Reference: VULN-716<br />Severity: High<br />CVSS v3.1 Base Score: 7.1<br />CVSS v3.1 Vector: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N</p>
+        <p><b>Workaround</b></p>
+        <p>Restrict management interfaces to trusted networks.</p>
+        <p><b>Exploitation and Public Discussion</b></p>
+        <p>HPE is aware of public discussion of <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-54763">CVE-2026-54763</a>.</p>
+      </div>
+      <div class="reference.number">
+        <div class="para"><b>References:</b><ul><li>CVE-2026-54763</li><li>CVE-2026-33377</li></ul></div>
+      </div>
+      <div class="supported.software.versions">
+        <h2>SUPPORTED SOFTWARE VERSIONS*: ONLY impacted versions are listed.</h2>
+        <p>HPE Private 5G Core 1.26.1.2 and prior</p>
+      </div>
+      <div class="background">
+        <h2>BACKGROUND</h2>
+      </div>
+      <div class="background.text">
+        <div class="para">HPE calculates CVSS using CVSS Version 3.1.
+          <table class="ods_si_table_bordered">
+            <thead><tr><th>Reference</th><th>V3 Vector</th><th>V3 Base Score</th></tr></thead>
+            <tbody>
+              <tr><td>CVE-2026-33377</td><td>CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N</td><td>7.1</td></tr>
+              <tr><td>CVE-2026-54763</td><td>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N</td><td>10.0</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="resolution">
+        <h2>RESOLUTION</h2>
+        <p>Upgrade HPE Private 5G Core to version 1.26.1.3 or later.</p>
+        <p>Software is available from the <a href="https://myenterpriselicense.hpe.com/cwp-ui/software">HPE Software Center</a>.</p>
+      </div>
+      <div class="resolution">
+        <p><b>HISTORY</b><br />Version:1 (rev.1) - 7 August 2026 Initial release</p>
+      </div>
+    </div>
+  </body>
+</html>

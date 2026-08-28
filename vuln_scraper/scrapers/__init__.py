@@ -13,6 +13,7 @@ from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
 from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.hikvision.provider import HikvisionProvider
 from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
+from vuln_scraper.scrapers.hpe.provider import HPEProvider
 from vuln_scraper.scrapers.huawei_sa.provider import HuaweiSAProvider
 from vuln_scraper.scrapers.infosec.provider import InfoSecProvider
 from vuln_scraper.scrapers.juniper.provider import JuniperProvider
@@ -59,6 +60,7 @@ PROVIDERS: dict[str, type[ScraperProvider]] = {
     "infosec": InfoSecProvider,
     "splunk": SplunkProvider,
     "hikvision": HikvisionProvider,
+    "hpe": HPEProvider,
     "cnnvd": CNNVDProvider,
     "cnvd": CNVDProvider,
     "juniper": JuniperProvider,
