@@ -121,6 +121,14 @@ PROVIDER_SCHEMAS: dict[str, ProviderSchema] = {
         updated_fields=("last_update_date",),
         volatile_fields=("views",),
     ),
+    "hpe": ProviderSchema(
+        identity_fields=("doc_id",),
+        title_fields=("title",),
+        cve_fields=("cve_ids",),
+        severity_fields=("severity",),
+        published_fields=("release_date", "published_date"),
+        updated_fields=("last_updated",),
+    ),
     "huawei_sa": ProviderSchema(
         identity_fields=("sasnNo", "sasnId"),
         title_fields=("title",),

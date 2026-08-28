@@ -4,6 +4,7 @@ from pathlib import Path
 from vuln_scraper.client import FetchResult
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.models import ListEntry, VulnerabilityId
+from vuln_scraper.mongo import build_mongo_document
 from vuln_scraper.runner import ScraperRunner
 from vuln_scraper.scrapers import HPEProvider, get_provider, provider_keys
 from vuln_scraper.scrapers.hpe.config import DOCUMENT_API_URL, LIST_URL, SOURCE_URL
@@ -55,6 +56,33 @@ def test_hpe_provider_detail_url_for_entry_uses_doc_id_not_doc_display_link() ->
     )
 
     assert provider.detail_url_for_entry(entry) == f"{DOCUMENT_API_URL}/hpesbnw05119en_us"
+
+
+def test_hpe_record_is_accepted_by_schema_v2() -> None:
+    record = {
+        "type": "hpe",
+        "code": "hpesbnw05119en_us",
+        "title": "HPE bulletin",
+        "status": "Critical",
+        "disclosure_date": "2026-08-07",
+        "details": {
+            "hpe": {
+                "doc_id": "hpesbnw05119en_us",
+                "title": "HPE bulletin",
+                "release_date": "2026-08-07",
+                "severity": "Critical",
+                "cve_ids": ["CVE-2026-54763", "CVE-2026-33377"],
+            }
+        },
+    }
+
+    document = build_mongo_document(
+        record,
+        {"scraped_at": "2026-08-28T09:43:19Z"},
+    )
+
+    assert document["_id"] == "hpe:hpesbnw05119en_us"
+    assert document["cve_ids"] == ["CVE-2026-54763", "CVE-2026-33377"]
 
 
 class _FakeHPEClient:
