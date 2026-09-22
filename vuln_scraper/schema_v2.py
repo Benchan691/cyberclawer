@@ -269,6 +269,10 @@ def build_v2_document(record: dict[str, Any], output: dict[str, Any]) -> dict[st
         document["updated_at"] = updated_at
 
     source = _clean_source(record.get("source") or output.get("source"))
+    # A unified collection needs a stable discriminator because `_id` remains
+    # provider-prefixed for collision-free upserts.  Keep the source URLs in
+    # the same object so callers can still link back to the advisory.
+    source["provider"] = provider
     if source:
         document["source"] = source
 
@@ -280,8 +284,13 @@ def build_v2_document(record: dict[str, Any], output: dict[str, Any]) -> dict[st
 
 def convert_existing_document(document: dict[str, Any], provider: str) -> dict[str, Any]:
     if document.get("schema_version") == SCHEMA_VERSION:
-        validate_v2_document(document, provider)
-        return document
+        converted = dict(document)
+        source = dict(converted.get("source") or {})
+        actual_provider = str(source.get("provider") or provider).strip().lower()
+        source["provider"] = actual_provider
+        converted["source"] = source
+        validate_v2_document(converted, "news" if provider == "news" else actual_provider)
+        return converted
     legacy = dict(document)
     legacy["type"] = provider
     if not legacy.get("code") and isinstance(legacy.get("_id"), str):
@@ -303,6 +312,16 @@ def convert_existing_document(document: dict[str, Any], provider: str) -> dict[s
 
 
 def validate_v2_document(document: dict[str, Any], provider: str) -> None:
+    source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    stored_provider = str(source.get("provider") or "").strip().lower()
+    if stored_provider not in PROVIDER_SCHEMAS:
+        raise ValueError("source.provider must be a supported provider")
+    if provider == "news":
+        provider = stored_provider
+    elif stored_provider != provider:
+        raise ValueError(
+            f"source.provider {stored_provider!r} does not match provider {provider!r}"
+        )
     if provider not in PROVIDER_SCHEMAS:
         raise ValueError(f"unknown provider: {provider}")
     if document.get("schema_version") != SCHEMA_VERSION:
@@ -317,9 +336,9 @@ def validate_v2_document(document: dict[str, Any], provider: str) -> None:
     if not isinstance(document.get("details"), dict):
         raise ValueError("details must be an object")
     if provider != "cve" and "classification" in document:
-        raise ValueError("classification is only valid in the cve collection")
+        raise ValueError("classification is only valid for the cve provider")
     if provider == "cve" and "cve_ids" in document:
-        raise ValueError("cve collection must derive its CVE identifier from code")
+        raise ValueError("cve provider documents must derive their CVE identifier from code")
     cve_ids = document.get("cve_ids", [])
     if len(cve_ids) != len(set(cve_ids)):
         raise ValueError("cve_ids must contain unique values")
@@ -347,8 +366,13 @@ def mongo_json_schema(provider: str) -> dict[str, Any]:
         "observed_at": {"bsonType": "date"},
         "source": {
             "bsonType": "object",
+            "required": ["provider"],
             "additionalProperties": False,
             "properties": {
+                "provider": {
+                    "bsonType": "string",
+                    "enum": sorted(PROVIDER_SCHEMAS),
+                },
                 "url": {"bsonType": "string", "minLength": 1},
                 "detail_url": {"bsonType": "string", "minLength": 1},
             },
@@ -375,9 +399,34 @@ def mongo_json_schema(provider: str) -> dict[str, Any]:
             "uniqueItems": True,
             "items": {"bsonType": "string", "pattern": r"^CVE-\d{4}-\d{4,}$"},
         }
+    if provider == "news":
+        # The unified collection contains both CVE and non-CVE documents, so
+        # the provider-specific optional fields must be allowed together.
+        properties["classification"] = {
+            "bsonType": "object",
+            "properties": {
+                "status": {"bsonType": "string"},
+                "queued_at": {"bsonType": "date"},
+                "processing_started_at": {"bsonType": "date"},
+                "updated_at": {"bsonType": "date"},
+            },
+        }
+        properties["cve_ids"] = {
+            "bsonType": "array",
+            "uniqueItems": True,
+            "items": {"bsonType": "string", "pattern": r"^CVE-\d{4}-\d{4,}$"},
+        }
     return {
         "bsonType": "object",
-        "required": ["_id", "schema_version", "code", "title", "observed_at", "details"],
+        "required": [
+            "_id",
+            "schema_version",
+            "code",
+            "title",
+            "observed_at",
+            "source",
+            "details",
+        ],
         "additionalProperties": False,
         "properties": properties,
     }
@@ -406,6 +455,16 @@ def ensure_v2_indexes(collection: Any, provider: str, *, drop_legacy: bool = Fal
         [("observed_at", -1), ("_id", -1)],
         name="observed_desc",
     )
+    if provider == "news":
+        collection.create_index(
+            [("source.provider", 1), ("observed_at", -1)],
+            name="provider_observed",
+        )
+        collection.create_index(
+            [("source.provider", 1), ("severity", 1), ("observed_at", -1)],
+            name="provider_severity_observed",
+            partialFilterExpression={"severity": {"$exists": True}},
+        )
     if provider != "cve":
         collection.create_index(
             [("cve_ids", 1)],
@@ -422,7 +481,7 @@ def ensure_v2_indexes(collection: Any, provider: str, *, drop_legacy: bool = Fal
         name="published_desc",
         partialFilterExpression={"published_at": {"$exists": True}},
     )
-    if provider == "cve":
+    if provider in {"cve", "news"}:
         collection.create_index(
             [("classification.status", 1)],
             name="classification_status",

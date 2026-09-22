@@ -2,6 +2,7 @@ import asyncio
 import builtins
 import copy
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -2800,9 +2801,27 @@ class FakeMongoCollection:
 
     def find(self, query: dict | None = None, projection: dict | None = None):
         query = query or {}
-        if query:
-            return []
-        return [copy.deepcopy(document) for document in self.documents.values()]
+        documents = self.documents.values()
+        if "$or" in query:
+            conditions = query["$or"]
+
+            def matches(document: dict) -> bool:
+                source = document.get("source") if isinstance(document.get("source"), dict) else {}
+                for condition in conditions:
+                    if (
+                        "source.provider" in condition
+                        and source.get("provider") == condition["source.provider"]
+                    ):
+                        return True
+                    regex = (condition.get("_id") or {}).get("$regex")
+                    if regex and re.search(regex, str(document.get("_id") or "")):
+                        return True
+                return False
+
+            documents = [document for document in documents if matches(document)]
+        elif query:
+            documents = []
+        return [copy.deepcopy(document) for document in documents]
 
     def find_one(self, query: dict) -> dict | None:
         document = self.documents.get(query["_id"])

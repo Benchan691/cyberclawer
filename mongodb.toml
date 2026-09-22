@@ -4,30 +4,8 @@
 [mongodb]
 uri = "mongodb://localhost:27017/myDatabase"
 database = "vulnerabilities"
+collection = "news"
 
 # Conflict handling for existing type/code records in terminal scrape runs:
 # skip, or overwrite.
 conflict = "overwrite"
-
-[mongodb.collections]
-avd = "avd"
-cisco = "cisco"
-cnnvd = "cnnvd"
-cnvd = "cnvd"
-cve = "cve"
-fortiguard = "fortiguard"
-github_advisory = "github_advisory"
-govcert = "govcert"
-hikvision = "hikvision"
-hkcert = "hkcert"
-hpe = "hpe"
-huawei_sa = "huawei_sa"
-infosec = "infosec"
-juniper = "juniper"
-msrc = "msrc"
-paloalto = "paloalto"
-qianxin = "qianxin"
-ransomwarelive = "ransomwarelive"
-splunk = "splunk"
-zeroday = "zeroday"
-zimbra = "zimbra"

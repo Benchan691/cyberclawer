@@ -25,7 +25,7 @@ Point MongoDB at your cluster via `mongodb.toml` or env vars (`MONGO_URI`, `MONG
 
 ## Scrapers
 
-| Key | Collection | Notes |
+| Key | `source.provider` | Notes |
 | --- | --- | --- |
 | `avd` | `avd` | Needs `.[avd]`; browser optional |
 | `cisco` | `cisco` | Needs `CISCO_OPENVULN_TOKEN` or client id/secret |
@@ -53,21 +53,21 @@ The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.c
 
 ## MongoDB layout
 
-One database, one collection per scraper. Configure in [`mongodb.toml`](mongodb.toml):
+All scrapers write to one physical `news` collection. Every document records
+its origin in `source.provider`, for example `cve`, `hkcert`, or `hpe`.
+Configure the shared collection in [`mongodb.toml`](mongodb.toml):
 
 ```toml
 [mongodb]
 uri = "mongodb://localhost:27017"
 database = "vulnerabilities"
+collection = "news"
 conflict = "overwrite"
-
-[mongodb.collections]
-avd = "avd"
-cisco = "cisco"
-# ... one entry per scraper key
 ```
 
-Precedence: env vars (`MONGO_URI`, `MONGO_DB`) > `mongodb.toml` > defaults.
+Precedence: env vars (`MONGO_URI`, `MONGO_DB`, `MONGO_COLLECTION`) >
+`mongodb.toml` > defaults. Provider-specific collection tables from older
+releases are ignored for runtime writes.
 
 Document shape, indexes, and migration: see [`database.md`](database.md).
 
@@ -98,6 +98,11 @@ providers = ["hkcert", "cve", "cnvd"]
 Other commands:
 
 ```bash
-vuln-scrape review
-vuln-scrape migrate-mongo --target-version 2 --dry-run
+vuln-scrape unify-mongo --dry-run
+vuln-scrape unify-mongo
 ```
+
+`unify-mongo` builds and validates a shadow `news` collection before cutover.
+The old physical source collections are renamed to timestamped backups. For a
+deployment that used custom legacy collection names, repeat
+`--source-collection <name>` for each one. Review views are no longer created.

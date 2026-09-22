@@ -3,12 +3,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from vuln_scraper.config import DEFAULT_MONGO_CONFIG_FILE, mongo_collection_for_provider
-from vuln_scraper.scrapers import get_provider, provider_keys
 from vuln_scraper.severity import normalize_severity
 
 
@@ -31,7 +27,10 @@ _REVIEW_ARRAY_FIELDS = {"affected", "related_link"}
 
 
 def review_template_from_document(document: dict[str, Any]) -> dict[str, Any]:
-    provider = _text(document.get("type")).lower()
+    source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    provider = _text(source.get("provider")).lower()
+    if not provider:
+        provider = _text(document.get("type")).lower()
     if not provider:
         provider = _text(document.get("_id")).partition(":")[0].lower()
     detail = _detail(document, provider)
@@ -619,51 +618,6 @@ _MAPPERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] 
 }
 
 
-class ReviewViewError(RuntimeError):
-    """Raised when a review view cannot be refreshed safely."""
-
-
-def review_view_name(collection_name: str) -> str:
-    return f"{collection_name}_review"
-
-
-def ensure_review_view(database: Any, *, provider: str, collection_name: str) -> bool:
-    existing = {
-        item["name"]: item.get("type")
-        for item in database.list_collections(filter={})
-    }
-    if collection_name not in existing:
-        return False
-
-    view_name = review_view_name(collection_name)
-    view_type = existing.get(view_name)
-    if view_type and view_type != "view":
-        raise ReviewViewError(
-            f"refusing to replace physical collection {view_name!r} with a review view"
-        )
-    if view_type == "view":
-        database[view_name].drop()
-
-    database.command(
-        {
-            "create": view_name,
-            "viewOn": collection_name,
-            "pipeline": review_view_pipeline(provider),
-        }
-    )
-    _validate_review_view(database, view_name)
-    return True
-
-
-def _validate_review_view(database: Any, view_name: str, *, sample_size: int = 100) -> None:
-    for index, document in enumerate(database[view_name].find({}).limit(sample_size), start=1):
-        errors = _review_document_errors(document)
-        if errors:
-            raise ReviewViewError(
-                f"review view {view_name!r} has invalid document {index}: {', '.join(errors)}"
-            )
-
-
 def _review_document_errors(document: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     fields = tuple(document)
@@ -683,61 +637,6 @@ def _review_document_errors(document: dict[str, Any]) -> list[str]:
         elif not isinstance(value, str):
             errors.append(f"{field} must be a string")
     return errors
-
-
-@dataclass(slots=True)
-class ReviewViewRefreshResult:
-    provider: str
-    collection_name: str
-    view_name: str
-    refreshed: bool
-    message: str = ""
-
-
-def refresh_review_views(
-    database: Any,
-    *,
-    providers: list[str] | None = None,
-    mongo_config_file: Path | str | None = DEFAULT_MONGO_CONFIG_FILE,
-) -> list[ReviewViewRefreshResult]:
-    keys = list(providers) if providers else list(provider_keys())
-    results: list[ReviewViewRefreshResult] = []
-    for key in keys:
-        provider = get_provider(key)
-        collection_name = mongo_collection_for_provider(
-            key,
-            mongo_config_file,
-            default=provider.default_mongo_collection,
-        )
-        view_name = review_view_name(collection_name)
-        try:
-            refreshed = ensure_review_view(
-                database,
-                provider=key,
-                collection_name=collection_name,
-            )
-        except ReviewViewError as exc:
-            results.append(
-                ReviewViewRefreshResult(
-                    provider=key,
-                    collection_name=collection_name,
-                    view_name=view_name,
-                    refreshed=False,
-                    message=str(exc),
-                )
-            )
-            continue
-        message = "refreshed" if refreshed else "source collection missing"
-        results.append(
-            ReviewViewRefreshResult(
-                provider=key,
-                collection_name=collection_name,
-                view_name=view_name,
-                refreshed=refreshed,
-                message=message,
-            )
-        )
-    return results
 
 
 def review_view_pipeline(provider: str) -> list[dict[str, Any]]:

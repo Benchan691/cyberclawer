@@ -107,16 +107,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum time to wait for headed manual verification.",
     )
-    review_parser = subparsers.add_parser(
-        "review",
-        help="Create or refresh MongoDB review views for one or more providers.",
-    )
-    review_parser.add_argument(
-        "providers",
-        nargs="*",
-        help="Provider key(s) to refresh. Omit to refresh all configured providers.",
-    )
-
     migrate_parser = subparsers.add_parser(
         "migrate-mongo",
         help="Clean legacy MongoDB vulnerability documents.",
@@ -143,6 +133,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="MongoDB database name override.",
     )
 
+    unify_parser = subparsers.add_parser(
+        "unify-mongo",
+        help="Merge provider collections into the unified news collection and remove review views.",
+    )
+    unify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the merge without writing to MongoDB.",
+    )
+    unify_parser.add_argument(
+        "--collection",
+        default="news",
+        help="Target unified collection (default: news).",
+    )
+    unify_parser.add_argument(
+        "--database",
+        default=None,
+        help="MongoDB database name override.",
+    )
+    unify_parser.add_argument(
+        "--source-collection",
+        action="append",
+        dest="source_collections",
+        default=None,
+        help=(
+            "Legacy physical collection to merge. Repeat for custom collection "
+            "names; omit to discover standard provider collections."
+        ),
+    )
+
     cleanup_parser = subparsers.add_parser(
         "cleanup-mongo-backups",
         help="Remove accepted v2 migration backups after the retention period.",
@@ -166,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     reclassify_parser = subparsers.add_parser(
         "reclassify-cve",
-        help="Re-run CVE vendor/product classification for all cve collection documents.",
+        help="Re-run vendor/product classification for CVE documents in the unified collection.",
     )
     reclassify_parser.add_argument(
         "--dry-run",
@@ -278,61 +298,6 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
 
-    if args.command == "review":
-        from .mongo import create_mongo_client
-        from .scrapers import get_provider
-        from .review_template import refresh_review_views
-
-        providers = list(args.providers)
-        try:
-            for key in providers:
-                get_provider(key)
-        except KeyError as exc:
-            parser.error(str(exc))
-
-        settings = default_scrape_settings(mongo_enabled=True).normalized()
-        client = create_mongo_client(settings.mongo_uri or "")
-        try:
-            database = client[settings.mongo_database]
-            results = refresh_review_views(
-                database,
-                providers=providers or None,
-                mongo_config_file=settings.mongo_config_file,
-            )
-        finally:
-            close = getattr(client, "close", None)
-            if close is not None:
-                close()
-
-        refreshed = 0
-        skipped = 0
-        failed = 0
-        for result in results:
-            if result.refreshed:
-                refreshed += 1
-                print(
-                    f"{result.provider}: refreshed {result.view_name} "
-                    f"(viewOn={result.collection_name})"
-                )
-                continue
-            if result.message != "source collection missing":
-                failed += 1
-                print(f"{result.provider}: failed {result.view_name} ({result.message})")
-                continue
-            skipped += 1
-            print(
-                f"{result.provider}: skipped {result.view_name} "
-                f"(missing source collection {result.collection_name})"
-            )
-
-        print(
-            f"review: refreshed={refreshed} skipped={skipped} failed={failed} "
-            f"total={len(results)}"
-        )
-        if failed:
-            raise SystemExit(1)
-        return
-
     if args.command == "migrate-mongo":
         from .migrate_mongo import migrate_mongo
         from .mongo import create_mongo_client
@@ -367,6 +332,37 @@ def main(argv: list[str] | None = None) -> None:
                 f"{action}={result.updated} status={result.status}{suffix}"
             )
         print(f"migrate-mongo: scanned={scanned} {action}={updated} collections={len(results)}")
+        return
+
+    if args.command == "unify-mongo":
+        from .migrate_mongo import unify_mongo
+        from .mongo import create_mongo_client
+
+        settings = default_scrape_settings(mongo_enabled=True).normalized()
+        client = create_mongo_client(settings.mongo_uri or "")
+        try:
+            database = client[args.database or settings.mongo_database]
+            result = unify_mongo(
+                database,
+                target_collection=args.collection,
+                source_collections=args.source_collections,
+                dry_run=args.dry_run,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+        action = "would_merge" if args.dry_run else "merged"
+        print(
+            f"unify-mongo: sources={','.join(result.source_collections) or '-'} "
+            f"scanned={result.scanned} {action}={result.inserted} "
+            f"duplicates={result.duplicates} status={result.status}"
+        )
+        if result.backup_collections:
+            print(f"unify-mongo: backups={','.join(result.backup_collections)}")
+        if result.validation_error:
+            print(f"unify-mongo: error={result.validation_error}")
+            raise SystemExit(1)
         return
 
     if args.command == "cleanup-mongo-backups":
@@ -411,6 +407,7 @@ def main(argv: list[str] | None = None) -> None:
             stats = reclassify_cve(
                 database,
                 classifier_config,
+                collection_name=settings.mongo_collection or "news",
                 dry_run=args.dry_run,
                 limit=args.limit,
                 use_zero_shot=args.zero_shot,

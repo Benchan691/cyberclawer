@@ -9,7 +9,7 @@ try:
     from .cpe_dictionary import CpeDictionaryLookup, cpe_fingerprint
     from .logging_utils import log_event
     from .mongo_utils import (
-        build_unclassified_query,
+        build_cve_unclassified_query,
         create_mongo_client,
         current_taxonomy_version,
         get_database,
@@ -26,7 +26,7 @@ except ImportError:
     from cpe_dictionary import CpeDictionaryLookup, cpe_fingerprint
     from logging_utils import log_event
     from mongo_utils import (
-        build_unclassified_query,
+        build_cve_unclassified_query,
         create_mongo_client,
         current_taxonomy_version,
         get_database,
@@ -188,7 +188,7 @@ def scan_collection(
     )
 
     cursor = _cursor_with_limit(
-        collection.find(build_unclassified_query()),
+        collection.find(build_cve_unclassified_query(collection_name)),
         batch_size,
     )
 

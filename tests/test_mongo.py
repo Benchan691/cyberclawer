@@ -1,4 +1,5 @@
 import copy
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -8,6 +9,7 @@ from vuln_scraper.mongo import (
     build_mongo_document,
     documents_content_match,
     documents_match,
+    existing_identity_keys,
     redact_mongo_uri,
     sync_output_to_mongo,
 )
@@ -25,7 +27,7 @@ def test_build_mongo_document_emits_closed_v2_envelope() -> None:
     assert document["schema_version"] == 2
     assert document["code"] == "2026-10001"
     assert document["cve_ids"] == ["CVE-2026-10001"]
-    assert document["source"] == {"url": "https://example.test"}
+    assert document["source"] == {"provider": "avd", "url": "https://example.test"}
     assert document["details"] == {"source_status": "CVE PoC"}
     assert not {"type", "cve_code", "cve_codes", "vuln_type", "status"} & document.keys()
 
@@ -89,7 +91,13 @@ def test_sync_inserts_records_and_creates_indexes() -> None:
 
     assert result.inserted == 1
     assert [item[1]["name"] for item in collection.indexes] == [
-        "observed_desc", "cve_ids", "severity_observed", "published_desc"
+        "observed_desc",
+        "provider_observed",
+        "provider_severity_observed",
+        "cve_ids",
+        "severity_observed",
+        "published_desc",
+        "classification_status",
     ]
     assert collection.documents["avd:2026-10001"]["schema_version"] == 2
 
@@ -125,6 +133,41 @@ def test_sync_stores_all_raw_output_records() -> None:
     assert result.inserted == 2
     assert set(collection.documents) == {"avd:2026-10001", "avd:2026-10002"}
     assert "cve_ids" not in collection.documents["avd:2026-10002"]
+
+
+def test_multiple_providers_share_one_collection_with_source_discriminator() -> None:
+    collection = FakeCollection()
+    settings = ScraperSettings(mongo_enabled=True)
+    output = output_payload(
+        [
+            record("2026-10001"),
+            hkcert_record("security-bulletin"),
+        ]
+    )
+
+    result = sync_output_to_mongo(
+        output,
+        settings,
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.inserted == 2
+    assert collection.documents["avd:2026-10001"]["source"]["provider"] == "avd"
+    assert collection.documents["hkcert:security-bulletin"]["source"]["provider"] == "hkcert"
+
+
+def test_existing_identity_query_is_scoped_to_provider_and_supports_legacy_ids() -> None:
+    collection = FakeCollection()
+    collection.documents = {
+        "avd:one": {"_id": "avd:one", "source": {"provider": "avd"}},
+        "avd:legacy": {"_id": "avd:legacy", "type": "avd"},
+        "hkcert:one": {"_id": "hkcert:one", "source": {"provider": "hkcert"}},
+    }
+
+    assert existing_identity_keys(collection, provider="avd") == {
+        "avd:one",
+        "avd:legacy",
+    }
 
 
 def test_sync_skips_conflicts_when_not_interactive() -> None:
@@ -169,7 +212,7 @@ def test_sync_prompt_can_overwrite_conflict(monkeypatch) -> None:
 def test_documents_content_match_ignores_observation_metadata() -> None:
     existing = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
     existing["observed_at"] = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    existing["source"] = {"url": "https://old.example.test"}
+    existing["source"] = {"provider": "avd", "url": "https://old.example.test"}
     incoming = build_mongo_document(record("2026-10001", cve_code="2026-10001"), output_payload())
 
     assert documents_match(existing, incoming)
@@ -384,6 +427,26 @@ def test_sync_skips_unchanged_documents() -> None:
     assert result.overwritten == 0
 
 
+def test_sync_repairs_missing_source_provider_even_when_conflicts_skip() -> None:
+    collection = FakeCollection()
+    existing = build_mongo_document(record("2026-10001"), output_payload())
+    existing["source"].pop("provider")
+    collection.documents["avd:2026-10001"] = existing
+    settings = ScraperSettings(
+        mongo_enabled=True,
+        mongo_conflict="skip",
+    )
+
+    result = sync_output_to_mongo(
+        output_payload([record("2026-10001")]),
+        settings,
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.overwritten == 1
+    assert collection.documents["avd:2026-10001"]["source"]["provider"] == "avd"
+
+
 def test_redact_mongo_uri_hides_password() -> None:
     assert redact_mongo_uri("mongodb://user:secret@localhost:27017/db") == (
         "mongodb://user:***@localhost:27017/db"
@@ -515,6 +578,9 @@ def _matches_query(document: dict, query: dict) -> bool:
         if isinstance(expected, dict) and "$in" in expected:
             candidates = value if isinstance(value, list) else [value]
             if not any(candidate in expected["$in"] for candidate in candidates):
+                return False
+        elif isinstance(expected, dict) and "$regex" in expected:
+            if re.search(expected["$regex"], str(value or "")) is None:
                 return False
         elif isinstance(value, list):
             if expected not in value:

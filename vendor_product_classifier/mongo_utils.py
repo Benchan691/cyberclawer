@@ -118,6 +118,18 @@ def resolve_mongo_database(config: dict[str, Any], base: Path) -> str:
     return "vulnerabilities"
 
 
+def resolve_mongo_collection(config: dict[str, Any], base: Path) -> str:
+    env_collection = os.getenv("MONGO_COLLECTION", "").strip()
+    if env_collection:
+        return env_collection
+    mongo_config = load_mongo_toml(repo_root(base) / DEFAULT_MONGO_CONFIG_FILE)
+    toml_collection = mongo_config.get("collection")
+    if isinstance(toml_collection, str) and toml_collection.strip():
+        return toml_collection.strip()
+    configured = (config.get("mongo") or {}).get("collections") or ["news"]
+    return str(configured[0]).strip() or "news"
+
+
 def load_config(base_dir: str | Path | None = None, *, require_secrets: bool = True) -> dict[str, Any]:
     base = Path(base_dir) if base_dir is not None else classifier_dir()
     load_dotenv(base / ".env")
@@ -131,6 +143,7 @@ def load_config(base_dir: str | Path | None = None, *, require_secrets: bool = T
     config["MONGO_URI"] = resolve_mongo_uri(base)
     config.setdefault("mongo", {})
     config["mongo"]["database"] = resolve_mongo_database(config, base)
+    config["mongo"]["collections"] = [resolve_mongo_collection(config, base)]
 
     if require_secrets and not config.get("MONGO_URI"):
         raise ValueError("Missing required MongoDB URI (set MONGO_URI or configure mongodb.toml)")
@@ -169,6 +182,19 @@ def build_unclassified_query() -> dict[str, Any]:
             {"classification.product": {"$exists": False}},
             {"classification.status": {"$in": ["unclassified", "failed"]}},
             {"classification.status": {"$exists": False}},
+        ]
+    }
+
+
+def build_cve_unclassified_query(collection_name: str) -> dict[str, Any]:
+    """Limit unified collection scans to CVE provider documents."""
+    query = build_unclassified_query()
+    if collection_name == "cve":
+        return query
+    return {
+        "$and": [
+            {"source.provider": "cve"},
+            query,
         ]
     }
 

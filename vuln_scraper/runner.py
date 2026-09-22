@@ -32,6 +32,7 @@ from .mongo import (
     existing_identity_keys,
     sync_records_to_collection,
 )
+from .schema_v2 import PROVIDER_SCHEMAS
 from .scrapers import ScraperProvider
 from .table_extractor import extract_raw_tables
 from .timestamps import record_updated_at_or_after
@@ -212,12 +213,21 @@ class ScraperRunner:
             client_factory=self.mongo_client_factory,
         )
         try:
+            storage_provider = self.provider.key
+            if storage_provider not in PROVIDER_SCHEMAS:
+                storage_provider = self.provider.default_mongo_collection
             if self._stop_on_unchanged_content:
-                self._existing_documents = existing_documents_by_id(collection)
+                self._existing_documents = existing_documents_by_id(
+                    collection,
+                    provider=storage_provider,
+                )
                 known_ids = set(self._existing_documents)
             else:
                 self._existing_documents = {}
-                known_ids = existing_identity_keys(collection)
+                known_ids = existing_identity_keys(
+                    collection,
+                    provider=storage_provider,
+                )
             await self._scrape_newest_records(client, known_ids=known_ids)
             output = self._build_output()
             self.checkpoint.save(self.settings.checkpoint_file)

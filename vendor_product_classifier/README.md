@@ -1,6 +1,8 @@
 # Vendor/Product Classifier
 
-Standalone daemon that classifies only the MongoDB `cve` collection using a local CPE dictionary and optional zero-shot embeddings.
+Standalone daemon that classifies only documents with `source.provider: cve`
+inside the unified MongoDB `news` collection, using a local CPE dictionary and
+optional zero-shot embeddings.
 
 ## Pipeline
 
@@ -12,7 +14,12 @@ classifier_daemon.py
   -> write classification to MongoDB
 ```
 
-The daemon scans CVE documents missing a final vendor/product classification on a configurable interval. It extracts vendor/product evidence from `details.cve.affected`, CPE in `details.cve.configurations`, root `title`, and English `details.cve.descriptions`, then searches the local CPE dictionary. On a hit it writes `method: dictionary`. On a miss it runs zero-shot embedding classification when enabled.
+The daemon filters the shared collection before scanning, so non-CVE news is
+never classified. It extracts vendor/product evidence from normalized
+`details.affected`, `details.configurations`, root `title`, and English
+`details.descriptions`, then searches the local CPE dictionary. On a hit it
+writes `method: dictionary`. On a miss it runs zero-shot embedding
+classification when enabled.
 
 ## Configuration
 
@@ -24,9 +31,11 @@ MongoDB connection (optional if repo-root `mongodb.toml` is configured):
 
 ```env
 MONGO_URI=mongodb://localhost:27017
+MONGO_COLLECTION=news
 ```
 
-Resolution order: `MONGO_URI` environment variable, then `[mongodb].uri` from repo-root [`mongodb.toml`](../mongodb.toml), then `mongodb://localhost:27017`.
+Connection and collection settings use environment variables first, then the
+repo-root [`mongodb.toml`](../mongodb.toml), then local defaults.
 
 `config/classifier.json` contains MongoDB database name, scanner interval/batch settings, retry limits, `dictionary_lookup`, model, and `cpe_dictionary.path` settings. `CPE_DICTIONARY_PATH` overrides the JSON path.
 
@@ -84,7 +93,10 @@ python -m vendor_product_classifier.reclassify_cve --dry-run
 python -m vendor_product_classifier.reclassify_cve --database vulnerabilities
 ```
 
-The script scans every `cve` document, re-runs dictionary lookup (and optional zero-shot fallback), and overwrites `classification` when the result differs. Run `vuln-scrape migrate-mongo` first if legacy classification fields still need normalization.
+The script scans every CVE-provider document in `news`, re-runs dictionary
+lookup (and optional zero-shot fallback), and overwrites `classification` when
+the result differs. Run `vuln-scrape unify-mongo` first when migrating from
+provider collections.
 
 ## Native Python
 

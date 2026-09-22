@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -103,13 +104,27 @@ def collection_from_settings(
     return client, collection
 
 
-def existing_identity_keys(collection: Any) -> set[str]:
-    return set(existing_documents_by_id(collection))
+def existing_identity_keys(collection: Any, *, provider: str | None = None) -> set[str]:
+    return set(existing_documents_by_id(collection, provider=provider))
 
 
-def existing_documents_by_id(collection: Any) -> dict[str, dict[str, Any]]:
+def existing_documents_by_id(
+    collection: Any,
+    *,
+    provider: str | None = None,
+) -> dict[str, dict[str, Any]]:
     documents: dict[str, dict[str, Any]] = {}
-    for document in collection.find({}):
+    query = (
+        {
+            "$or": [
+                {"source.provider": provider},
+                {"_id": {"$regex": rf"^{re.escape(provider)}:"}},
+            ]
+        }
+        if provider
+        else {}
+    )
+    for document in collection.find(query):
         identity = document.get("_id")
         if not identity and document.get("type") and document.get("code"):
             identity = f"{str(document['type']).lower()}:{document['code']}"
@@ -136,18 +151,20 @@ def sanitize_details_for_content_compare(details: dict[str, Any]) -> dict[str, A
 
 
 def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         key: copy.deepcopy(value)
         for key, value in document.items()
         if key not in {"_id", "observed_at", "source", "classification"}
     }
+    source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    payload["source_provider"] = source.get("provider")
+    return payload
 
 
 def _ensure_indexes(collection: Any, provider: str | None = None) -> None:
-    provider = str(provider or getattr(collection, "name", "") or "").strip().lower()
-    if provider in {"", "fake"}:
-        return
-    ensure_v2_indexes(collection, provider)
+    # The configured collection name is operator-defined and no longer carries
+    # provider meaning.  Every runtime collection uses the unified indexes.
+    ensure_v2_indexes(collection, "news")
 
 
 def _sync_records(
@@ -195,7 +212,10 @@ def _sync_one(
         return
 
     result.conflicts += 1
-    if _should_overwrite(document, existing, settings):
+    existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
+    document_source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    repairs_provider = existing_source.get("provider") != document_source.get("provider")
+    if repairs_provider or _should_overwrite(document, existing, settings):
         if document["_id"].startswith("cve:") and isinstance(existing.get("classification"), dict):
             document["classification"] = existing["classification"]
         collection.replace_one({"_id": identity}, document, upsert=True)
@@ -212,7 +232,12 @@ def _documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool
         existing_core["details"] = sanitize_details_for_content_compare(existing_core["details"])
     if "details" in document_core:
         document_core["details"] = sanitize_details_for_content_compare(document_core["details"])
-    return existing_core == document_core
+    existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
+    document_source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    return (
+        existing_core == document_core
+        and existing_source.get("provider") == document_source.get("provider")
+    )
 
 
 def _should_overwrite(

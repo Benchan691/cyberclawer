@@ -16,7 +16,7 @@ from vendor_product_classifier.cve_cpe import (
     extract_cpe_evidence,
     extract_vendor_product_evidence,
 )
-from vendor_product_classifier.reclassify_cve import classify_cve_document
+from vendor_product_classifier.reclassify_cve import classify_cve_document, reclassify_cve
 from vendor_product_classifier.zero_shot import (
     EmbeddingZeroShotClassifier,
     low_confidence_classification,
@@ -29,7 +29,7 @@ FIXTURE = "fixtures/cpe_dictionary_sample.csv"
 
 def config() -> dict[str, Any]:
     return {
-        "mongo": {"database": "vulnerabilities", "collections": ["cve"]},
+        "mongo": {"database": "vulnerabilities", "collections": ["news"]},
         "cpe_dictionary": {"path": FIXTURE},
         "scanner": {
             "interval_seconds": 300,
@@ -171,6 +171,7 @@ def test_daemon_classifies_via_dictionary() -> None:
         [
             {
                 "_id": "cve:2026-1000",
+                "source": {"provider": "cve"},
                 "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
             }
         ]
@@ -178,7 +179,7 @@ def test_daemon_classifies_via_dictionary() -> None:
     lookup = CpeDictionaryLookup(dictionary_path=FIXTURE)
 
     stats, _, _ = scan_once(
-        FakeDatabase({"cve": collection}),
+        FakeDatabase({"news": collection}),
         config(),
         lookup=lookup,
         zero_shot_classifier=None,
@@ -196,10 +197,11 @@ def test_daemon_classifies_via_dictionary() -> None:
 def test_daemon_skips_unclassified_for_current_dictionary() -> None:
     database = FakeDatabase(
         {
-            "cve": FakeCollection(
+            "news": FakeCollection(
                 [
                     {
                         "_id": "cve:current-unclassified",
+                        "source": {"provider": "cve"},
                         "classification": {
                             "status": "unclassified",
                             "dictionary_version": current_taxonomy_version(),
@@ -220,6 +222,56 @@ def test_daemon_skips_unclassified_for_current_dictionary() -> None:
     assert stats.classified == 0
     assert stats.unclassified == 0
     assert stats.skipped_by_reason.get("unclassified_current_dictionary") == 1
+
+
+def test_daemon_ignores_non_cve_documents_in_unified_collection() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "_id": "avd:one",
+                "source": {"provider": "avd"},
+                "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
+            },
+            {
+                "_id": "cve:2026-1000",
+                "source": {"provider": "cve"},
+                "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
+            },
+        ]
+    )
+
+    stats, _, _ = scan_once(
+        FakeDatabase({"news": collection}),
+        config(),
+        lookup=CpeDictionaryLookup(dictionary_path=FIXTURE),
+        now=datetime.now(timezone.utc),
+    )
+
+    assert stats.scanned == 1
+    assert "classification" not in collection.documents["avd:one"]
+    assert collection.documents["cve:2026-1000"]["classification"]["status"] == "classified"
+
+
+def test_reclassify_filters_unified_collection_to_cve_provider() -> None:
+    collection = FakeCollection(
+        [
+            {"_id": "avd:one", "source": {"provider": "avd"}, "details": {}},
+            {
+                "_id": "cve:2026-1000",
+                "source": {"provider": "cve"},
+                "details": {"affected": [{"vendor": "Cisco", "product": "IOS XE"}]},
+            },
+        ]
+    )
+
+    result = reclassify_cve(
+        FakeDatabase({"news": collection}),
+        config(),
+        dry_run=True,
+    )
+
+    assert result.scanned == 1
+    assert result.classified == 1
 
 
 def test_zero_shot_classifies_exact_cpe_match() -> None:
@@ -358,8 +410,10 @@ class FakeCollection:
     def __init__(self, documents: list[dict[str, Any]]) -> None:
         self.documents = {document["_id"]: copy.deepcopy(document) for document in documents}
 
-    def find(self, _query: dict[str, Any]) -> FakeCursor:
-        return FakeCursor(list(self.documents.values()))
+    def find(self, query: dict[str, Any]) -> FakeCursor:
+        return FakeCursor(
+            [document for document in self.documents.values() if matches_query(document, query)]
+        )
 
     def find_one(self, query: dict[str, Any]) -> dict[str, Any] | None:
         document = self.documents.get(query["_id"])
@@ -385,3 +439,28 @@ class StaticZeroShotClassifier:
 
     def classify(self, _document: dict[str, Any]) -> dict[str, Any]:
         return dict(self.result)
+
+
+def matches_query(document: dict[str, Any], query: dict[str, Any]) -> bool:
+    if "$and" in query:
+        return all(matches_query(document, item) for item in query["$and"])
+    if "$or" in query:
+        return any(matches_query(document, item) for item in query["$or"])
+    for field, expected in query.items():
+        value: Any = document
+        exists = True
+        for part in field.split("."):
+            if not isinstance(value, dict) or part not in value:
+                exists = False
+                value = None
+                break
+            value = value[part]
+        if isinstance(expected, dict) and "$exists" in expected:
+            if exists != bool(expected["$exists"]):
+                return False
+        elif isinstance(expected, dict) and "$in" in expected:
+            if value not in expected["$in"]:
+                return False
+        elif value != expected:
+            return False
+    return True

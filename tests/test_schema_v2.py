@@ -45,6 +45,7 @@ def test_every_provider_builds_a_valid_deterministic_v2_document(provider: str) 
     }
     assert first["change_type"] == "new"
     assert first["observed_at"] == datetime(2026, 7, 23, 1, 2, 3, tzinfo=timezone.utc)
+    assert first["source"]["provider"] == provider
     if provider == "cve":
         assert "cve_ids" not in first
     else:
@@ -60,6 +61,30 @@ def test_validator_is_closed_and_classification_is_cve_only() -> None:
     assert "cve_ids" in avd_properties
     assert "classification" in cve_properties
     assert "cve_ids" not in cve_properties
+    news_schema = mongo_json_schema("news")
+    assert "source" in news_schema["required"]
+    assert news_schema["properties"]["source"]["required"] == ["provider"]
+    assert set(news_schema["properties"]["source"]["properties"]["provider"]["enum"]) == set(
+        PROVIDER_SCHEMAS
+    )
+
+
+def test_validation_rejects_missing_unknown_or_mismatched_source_provider() -> None:
+    document = build_v2_document(
+        {"type": "avd", "code": "x", "title": "x", "details": {}},
+        {"scraped_at": "2026-01-01T00:00:00Z"},
+    )
+
+    missing = {**document, "source": {}}
+    with pytest.raises(ValueError, match="source.provider"):
+        validate_v2_document(missing, "news")
+
+    unknown = {**document, "source": {"provider": "unknown"}}
+    with pytest.raises(ValueError, match="source.provider"):
+        validate_v2_document(unknown, "news")
+
+    with pytest.raises(ValueError, match="does not match"):
+        validate_v2_document(document, "cve")
 
 
 def test_invalid_observed_at_and_duplicate_cves_are_rejected() -> None:

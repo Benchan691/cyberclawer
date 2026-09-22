@@ -2,7 +2,7 @@
   "mongo": {
     "database": "vulnerabilities",
     "collections": [
-      "cve"
+      "news"
     ]
   },
   "cpe_dictionary": {

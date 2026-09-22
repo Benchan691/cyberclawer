@@ -7,15 +7,16 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-
-
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_OUTPUT_FILE = DEFAULT_DATA_DIR / "high_risk_vulns.json"
 DEFAULT_CHECKPOINT_FILE = DEFAULT_DATA_DIR / "checkpoint.json"
 MAX_RESULT_LIMIT = 1000
 DEFAULT_MONGO_URI = "mongodb://localhost:27017"
 DEFAULT_MONGO_DATABASE = "vulnerabilities"
-DEFAULT_MONGO_COLLECTION = "vulnerabilities"
+# All providers write to one physical collection.  The provider is retained in
+# ``source.provider`` on each document so the web application can filter and
+# render source-specific fields without maintaining one collection per source.
+DEFAULT_MONGO_COLLECTION = "news"
 DEFAULT_MONGO_CONFIG_FILE = Path("mongodb.toml")
 DEFAULT_SCRAPERS_CONFIG_FILE = Path("scrapers.toml")
 MONGO_CONFLICT_MODES = {"prompt", "skip", "overwrite"}
@@ -159,16 +160,10 @@ class ScraperSettings:
         default_concurrency: int | None = None,
         manual_verification: bool | None = None,
     ) -> "ScraperSettings":
+        # Every provider shares one physical collection.  Provider-specific
+        # defaults remain on the provider classes only so the migration command
+        # can discover legacy collections; they must not affect live writes.
         mongo_collection = self.mongo_collection
-        env_collection = _env("MONGO_COLLECTION", legacy="AVD_MONGO_COLLECTION")
-        if env_collection is None and (
-            mongo_collection is None or mongo_collection == DEFAULT_MONGO_COLLECTION
-        ):
-            mongo_collection = mongo_collection_for_provider(
-                provider_key,
-                self.mongo_config_file,
-                default=default_collection,
-            )
         request_delay = self.request_delay
         if default_request_delay is not None and self.request_delay == 1.0:
             request_delay = default_request_delay
@@ -434,18 +429,18 @@ def _default_mongo_collections() -> dict[str, str]:
 
 
 def mongo_collections_from_config(path: Path | str | None = DEFAULT_MONGO_CONFIG_FILE) -> dict[str, str]:
+    """Return the unified runtime collection for every provider.
+
+    Older releases accepted ``[mongodb.collections]`` and routed providers to
+    separate collections.  That table is deliberately ignored at runtime; the
+    shadow migration discovers legacy collections from provider metadata.
+    """
     config = load_mongo_config(path)
-    configured = config.get("collections", {})
-    collections = _default_mongo_collections()
-    if isinstance(configured, dict):
-        collections.update(
-            {
-                str(provider).strip(): str(collection).strip()
-                for provider, collection in configured.items()
-                if str(provider).strip() and str(collection).strip()
-            }
-        )
-    return dict(sorted(collections.items()))
+    unified = str(config.get("collection") or DEFAULT_MONGO_COLLECTION).strip()
+    return {
+        provider_key: unified
+        for provider_key in sorted(_default_mongo_collections())
+    }
 
 
 def mongo_collection_for_provider(
@@ -454,17 +449,16 @@ def mongo_collection_for_provider(
     *,
     default: str | None = None,
 ) -> str:
-    collections = mongo_collections_from_config(path)
-    return collections.get(provider_key, default or DEFAULT_MONGO_COLLECTION)
+    config = load_mongo_config(path)
+    return str(config.get("collection") or DEFAULT_MONGO_COLLECTION).strip()
 
 
 def provider_for_mongo_collection(
     collection_name: str,
     path: Path | str | None = DEFAULT_MONGO_CONFIG_FILE,
 ) -> str | None:
-    for provider_key, configured_collection in mongo_collections_from_config(path).items():
-        if configured_collection == collection_name:
-            return provider_key
+    # A unified collection cannot identify a provider by its own name.  Callers
+    # must use ``source.provider`` from the document instead.
     return None
 
 

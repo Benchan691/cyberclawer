@@ -4,12 +4,8 @@ import pytest
 
 from vuln_scraper.review_template import (
     REVIEW_TEMPLATE_FIELDS,
-    ReviewViewError,
     _review_document_errors,
-    ensure_review_view,
-    refresh_review_views,
     review_template_from_document,
-    review_view_name,
     review_view_pipeline,
 )
 
@@ -508,101 +504,3 @@ def test_review_document_validation_rejects_mixed_mongodb_review_shapes() -> Non
     assert "description must be a string" in errors
     assert "affected must be an array of strings" in errors
     assert "recommendation must be a string" in errors
-
-
-def test_refresh_review_views_refreshes_existing_collections_only() -> None:
-    database = FakeDatabase({"avd": [], "hikvision": []}, types={"avd": "collection", "hikvision": "collection"})
-
-    results = refresh_review_views(database, providers=["avd", "hikvision", "cve"])
-
-    by_provider = {result.provider: result for result in results}
-    assert by_provider["avd"].refreshed is True
-    assert by_provider["hikvision"].refreshed is True
-    assert by_provider["cve"].refreshed is False
-    assert by_provider["cve"].message == "source collection missing"
-    assert database.commands[0]["create"] == "avd_review"
-    assert database.commands[1]["create"] == "hikvision_review"
-
-
-def test_ensure_review_view_creates_view_for_existing_collection() -> None:
-    database = FakeDatabase({"avd": []}, types={"avd": "collection"})
-
-    created = ensure_review_view(database, provider="avd", collection_name="avd")
-
-    assert created
-    assert database.commands[0]["create"] == "avd_review"
-    assert database.commands[0]["viewOn"] == "avd"
-    assert database.types["avd_review"] == "view"
-
-
-def test_ensure_review_view_replaces_existing_view() -> None:
-    database = FakeDatabase(
-        {"avd": [], "avd_review": []},
-        types={"avd": "collection", "avd_review": "view"},
-    )
-
-    assert ensure_review_view(database, provider="avd", collection_name="avd")
-    assert database.dropped == ["avd_review"]
-    assert database.types["avd_review"] == "view"
-
-
-def test_ensure_review_view_skips_missing_source_and_protects_collection_collision() -> None:
-    missing = FakeDatabase({}, types={})
-    collision = FakeDatabase(
-        {"avd": [], "avd_review": []},
-        types={"avd": "collection", "avd_review": "collection"},
-    )
-
-    assert not ensure_review_view(missing, provider="avd", collection_name="avd")
-    with pytest.raises(ReviewViewError):
-        ensure_review_view(collision, provider="avd", collection_name="avd")
-
-
-class FakeCursor:
-    def __init__(self, documents: list[dict]) -> None:
-        self.documents = documents
-
-    def limit(self, limit: int) -> "FakeCursor":
-        self.documents = self.documents[:limit]
-        return self
-
-    def __iter__(self):
-        return iter(self.documents)
-
-
-class FakeCollection:
-    def __init__(self, database: "FakeDatabase", name: str) -> None:
-        self.database = database
-        self.name = name
-
-    def find(self, query: dict) -> FakeCursor:
-        return FakeCursor(list(self.database.collections.get(self.name, [])))
-
-    def drop(self) -> None:
-        self.database.dropped.append(self.name)
-        self.database.collections.pop(self.name, None)
-        self.database.types.pop(self.name, None)
-
-
-class FakeDatabase:
-    def __init__(
-        self,
-        collections: dict[str, list[dict]],
-        *,
-        types: dict[str, str] | None = None,
-    ) -> None:
-        self.collections = collections
-        self.types = types or {name: "collection" for name in collections}
-        self.commands: list[dict] = []
-        self.dropped: list[str] = []
-
-    def __getitem__(self, name: str) -> FakeCollection:
-        return FakeCollection(self, name)
-
-    def list_collections(self, filter: dict):
-        return [{"name": name, "type": collection_type} for name, collection_type in self.types.items()]
-
-    def command(self, command: dict) -> None:
-        self.commands.append(command)
-        self.types[command["create"]] = "view"
-        self.collections.setdefault(command["create"], [])

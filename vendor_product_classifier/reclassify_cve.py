@@ -155,7 +155,7 @@ def reclassify_cve(
     database: Any,
     config: dict[str, Any],
     *,
-    collection_name: str = "cve",
+    collection_name: str = "news",
     dry_run: bool = True,
     limit: int | None = None,
     use_zero_shot: bool = False,
@@ -165,7 +165,8 @@ def reclassify_cve(
     zero_shot_classifier = zero_shot_from_config(config) if use_zero_shot else None
     result = ReclassifyResult()
 
-    cursor = collection.find({})
+    query = {} if collection_name == "cve" else {"source.provider": "cve"}
+    cursor = collection.find(query)
     if limit is not None:
         cursor = cursor.limit(limit)
 
@@ -245,9 +246,11 @@ def main(argv: list[str] | None = None) -> int:
     client = create_mongo_client(config)
     try:
         database = get_database(client, config)
+        collections = config.get("mongo", {}).get("collections") or ["news"]
         result = reclassify_cve(
             database,
             config,
+            collection_name=str(collections[0]),
             dry_run=args.dry_run,
             limit=args.limit,
             use_zero_shot=args.zero_shot,

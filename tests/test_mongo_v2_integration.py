@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from vuln_scraper.migrate_mongo import migrate_mongo
+from vuln_scraper.migrate_mongo import migrate_mongo, unify_mongo
 
 
 pytestmark = pytest.mark.skipif(
@@ -47,7 +47,7 @@ def legacy_document(provider: str, code: str) -> dict:
     }
 
 
-def test_shadow_cutover_installs_validator_indexes_view_and_is_rerunnable(database) -> None:
+def test_shadow_cutover_installs_validator_indexes_without_views_and_is_rerunnable(database) -> None:
     database["avd"].insert_one(legacy_document("avd", "native-code"))
 
     results = migrate_mongo(database, collections=["avd"], dry_run=False)
@@ -55,15 +55,13 @@ def test_shadow_cutover_installs_validator_indexes_view_and_is_rerunnable(databa
     assert results[0].status == "complete"
     converted = database["avd"].find_one({"_id": "avd:native-code"})
     assert converted["schema_version"] == 2
+    assert converted["source"]["provider"] == "avd"
     assert converted["cve_ids"] == ["CVE-2026-1000"]
     assert converted["details"]["description"] == "Provider evidence"
     assert set(database["avd"].index_information()) >= {
         "_id_", "observed_desc", "cve_ids", "severity_observed", "published_desc"
     }
-    assert database["avd_review"].find_one({}).keys() == {
-        "title", "description", "impacts", "affected", "cve",
-        "recommendation", "related_link",
-    }
+    assert "avd_review" not in database.list_collection_names()
 
     with pytest.raises(Exception):
         database["avd"].insert_one(
@@ -82,21 +80,14 @@ def test_shadow_cutover_installs_validator_indexes_view_and_is_rerunnable(databa
     assert rerun[0].updated == 0
 
 
-def test_failed_view_cutover_restores_original_collection(database, monkeypatch) -> None:
+def test_unified_cutover_merges_sources_and_preserves_backups(database) -> None:
+    database["avd"].insert_one(legacy_document("avd", "native-code"))
     database["cisco"].insert_one(legacy_document("cisco", "cisco-sa-test"))
 
-    class FailedView:
-        provider = "cisco"
-        refreshed = False
-        message = "simulated view failure"
+    result = unify_mongo(database, dry_run=False)
 
-    monkeypatch.setattr(
-        "vuln_scraper.review_template.refresh_review_views",
-        lambda *args, **kwargs: [FailedView()],
-    )
-    with pytest.raises(RuntimeError, match="rolled back"):
-        migrate_mongo(database, collections=["cisco"], dry_run=False)
-
-    restored = database["cisco"].find_one({"_id": "cisco:cisco-sa-test"})
-    assert restored["type"] == "cisco"
-    assert restored.get("schema_version") is None
+    assert result.status == "complete"
+    assert database["news"].count_documents({}) == 2
+    assert database["news"].count_documents({"source.provider": "avd"}) == 1
+    assert database["news"].count_documents({"source.provider": "cisco"}) == 1
+    assert all(name in database.list_collection_names() for name in result.backup_collections)

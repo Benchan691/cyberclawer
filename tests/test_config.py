@@ -99,7 +99,7 @@ def test_default_scrape_settings_enables_mongo_without_provider_browser_default(
     assert settings.limit <= MAX_RESULT_LIMIT
 
 
-def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
+def test_legacy_collections_table_cannot_split_runtime_writes(tmp_path) -> None:
     config_file = tmp_path / "mongodb.toml"
     config_file.write_text(
         """
@@ -114,11 +114,10 @@ def test_mongo_collection_for_provider_uses_collections_table(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert mongo_collections_from_config(config_file) == dict(sorted(
-        (provider.key, provider.default_mongo_collection)
-        for provider in all_providers()
-    ))
-    assert mongo_collection_for_provider("hkcert", config_file) == "hkcert"
+    assert mongo_collections_from_config(config_file) == {
+        provider.key: "news" for provider in sorted(all_providers(), key=lambda item: item.key)
+    }
+    assert mongo_collection_for_provider("hkcert", config_file) == "news"
 
 
 def test_mongo_collections_from_config_is_alphabetical() -> None:
@@ -136,7 +135,7 @@ def test_scraper_settings_for_provider_disables_browser_for_cnvd() -> None:
     assert settings.browser_fallback is False
 
 
-def test_scraper_settings_for_provider_overrides_default_collection(tmp_path) -> None:
+def test_scraper_settings_for_provider_keeps_unified_collection(tmp_path) -> None:
     config_file = tmp_path / "mongodb.toml"
     config_file.write_text(
         """
@@ -156,10 +155,10 @@ def test_scraper_settings_for_provider_overrides_default_collection(tmp_path) ->
         .normalized()
     )
 
-    assert settings.mongo_collection == "hkcert"
+    assert settings.mongo_collection == "news"
 
 
-def test_scraper_settings_for_provider_sets_collection(tmp_path) -> None:
+def test_scraper_settings_for_provider_uses_unified_default(tmp_path) -> None:
     config_file = tmp_path / "mongodb.toml"
     config_file.write_text(
         """
@@ -174,7 +173,7 @@ def test_scraper_settings_for_provider_sets_collection(tmp_path) -> None:
 
     settings = ScraperSettings(mongo_enabled=True, mongo_config_file=config_file).for_provider("hkcert").normalized()
 
-    assert settings.mongo_collection == "hkcert"
+    assert settings.mongo_collection == "news"
 
 
 def test_load_scrapers_config_reads_scrapers_table(tmp_path) -> None:

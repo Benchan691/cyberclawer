@@ -33,7 +33,9 @@ tests/scrapers/<provider>/
 ## 2) Files to create (new provider package)
 
 - `vuln_scraper/scrapers/<provider>/config.py`
-  - Define constants like `BASE_URL`, `LIST_URL`, `SOURCE_URL`, `DEFAULT_COLLECTION`.
+  - Define constants like `BASE_URL`, `LIST_URL`, `SOURCE_URL`. A legacy
+    `DEFAULT_COLLECTION` may remain for migration discovery, but runtime writes
+    always use the shared collection.
 - `vuln_scraper/scrapers/<provider>/provider.py`
   - Add a `@dataclass` provider with fields:
     - `key`
@@ -67,12 +69,13 @@ tests/scrapers/<provider>/
 
 ### `vuln_scraper/config.py`
 
-- Set `default_mongo_collection` on the provider; add a `[mongodb.collections]`
-  override only when the configured collection name differs.
+- Runtime collection routing is global. Do not add provider-specific collection
+  routing; every provider is distinguished by `source.provider`.
 
 ### `mongodb.toml`
 
-- Add `<provider> = "<collection>"` under `[mongodb.collections]`.
+- No provider entry is needed. The single `[mongodb].collection` value applies
+  to every provider.
 
 ### `scrapers.toml` (optional)
 
@@ -103,7 +106,7 @@ tests/scrapers/<provider>/
 ## 4) Implementation checklist
 
 - [ ] Provider key is lowercase and stable (`<provider>`).
-- [ ] `default_mongo_collection` matches config/toml/test expectations.
+- [ ] Stored documents use the shared collection and set `source.provider`.
 - [ ] `content_type` matches real endpoint payload (`html` vs `json`).
 - [ ] `list_url` and `detail_url` are deterministic and correctly encoded.
 - [ ] Parser output includes stable identity fields (`type`, `code`, optional `cve_code`).
