@@ -69,6 +69,15 @@ Precedence: env vars (`MONGO_URI`, `MONGO_DB`, `MONGO_COLLECTION`) >
 `mongodb.toml` > defaults. Provider-specific collection tables from older
 releases are ignored for runtime writes.
 
+The configured catch-up provider list is also published atomically to the
+`source_catalog` collection in the same database. The portal reads this list
+to populate provider filters, including providers that have not published a
+document yet. Sync the catalog without running scrapers with:
+
+```bash
+vuln-scrape sync-source-catalog
+```
+
 Document shape, indexes, and migration: see [`database.md`](database.md).
 
 ## Usage

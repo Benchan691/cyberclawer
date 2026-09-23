@@ -8,6 +8,7 @@ from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
 from .error_log import log_uncaught_provider_error
 from .scrapers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
+from .source_catalog import sync_source_catalog_to_mongo
 from .timestamps import window_start
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,12 @@ def run_catch_up_cycle(
 ) -> None:
     selected_providers = providers_for_catch_up(settings)
     selected_keys = [provider.key for provider in selected_providers]
+    if settings.mongo_enabled:
+        catalog = sync_source_catalog_to_mongo(settings, providers=selected_keys)
+        logger.info(
+            "Updated MongoDB source catalog with %s configured provider(s)",
+            len(catalog["providers"]),
+        )
     logger.info(
         "Catch-up provider selection from %s: %s",
         settings.scrapers_config_file,

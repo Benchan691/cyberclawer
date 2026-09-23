@@ -6,12 +6,35 @@
 # - Use providers = ["all"] to run every scraper explicitly.
 # - Or list only the scrapers you want; remove lines you do not need.
 #
-# Available provider keys:
-# avd, cisco, cnnvd, cnvd, cve, github_advisory, govcert, hikvision, hkcert,
-# hpe, huawei_sa, infosec, juniper, msrc, paloalto, qianxin, ransomwarelive, splunk, zeroday, zimbra
+# Available provider keys (kept in sync with vuln_scraper.scrapers):
+# avd, cisco, cnnvd, cnvd, cve, fortiguard, github_advisory, govcert,
+# hikvision, hkcert, hpe, huawei_sa, infosec, juniper, msrc, paloalto,
+# qianxin, ransomwarelive, splunk, zeroday, zimbra
 
 [scrapers.catch_up]
-providers = ["all"]
+providers = [
+  "avd",
+  "cisco",
+  "cnnvd",
+  "cnvd",
+  "cve",
+  "fortiguard",
+  "github_advisory",
+  "govcert",
+  "hikvision",
+  "hkcert",
+  "hpe",
+  "huawei_sa",
+  "infosec",
+  "juniper",
+  "msrc",
+  "paloalto",
+  "qianxin",
+  "ransomwarelive",
+  "splunk",
+  "zeroday",
+  "zimbra",
+]
 
 [scrapers.defaults]
 retries = 3

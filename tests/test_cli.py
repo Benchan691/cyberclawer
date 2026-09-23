@@ -141,3 +141,17 @@ def test_main_run_can_disable_provider_browser_fallback(monkeypatch, capsys) -> 
     assert captured["provider"].key == "avd"
     assert captured["provider"].browser_fallback is False
     assert "avd: fetched 0 records" in capsys.readouterr().out
+
+
+def test_cli_syncs_source_catalog_without_starting_a_scraper(monkeypatch, capsys) -> None:
+    published: list[dict] = []
+    monkeypatch.setattr(
+        "vuln_scraper.source_catalog.sync_source_catalog_to_mongo",
+        lambda settings: published.append({"providers": ["fortiguard", "cve"]})
+        or published[-1],
+    )
+
+    main(["sync-source-catalog"])
+
+    assert published == [{"providers": ["fortiguard", "cve"]}]
+    assert capsys.readouterr().out.strip() == "source-catalog: providers=2"

@@ -107,6 +107,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum time to wait for headed manual verification.",
     )
+    subparsers.add_parser(
+        "sync-source-catalog",
+        help="Publish the configured source list to MongoDB without scraping.",
+    )
     migrate_parser = subparsers.add_parser(
         "migrate-mongo",
         help="Clean legacy MongoDB vulnerability documents.",
@@ -296,6 +300,17 @@ def main(argv: list[str] | None = None) -> None:
             batch_size=batch_size,
             days=args.days,
         )
+        return
+
+    if args.command == "sync-source-catalog":
+        from .source_catalog import sync_source_catalog_to_mongo
+
+        try:
+            settings = default_scrape_settings(mongo_enabled=True).normalized()
+            catalog = sync_source_catalog_to_mongo(settings)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"source-catalog: providers={len(catalog['providers'])}")
         return
 
     if args.command == "migrate-mongo":

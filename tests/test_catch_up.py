@@ -17,6 +17,14 @@ from vuln_scraper.config import default_scrape_settings
 from vuln_scraper.scrapers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
 
 
+@pytest.fixture(autouse=True)
+def stub_source_catalog_sync(monkeypatch):
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.sync_source_catalog_to_mongo",
+        lambda settings, *, providers=None: {"providers": list(providers or [])},
+    )
+
+
 def test_provider_caught_up_ignores_overlap() -> None:
     assert not provider_caught_up({"stop_reason": "overlap"})
     assert not provider_caught_up({"stop_reason": "limit", "result_count": 10})
@@ -86,6 +94,37 @@ def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
 
     assert conflicts == ["overwrite"]
     assert updated_since_seen[0] is not None
+
+
+def test_run_catch_up_cycle_publishes_selected_sources(monkeypatch) -> None:
+    published: list[list[str]] = []
+
+    class FakeScraper:
+        def __init__(self, settings, *, provider=None, **kwargs) -> None:
+            self.provider = provider
+
+        async def run(self):
+            return {
+                "stop_reason": "timestamp_boundary",
+                "result_count": 0,
+                "vulnerabilities": [],
+                "mongo_sync": {},
+            }
+
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.providers_for_catch_up",
+        lambda settings: [HKCERTProvider(), ZeroDayProvider()],
+    )
+    monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
+    monkeypatch.setattr(
+        "vuln_scraper.catch_up.sync_source_catalog_to_mongo",
+        lambda settings, *, providers=None: published.append(list(providers or []))
+        or {"providers": list(providers or [])},
+    )
+
+    run_catch_up_cycle(default_scrape_settings())
+
+    assert published == [["hkcert", "zeroday"]]
 
 
 def test_run_catch_up_cycle_runs_provider_once_for_timestamp_boundary(monkeypatch) -> None:
