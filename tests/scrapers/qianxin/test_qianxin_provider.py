@@ -8,7 +8,6 @@ def test_qianxin_provider_registry_and_defaults() -> None:
     assert isinstance(provider, QianxinProvider)
     assert "qianxin" in provider_keys()
     assert provider.content_type == "json"
-    assert not provider.browser_fallback
     assert provider.default_mongo_collection == "qianxin"
     assert provider.stop_on_first_known
 

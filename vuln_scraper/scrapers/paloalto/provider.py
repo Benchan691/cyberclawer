@@ -19,7 +19,6 @@ class PaloAltoProvider:
     key: str = "paloalto"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = False
     content_type: str = "html"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = True

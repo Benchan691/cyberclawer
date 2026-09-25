@@ -14,5 +14,4 @@ def test_paloalto_provider_urls_and_registry() -> None:
         == "https://security.paloaltonetworks.com/PAN-SA-2026-0007"
     )
     assert provider.default_mongo_collection == "paloalto"
-    assert not provider.browser_fallback
     assert provider.stop_on_first_known

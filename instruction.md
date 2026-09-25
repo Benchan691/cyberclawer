@@ -41,7 +41,6 @@ tests/scrapers/<provider>/
     - `key`
     - `source_url`
     - `default_mongo_collection`
-    - `browser_fallback`
     - `content_type` (`"html"` or `"json"`)
     - `default_request_delay`
     - `stop_on_first_known`
@@ -59,13 +58,17 @@ tests/scrapers/<provider>/
 - `tests/scrapers/<provider>/test_parsers.py`
   - Validate list/detail parser behavior using fixture HTML/JSON.
 
-## 3) Files to edit (project wiring)
+## 3) Project wiring (automatic)
 
 ### `vuln_scraper/scrapers/__init__.py`
 
-- Import the new provider class.
-- Add provider to `PROVIDERS` (dict insertion order controls `catch-up` iteration;
-  `provider_keys()` is sorted alphabetically for CLI/help).
+- Nothing to edit: providers are discovered automatically from the package
+  directories. `provider.py` must expose either a `PROVIDER_CLASS` attribute or
+  a single class whose `key` field equals the directory name. A package that
+  fails to import is skipped with a warning instead of breaking the CLI.
+- Optional: export `PROVIDER_SCHEMA` (a `schema_v2.ProviderSchema`) from
+  `provider.py` to register document normalization with the provider; otherwise
+  add the schema to the built-in table in `schema_v2.py`.
 
 ### `vuln_scraper/config.py`
 
@@ -121,3 +124,13 @@ tests/scrapers/<provider>/
 PYTHONPATH=. pytest -q
 PYTHONPATH=. pytest -q tests/scrapers/<provider>
 ```
+
+## Removing a provider
+
+- Delete `vuln_scraper/scrapers/<provider>/` and `tests/scrapers/<provider>/`;
+  discovery picks the change up automatically.
+- Remove its key from the `[scrapers.catch_up] providers` list in
+  `scrapers.toml` (optional — unknown keys are skipped with a warning) and its
+  row from the README table.
+- Keep its `ProviderSchema` entry in `schema_v2.py` if historical documents of
+  that provider exist, so `migrate-mongo`/`unify-mongo` can still normalize them.

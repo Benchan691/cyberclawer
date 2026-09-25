@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import time
 from collections.abc import Mapping
@@ -11,8 +10,6 @@ from typing import Any
 import httpx
 
 from .config import DEFAULT_HEADERS
-
-logger = logging.getLogger(__name__)
 
 
 class ScrapeError(Exception):
@@ -28,7 +25,7 @@ class CaptchaRequiredError(FetchError):
 
 
 class WAFChallengeError(FetchError):
-    """Raised when Aliyun returns a JavaScript signature challenge."""
+    """Raised when a site returns a JavaScript challenge plain HTTP cannot pass."""
 
 
 def looks_like_captcha_gate(html: str) -> bool:
@@ -95,7 +92,6 @@ class FetchResult:
     html: str
     status_code: int | None
     url: str
-    via_browser: bool = False
 
 
 @dataclass(slots=True)
@@ -116,14 +112,12 @@ class ScraperClient:
         backoff_jitter: float = 0.4,
         timeout: float = 30.0,
         headers: Mapping[str, str] | None = None,
-        browser_fetcher: object | None = None,
     ) -> None:
         self.retries = max(0, retries)
         self.backoff_base = max(0.0, backoff_base)
         self.backoff_max = max(0.0, backoff_max)
         self.backoff_jitter = max(0.0, backoff_jitter)
         self.rate_limiter = AsyncRateLimiter(delay)
-        self.browser_fetcher = browser_fetcher
         self._timeout = timeout
         self._default_headers = dict(headers or DEFAULT_HEADERS)
         self._client = self._build_http_client()
@@ -169,13 +163,7 @@ class ScraperClient:
         url: str,
         *,
         retries: int | None = None,
-        force_browser: bool = False,
     ) -> FetchResult:
-        if force_browser:
-            if self.browser_fetcher is None:
-                raise FetchError(f"Browser fetch requested for {url}, but no browser fetcher is configured.")
-            return await self._get_with_browser(url)
-
         retry_count = self.retries if retries is None else max(0, retries)
         last_error: Exception | None = None
 
@@ -184,18 +172,14 @@ class ScraperClient:
             try:
                 response = await self._client.get(url)
                 if response.status_code == 429 or response.status_code >= 500:
-                    if self.browser_fetcher is not None and looks_like_waf_challenge(response.text, response.headers):
-                        return await self._get_with_browser(url)
                     raise FetchError(f"HTTP {response.status_code} for {url}")
                 response.raise_for_status()
 
                 html = response.text
                 if looks_like_waf_challenge(html, response.headers):
-                    if self.browser_fetcher is not None:
-                        return await self._get_with_browser(url)
                     raise WAFChallengeError(
-                        f"Aliyun returned a JavaScript challenge for {url}; "
-                        "retry with --browser-fallback."
+                        f"Site returned a JavaScript challenge for {url}; "
+                        "a provider-specific solver is required."
                     )
 
                 return FetchResult(
@@ -330,31 +314,6 @@ class ScraperClient:
                 await self._backoff(attempt)
 
         raise FetchError(f"Failed to fetch {url}: {last_error}") from last_error
-
-    async def _get_with_browser(self, url: str) -> FetchResult:
-        logger.info("Falling back to browser for %s", url)
-        try:
-            result = await self.browser_fetcher.fetch(url)  # type: ignore[attr-defined]
-        except Exception as exc:
-            raise FetchError(f"Browser fetch failed for {url}: {exc}") from exc
-
-        for cookie in result.cookies:
-            name = cookie.get("name")
-            value = cookie.get("value")
-            domain = cookie.get("domain")
-            path = cookie.get("path") or "/"
-            if name and value:
-                self._client.cookies.set(name, value, domain=domain, path=path)
-
-        if looks_like_waf_challenge(result.html):
-            raise WAFChallengeError(f"Browser also received a challenge for {url}")
-
-        return FetchResult(
-            html=result.html,
-            status_code=result.status_code,
-            url=result.url,
-            via_browser=True,
-        )
 
 
 def _non_retryable_http_status(exc: Exception) -> bool:

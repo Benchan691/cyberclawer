@@ -2,37 +2,29 @@
 # Precedence: explicit ScraperSettings / CLI > [scrapers.<provider>] > [scrapers.defaults].
 #
 # Catch-up provider selection (optional):
-# - Omit this section to run every scraper.
-# - Use providers = ["all"] to run every scraper explicitly.
-# - Or list only the scrapers you want; remove lines you do not need.
+# - Omit this section to run every provider discovered in vuln_scraper/scrapers/.
+# - Use providers = ["all"] to run every provider explicitly.
+# - Or list only the scrapers you want; unknown keys are skipped with a warning.
 #
-# Available provider keys (kept in sync with vuln_scraper.scrapers):
-# avd, cisco, cnnvd, cnvd, cve, fortiguard, github_advisory, govcert,
-# hikvision, hkcert, hpe, huawei_sa, infosec, juniper, msrc, paloalto,
-# qianxin, ransomwarelive, splunk, zeroday, zimbra
+# Providers are discovered from the vuln_scraper/scrapers/ package directories
+# (each directory with a provider.py is a provider). This list may lag the
+# registry: keys without a matching provider are skipped.
 
 [scrapers.catch_up]
 providers = [
   "avd",
-  "cisco",
-  "cnnvd",
   "cnvd",
   "cve",
-  "fortiguard",
   "github_advisory",
-  "govcert",
-  "hikvision",
   "hkcert",
   "hpe",
   "huawei_sa",
-  "infosec",
   "juniper",
   "msrc",
+  "nvd",
   "paloalto",
   "qianxin",
-  "ransomwarelive",
   "splunk",
-  "zeroday",
   "zimbra",
 ]
 

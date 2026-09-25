@@ -10,7 +10,6 @@ def test_github_advisory_provider_registry_and_defaults() -> None:
     assert isinstance(provider, GitHubAdvisoryProvider)
     assert "github_advisory" in provider_keys()
     assert provider.content_type == "json"
-    assert not provider.browser_fallback
     assert provider.default_mongo_collection == "github_advisory"
     assert provider.stop_on_first_known
 

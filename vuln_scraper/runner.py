@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .browser import BrowserHTMLFetcher
 from .client import (
     CaptchaRequiredError,
     FetchError,
@@ -131,10 +130,8 @@ class ScraperRunner:
         self.settings = settings.for_provider(
             self.provider.key,
             default_collection=self.provider.default_mongo_collection,
-            browser_fallback=self.provider.browser_fallback,
             default_request_delay=getattr(self.provider, "default_request_delay", None),
             default_concurrency=getattr(self.provider, "default_concurrency", None),
-            manual_verification=getattr(self.provider, "manual_verification", None),
         ).normalized()
         self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
         self._prune_stale_provider_failures()
@@ -156,18 +153,6 @@ class ScraperRunner:
     async def run(self) -> dict[str, Any]:
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
 
-        browser_fetcher = (
-            BrowserHTMLFetcher(
-                headless=self.settings.browser_headless,
-                timeout_ms=self.settings.browser_timeout_ms,
-                chrome_executable=self.settings.chrome_executable,
-                user_data_dir=self.settings.browser_user_data_dir,
-                manual_verification=self.settings.manual_verification,
-            )
-            if self.settings.browser_fallback
-            else None
-        )
-
         self._emit(phase="starting")
         if self.provider.key == "cnvd":
             await self._prepare_cnvd_session()
@@ -186,15 +171,9 @@ class ScraperRunner:
             "timeout": self.settings.timeout,
             "headers": client_headers,
         }
-        if browser_fetcher is None:
-            async with ScraperClient(**client_kwargs) as client:
-                self._inject_cnvd_cookies(client)
-                return await self._finalize_run_output(await self._run_with_client(client))
-
-        async with browser_fetcher:
-            async with ScraperClient(browser_fetcher=browser_fetcher, **client_kwargs) as client:
-                self._inject_cnvd_cookies(client)
-                return await self._finalize_run_output(await self._run_with_client(client))
+        async with ScraperClient(**client_kwargs) as client:
+            self._inject_cnvd_cookies(client)
+            return await self._finalize_run_output(await self._run_with_client(client))
 
     async def _run_with_client(self, client: ScraperClient) -> dict[str, Any]:
         if self.settings.mongo_enabled:
@@ -570,9 +549,6 @@ class ScraperRunner:
             return self._stop_on_first_known_override
         return bool(getattr(self.provider, "stop_on_first_known", False))
 
-    def _always_use_browser(self) -> bool:
-        return bool(getattr(self.provider, "always_use_browser", False))
-
     def _uses_cnvd_session(self) -> bool:
         return self.provider.key == "cnvd" and self._cnvd_session is not None
 
@@ -640,8 +616,6 @@ class ScraperRunner:
             return await self._fetch_cnvd_html(client, url)
         if self.provider.key == "avd":
             return await self._fetch_avd_html(client, url)
-        if self._always_use_browser():
-            return await client.get_html(url, force_browser=True)
         return await client.get_html(url)
 
     @staticmethod
@@ -684,7 +658,7 @@ class ScraperRunner:
             )
             client.inject_cookies(cookies)
             if looks_like_waf_challenge(html) and "<table" not in html.lower():
-                logger.info("AVD redirect fetch still blocked for %s; using browser fallback", url)
+                logger.info("AVD redirect fetch still blocked for %s; using standard fetch", url)
                 return await client.get_html(url)
             return FetchResult(html=html, status_code=200, url=final_url)
         except ImportError as exc:

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import ScraperRunner
-from vuln_scraper.scrapers import CNVDProvider
+from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
 from tests.test_runner import FakeCNVDClient, identities
 
 
@@ -68,10 +68,8 @@ def test_cnvd_run_prepares_session_and_uses_http(tmp_path: Path) -> None:
         request_delay=0,
         retries=0,
         concurrency=1,
-        browser_fallback=True,
     )
     scraper = ScraperRunner(settings, provider=CNVDProvider())
-    assert scraper.settings.browser_fallback is False
 
     preauth = FakeCNVDSession()
     preauth.ensure_authenticated()

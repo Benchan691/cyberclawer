@@ -90,12 +90,11 @@ def test_environment_values_override_mongo_config_file(tmp_path, monkeypatch) ->
     assert settings.mongo_collection == "env_collection"
 
 
-def test_default_scrape_settings_enables_mongo_without_provider_browser_default() -> None:
+def test_default_scrape_settings_enables_mongo() -> None:
     settings = default_scrape_settings(limit=25).normalized()
 
     assert settings.limit == 25
     assert settings.mongo_enabled
-    assert not settings.browser_fallback
     assert settings.limit <= MAX_RESULT_LIMIT
 
 
@@ -127,12 +126,6 @@ def test_mongo_collections_from_config_is_alphabetical() -> None:
 
 def test_provider_keys_is_alphabetical() -> None:
     assert provider_keys() == tuple(sorted(provider_keys()))
-
-
-def test_scraper_settings_for_provider_disables_browser_for_cnvd() -> None:
-    settings = ScraperSettings(browser_fallback=True).for_provider("cnvd")
-
-    assert settings.browser_fallback is False
 
 
 def test_scraper_settings_for_provider_keeps_unified_collection(tmp_path) -> None:

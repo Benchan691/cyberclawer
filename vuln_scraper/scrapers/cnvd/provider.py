@@ -22,9 +22,6 @@ class CNVDProvider:
     key: str = "cnvd"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = False
-    always_use_browser: bool = False
-    manual_verification: bool = False
     content_type: str = "html"
     default_request_delay: float = 3.0
     default_concurrency: int = 1

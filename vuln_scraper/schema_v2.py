@@ -42,160 +42,199 @@ class ProviderSchema:
     volatile_fields: tuple[str, ...] = ()
 
 
-PROVIDER_SCHEMAS: dict[str, ProviderSchema] = {
-    "avd": ProviderSchema(
-        cve_fields=("cve_id",),
-        severity_fields=("danger_level",),
-        published_fields=("attack_metrics.disclosure_date",),
-    ),
-    "cisco": ProviderSchema(
-        identity_fields=("advisory_id",),
-        title_fields=("title",),
-        cve_fields=("cve_id", "cve_ids"),
-        severity_fields=("sir",),
-        published_fields=("first_published",),
-        updated_fields=("last_updated",),
-        source_fields=("publication_url",),
-    ),
-    "cnnvd": ProviderSchema(
-        identity_fields=("cnnvdId",),
-        title_fields=("vulName",),
-        cve_fields=("cveId", "cveCode"),
-        severity_fields=("vulLevel", "hazardLevel"),
-        published_fields=("publishDate", "publishTime"),
-        updated_fields=("updateTime",),
-    ),
-    "cnvd": ProviderSchema(
-        identity_fields=("cnvd_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("published_date",),
-        updated_fields=("updated_date",),
-        volatile_fields=(
-            "click_count", "comment_count", "follow_count",
-            "clickCount", "commentCount", "followCount",
+def _builtin_provider_schemas() -> dict[str, ProviderSchema]:
+    # Schemas for providers whose scraper packages have been removed
+    # (cisco, fortiguard, infosec, ransomwarelive, zeroday) are kept so
+    # `migrate-mongo`/`unify-mongo` can still normalize historical documents.
+    return {
+        "avd": ProviderSchema(
+            cve_fields=("cve_id",),
+            severity_fields=("danger_level",),
+            published_fields=("attack_metrics.disclosure_date",),
         ),
-    ),
-    "cve": ProviderSchema(
-        identity_fields=("cve_id",),
-        title_fields=("title",),
-        cve_fields=("cve_id",),
-        published_fields=("published",),
-        updated_fields=("last_modified",),
-        volatile_fields=("vuln_status", "affected_products"),
-    ),
-    "fortiguard": ProviderSchema(
-        identity_fields=("advisory_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("published_date",),
-        source_fields=("csaf_url", "cvrf_url"),
-    ),
-    "github_advisory": ProviderSchema(
-        identity_fields=("ghsa_id",),
-        cve_fields=("cve_id", "cve_ids"),
-        severity_fields=("severity",),
-        published_fields=("published_at",),
-        updated_fields=("updated_at",),
-        source_fields=("html_url", "api_url"),
-    ),
-    "govcert": ProviderSchema(
-        identity_fields=("alert_code",),
-        cve_fields=("cve_ids",),
-        published_fields=("published_date",),
-    ),
-    "hikvision": ProviderSchema(
-        identity_fields=("advisory_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("initial_release_date", "published_date"),
-        updated_fields=("updated_date",),
-    ),
-    "hkcert": ProviderSchema(
-        cve_fields=("vulnerability_identifiers",),
-        severity_fields=("risk_level",),
-        published_fields=("release_date",),
-        updated_fields=("last_update_date",),
-        volatile_fields=("views",),
-    ),
-    "hpe": ProviderSchema(
-        identity_fields=("doc_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("release_date", "published_date"),
-        updated_fields=("last_updated",),
-    ),
-    "huawei_sa": ProviderSchema(
-        identity_fields=("sasnNo", "sasnId"),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("publishDate",),
-    ),
-    "infosec": ProviderSchema(
-        identity_fields=("alert_code",),
-        cve_fields=("cve_ids",),
-        published_fields=("published_date",),
-    ),
-    "juniper": ProviderSchema(
-        identity_fields=("article_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        published_fields=("published_date",),
-        updated_fields=("updated_date",),
-    ),
-    "msrc": ProviderSchema(
-        identity_fields=("cve_id", "document_id"),
-        title_fields=("title",),
-        cve_fields=("cve_id",),
-        published_fields=("initial_release_date",),
-        updated_fields=("current_release_date",),
-    ),
-    "paloalto": ProviderSchema(
-        identity_fields=("advisory_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("severity",),
-        published_fields=("published_date",),
-        updated_fields=("updated_date",),
-    ),
-    "qianxin": ProviderSchema(
-        identity_fields=("article_id",),
-        title_fields=("title",),
-        cve_fields=("cve_ids",),
-        severity_fields=("level",),
-        published_fields=("published_at", "published_date"),
-        updated_fields=("updated_at", "updated_date"),
-        volatile_fields=("read_num", "prev_article", "next_article"),
-    ),
-    "ransomwarelive": ProviderSchema(
-        title_fields=("victim",),
-        published_fields=("attackdate",),
-        updated_fields=("discovered",),
-    ),
-    "splunk": ProviderSchema(
-        identity_fields=("advisory_id",),
-        title_fields=("title",),
-        cve_fields=("cve_id", "cve_ids"),
-        severity_fields=("severity",),
-        published_fields=("published_date",),
-        updated_fields=("last_modified",),
-    ),
-    "zeroday": ProviderSchema(
-        cve_fields=("cve_id",),
-        published_fields=("disclosed_date",),
-        updated_fields=("patched_date",),
-    ),
-    "zimbra": ProviderSchema(
-        identity_fields=("version",),
-        title_fields=("title",),
-        published_fields=("release_date",),
-        source_fields=("reference_links",),
-    ),
+        "cisco": ProviderSchema(
+            identity_fields=("advisory_id",),
+            title_fields=("title",),
+            cve_fields=("cve_id", "cve_ids"),
+            severity_fields=("sir",),
+            published_fields=("first_published",),
+            updated_fields=("last_updated",),
+            source_fields=("publication_url",),
+        ),
+        "cnnvd": ProviderSchema(
+            identity_fields=("cnnvdId",),
+            title_fields=("vulName",),
+            cve_fields=("cveId", "cveCode"),
+            severity_fields=("vulLevel", "hazardLevel"),
+            published_fields=("publishDate", "publishTime"),
+            updated_fields=("updateTime",),
+        ),
+        "cnvd": ProviderSchema(
+            identity_fields=("cnvd_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("published_date",),
+            updated_fields=("updated_date",),
+            volatile_fields=(
+                "click_count", "comment_count", "follow_count",
+                "clickCount", "commentCount", "followCount",
+            ),
+        ),
+        "cve": ProviderSchema(
+            identity_fields=("cve_id",),
+            title_fields=("title",),
+            cve_fields=("cve_id",),
+            published_fields=("published",),
+            updated_fields=("last_modified",),
+            volatile_fields=("vuln_status", "affected_products"),
+        ),
+        "fortiguard": ProviderSchema(
+            identity_fields=("advisory_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("published_date",),
+            source_fields=("csaf_url", "cvrf_url"),
+        ),
+        "github_advisory": ProviderSchema(
+            identity_fields=("ghsa_id",),
+            cve_fields=("cve_id", "cve_ids"),
+            severity_fields=("severity",),
+            published_fields=("published_at",),
+            updated_fields=("updated_at",),
+            source_fields=("html_url", "api_url"),
+        ),
+        "govcert": ProviderSchema(
+            identity_fields=("alert_code",),
+            cve_fields=("cve_ids",),
+            published_fields=("published_date",),
+        ),
+        "hikvision": ProviderSchema(
+            identity_fields=("advisory_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("initial_release_date", "published_date"),
+            updated_fields=("updated_date",),
+        ),
+        "hkcert": ProviderSchema(
+            cve_fields=("vulnerability_identifiers",),
+            severity_fields=("risk_level",),
+            published_fields=("release_date",),
+            updated_fields=("last_update_date",),
+            volatile_fields=("views",),
+        ),
+        "hpe": ProviderSchema(
+            identity_fields=("doc_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("release_date", "published_date"),
+            updated_fields=("last_updated",),
+        ),
+        "huawei_sa": ProviderSchema(
+            identity_fields=("sasnNo", "sasnId"),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("publishDate",),
+        ),
+        "infosec": ProviderSchema(
+            identity_fields=("alert_code",),
+            cve_fields=("cve_ids",),
+            published_fields=("published_date",),
+        ),
+        "juniper": ProviderSchema(
+            identity_fields=("article_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            published_fields=("published_date",),
+            updated_fields=("updated_date",),
+        ),
+        "msrc": ProviderSchema(
+            identity_fields=("cve_id", "document_id"),
+            title_fields=("title",),
+            cve_fields=("cve_id",),
+            published_fields=("initial_release_date",),
+            updated_fields=("current_release_date",),
+        ),
+        "paloalto": ProviderSchema(
+            identity_fields=("advisory_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("severity",),
+            published_fields=("published_date",),
+            updated_fields=("updated_date",),
+        ),
+        "qianxin": ProviderSchema(
+            identity_fields=("article_id",),
+            title_fields=("title",),
+            cve_fields=("cve_ids",),
+            severity_fields=("level",),
+            published_fields=("published_at", "published_date"),
+            updated_fields=("updated_at", "updated_date"),
+            volatile_fields=("read_num", "prev_article", "next_article"),
+        ),
+        "ransomwarelive": ProviderSchema(
+            title_fields=("victim",),
+            published_fields=("attackdate",),
+            updated_fields=("discovered",),
+        ),
+        "splunk": ProviderSchema(
+            identity_fields=("advisory_id",),
+            title_fields=("title",),
+            cve_fields=("cve_id", "cve_ids"),
+            severity_fields=("severity",),
+            published_fields=("published_date",),
+            updated_fields=("last_modified",),
+        ),
+        "zeroday": ProviderSchema(
+            cve_fields=("cve_id",),
+            published_fields=("disclosed_date",),
+            updated_fields=("patched_date",),
+        ),
+        "zimbra": ProviderSchema(
+            identity_fields=("version",),
+            title_fields=("title",),
+            published_fields=("release_date",),
+            source_fields=("reference_links",),
+        ),
+    }
+
+
+def _package_schemas() -> dict[str, ProviderSchema]:
+    """Collect optional ``PROVIDER_SCHEMA`` exports from provider packages.
+
+    The export may be a ``ProviderSchema`` instance or a plain dict of the
+    same field names (plain dicts avoid import cycles for providers).
+    """
+    import importlib
+    import logging
+
+    from .scrapers import provider_keys
+
+    logger = logging.getLogger(__name__)
+    schemas: dict[str, ProviderSchema] = {}
+    for key in provider_keys():
+        try:
+            module = importlib.import_module(f"vuln_scraper.scrapers.{key}.provider")
+        except Exception:  # noqa: BLE001 - broken plugins are skipped by the registry
+            continue
+        schema = getattr(module, "PROVIDER_SCHEMA", None)
+        if isinstance(schema, ProviderSchema):
+            schemas[key] = schema
+        elif isinstance(schema, dict):
+            try:
+                schemas[key] = ProviderSchema(**schema)
+            except TypeError as exc:
+                logger.warning("Ignoring malformed PROVIDER_SCHEMA for %s: %s", key, exc)
+    return schemas
+
+
+PROVIDER_SCHEMAS: dict[str, ProviderSchema] = {
+    **_builtin_provider_schemas(),
+    **_package_schemas(),
 }
 
 

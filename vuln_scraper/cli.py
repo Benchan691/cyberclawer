@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from dataclasses import replace
 
 from .catch_up import CATCH_UP_BATCH_SIZE, CATCH_UP_DEFAULT_LIMIT, DEFAULT_MAX_RUNS_PER_PROVIDER
 from .config import MAX_RESULT_LIMIT, default_scrape_settings
@@ -41,22 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=MAX_RESULT_LIMIT,
         help=f"Maximum records to scrape (1-{MAX_RESULT_LIMIT}).",
     )
-    run_parser.add_argument(
-        "--browser-headed",
-        action="store_true",
-        help="Open a visible browser window for browser-backed scrapers.",
-    )
-    run_parser.add_argument(
-        "--no-browser-fallback",
-        action="store_true",
-        help="Disable browser fallback for browser-backed scrapers and use HTTP/cookies only.",
-    )
-    run_parser.add_argument(
-        "--manual-verification-timeout-seconds",
-        type=_positive_int_arg,
-        default=None,
-        help="Maximum time to wait for headed manual verification.",
-    )
     catch_up_parser = subparsers.add_parser(
         "catch-up",
         help="Scrape and sync each provider repeatedly until MongoDB overlap.",
@@ -90,22 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int_arg,
         default=DEFAULT_MAX_RUNS_PER_PROVIDER,
         help="Safety cap on scrape runs per provider (default 100).",
-    )
-    catch_up_parser.add_argument(
-        "--include-manual-verification",
-        action="store_true",
-        help="Include scrapers that require headed manual browser verification.",
-    )
-    catch_up_parser.add_argument(
-        "--browser-headed",
-        action="store_true",
-        help="Open a visible browser window for browser-backed scrapers.",
-    )
-    catch_up_parser.add_argument(
-        "--manual-verification-timeout-seconds",
-        type=_positive_int_arg,
-        default=None,
-        help="Maximum time to wait for headed manual verification.",
     )
     subparsers.add_parser(
         "sync-source-catalog",
@@ -244,16 +211,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             limit = validate_limit(args.limit)
             provider = get_provider(args.provider)
-            if args.no_browser_fallback:
-                provider = replace(provider, browser_fallback=False)
             settings = default_scrape_settings(limit=limit)
-            if args.browser_headed:
-                settings = replace(settings, browser_headless=False)
-            if args.manual_verification_timeout_seconds is not None:
-                settings = replace(
-                    settings,
-                    manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
-                )
             output = asyncio.run(ScraperRunner(settings, provider=provider).run())
         except (KeyError, ValueError) as exc:
             parser.error(str(exc))
@@ -283,19 +241,11 @@ def main(argv: list[str] | None = None) -> None:
             limit = validate_limit(args.limit)
             batch_size = validate_limit(args.batch_size)
             settings = default_scrape_settings(limit=limit)
-            if args.browser_headed:
-                settings = replace(settings, browser_headless=False)
-            if args.manual_verification_timeout_seconds is not None:
-                settings = replace(
-                    settings,
-                    manual_verification_timeout_ms=args.manual_verification_timeout_seconds * 1000,
-                )
             settings = settings.normalized()
         except ValueError as exc:
             parser.error(str(exc))
         run_catch_up_cycle(
             settings,
-            include_manual_verification=args.include_manual_verification,
             max_runs_per_provider=args.max_runs_per_provider,
             batch_size=batch_size,
             days=args.days,

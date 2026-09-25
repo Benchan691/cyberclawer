@@ -9,7 +9,6 @@ def test_splunk_provider_registry_and_defaults() -> None:
     assert isinstance(provider, SplunkProvider)
     assert "splunk" in provider_keys()
     assert provider.content_type == "html"
-    assert not provider.browser_fallback
     assert provider.default_request_delay == 1.0
     assert provider.stop_on_first_known
     assert provider.default_mongo_collection == "splunk"

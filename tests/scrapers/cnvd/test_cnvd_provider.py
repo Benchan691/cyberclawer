@@ -8,9 +8,6 @@ def test_cnvd_provider_registry_and_defaults() -> None:
     assert isinstance(provider, CNVDProvider)
     assert "cnvd" in provider_keys()
     assert provider.content_type == "html"
-    assert not provider.browser_fallback
-    assert not provider.always_use_browser
-    assert not provider.manual_verification
     assert provider.default_mongo_collection == "cnvd"
     assert provider.default_request_delay == 3.0
     assert provider.default_concurrency == 1

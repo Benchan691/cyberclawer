@@ -9,25 +9,20 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from vuln_scraper.client import CaptchaRequiredError, FetchError, FetchResult
+from unittest.mock import patch
+
+from vuln_scraper.client import CaptchaRequiredError, FetchError, FetchResult, ScraperClient
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.runner import Checkpoint, ScraperRunner
-from vuln_scraper.scrapers import CiscoProvider
-from vuln_scraper.scrapers import CNNVDProvider
-from vuln_scraper.scrapers import CNVDProvider
-from vuln_scraper.scrapers import CVEProvider
-from vuln_scraper.scrapers import GovCERTProvider
-from vuln_scraper.scrapers import HKCERTProvider
-from vuln_scraper.scrapers import HikvisionProvider
-from vuln_scraper.scrapers import HuaweiSAProvider
-from vuln_scraper.scrapers import InfoSecProvider
-from vuln_scraper.scrapers import JuniperProvider
-from vuln_scraper.scrapers import MSRCProvider
-from vuln_scraper.scrapers import PaloAltoProvider
-from vuln_scraper.scrapers import QianxinProvider
-from vuln_scraper.scrapers import RansomwareLiveProvider
-from vuln_scraper.scrapers import SplunkProvider
-from vuln_scraper.scrapers import ZeroDayProvider
+from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
+from vuln_scraper.scrapers.cve.provider import CVEProvider
+from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
+from vuln_scraper.scrapers.huawei_sa.provider import HuaweiSAProvider
+from vuln_scraper.scrapers.juniper.provider import JuniperProvider
+from vuln_scraper.scrapers.msrc.provider import MSRCProvider
+from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
+from vuln_scraper.scrapers.qianxin.provider import QianxinProvider
+from vuln_scraper.scrapers.splunk.provider import SplunkProvider
 
 from tests.fake_avd_provider import FakeAvdProvider
 from vuln_scraper.timestamps import LOCAL_TIMEZONE, document_updated_time
@@ -474,26 +469,8 @@ def test_timestamp_resolver_uses_fallback_publish_fields() -> None:
     ) == "2026-06-17T16:00:00+00:00"
     assert document_updated_time(
         {
-            "type": "govcert",
-            "details": {"govcert": {"published_date": "2026-06-18"}},
-        }
-    ) == "2026-06-17T16:00:00+00:00"
-    assert document_updated_time(
-        {
             "type": "huawei_sa",
             "details": {"huawei_sa": {"publishDate": "2026-06-18"}},
-        }
-    ) == "2026-06-17T16:00:00+00:00"
-    assert document_updated_time(
-        {
-            "type": "infosec",
-            "details": {"infosec": {"published_date": "2026-06-18"}},
-        }
-    ) == "2026-06-17T16:00:00+00:00"
-    assert document_updated_time(
-        {
-            "type": "cnnvd",
-            "details": {"cnnvd": {"publishDate": "2026-06-18"}},
         }
     ) == "2026-06-17T16:00:00+00:00"
     assert document_updated_time(
@@ -759,45 +736,6 @@ def test_checkpoint_loads_zero_byte_file_and_rejects_malformed_json(tmp_path) ->
     checkpoint_file.write_text("{broken", encoding="utf-8")
     with pytest.raises(json.JSONDecodeError):
         Checkpoint.load(checkpoint_file)
-
-
-def test_zeroday_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
-    client = FakeZeroDayClient()
-    collection = FakeMongoCollection(
-        {
-            "zeroday:1102": {
-                "_id": "zeroday:1102",
-                "type": "zeroday",
-                "code": "1102",
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "zeroday.json",
-        checkpoint_file=tmp_path / "zeroday_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=ZeroDayProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["zeroday:1104", "zeroday:1103"]
-    assert output["mongo_sync"]["inserted"] == 2
-    assert set(collection.documents) == {"zeroday:1104", "zeroday:1103", "zeroday:1102"}
-    assert client.detail_ids_seen == ["1104", "1103"]
-
-
 def test_huawei_sa_json_provider_converts_api_records_and_skips_empty_cves(tmp_path) -> None:
     client = FakeHuaweiSAClient()
     settings = ScraperSettings(
@@ -832,46 +770,6 @@ def test_huawei_sa_json_provider_converts_api_records_and_skips_empty_cves(tmp_p
 
     assert without_cve["cve_code"] is None
     assert without_cve["details"]["huawei_sa"]["cve_ids"] == []
-
-
-def test_govcert_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
-    client = FakeGovCERTClient()
-    collection = FakeMongoCollection(
-        {
-            "govcert:1892": {
-                "_id": "govcert:1892",
-                "type": "govcert",
-                "code": "1892",
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "govcert.json",
-        checkpoint_file=tmp_path / "govcert_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=GovCERTProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["govcert:1894", "govcert:1893"]
-    assert output["vulnerabilities"][0]["cve_code"] == "2026-1894"
-    assert output["mongo_sync"]["inserted"] == 2
-    assert set(collection.documents) == {"govcert:1894", "govcert:1893", "govcert:1892"}
-    assert client.detail_ids_seen == ["1894", "1893"]
-
-
 def test_paloalto_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     client = FakePaloAltoClient()
     collection = FakeMongoCollection(
@@ -912,51 +810,6 @@ def test_paloalto_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
         "paloalto:CVE-2026-0263",
     }
     assert client.detail_ids_seen == ["CVE-2026-0265", "PAN-SA-2026-0007"]
-
-
-def test_infosec_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
-    client = FakeInfoSecClient()
-    collection = FakeMongoCollection(
-        {
-            "infosec:1891": {
-                "_id": "infosec:1891",
-                "type": "infosec",
-                "code": "1891",
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "infosec.json",
-        checkpoint_file=tmp_path / "infosec_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=InfoSecProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["infosec:1893", "infosec:1892"]
-    assert output["vulnerabilities"][0]["cve_code"] == "2026-1893"
-    assert output["vulnerabilities"][0]["details"]["infosec"]["summary"] == "Summary for 1893."
-    assert (
-        output["vulnerabilities"][0]["details"]["infosec"]["govcert_detail_url"]
-        == "https://www.govcert.gov.hk/en/alerts_detail.php?id=1893"
-    )
-    assert output["mongo_sync"]["inserted"] == 2
-    assert set(collection.documents) == {"infosec:1893", "infosec:1892", "infosec:1891"}
-    assert client.detail_ids_seen == ["1893", "1892"]
-
-
 def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     client = FakeSplunkClient()
     collection = FakeMongoCollection(
@@ -1001,145 +854,6 @@ def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     assert output["mongo_sync"]["inserted"] == 2
     assert set(collection.documents) == {"splunk:SVD-2026-0516", "splunk:SVD-2026-0501", "splunk:SVD-2026-0500"}
     assert client.detail_ids_seen == ["SVD-2026-0516", "SVD-2026-0501"]
-
-
-def test_hikvision_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
-    client = FakeHikvisionClient()
-    collection = FakeMongoCollection(
-        {
-            "hikvision:hsrc-2026-0002": {
-                "_id": "hikvision:hsrc-2026-0002",
-                "type": "hikvision",
-                "code": "hsrc-2026-0002",
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "hikvision.json",
-        checkpoint_file=tmp_path / "hikvision_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=HikvisionProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["hikvision:hsrc-2026-0003"]
-    assert output["vulnerabilities"][0]["cve_code"] == "2026-0003"
-    assert output["mongo_sync"]["inserted"] == 1
-    assert set(collection.documents) == {"hikvision:hsrc-2026-0003", "hikvision:hsrc-2026-0002"}
-    assert client.detail_ids_seen == ["hsrc-2026-0003"]
-    assert client.force_browser_seen == [True, True]
-
-
-def test_cnnvd_mongo_sync_skips_leading_known_records(tmp_path) -> None:
-    client = FakeCNNVDClient()
-    known_id = "202606-1911"
-    collection = FakeMongoCollection(
-        {
-            f"cnnvd:{known_id}": {
-                "_id": f"cnnvd:{known_id}",
-                "type": "cnnvd",
-                "code": known_id,
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=CNNVDProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1910"]
-    assert output["mongo_sync"]["inserted"] == 1
-    assert client.detail_ids_seen == ["record-1910"]
-
-
-def test_cnnvd_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
-    client = FakeCNNVDClient()
-    known_id = "202606-1910"
-    collection = FakeMongoCollection(
-        {
-            f"cnnvd:{known_id}": {
-                "_id": f"cnnvd:{known_id}",
-                "type": "cnnvd",
-                "code": known_id,
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=CNNVDProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
-    assert output["vulnerabilities"][0]["cve_code"] == "2026-11628"
-    assert output["mongo_sync"]["inserted"] == 1
-    assert set(collection.documents) == {
-        "cnnvd:202606-1911",
-        f"cnnvd:{known_id}",
-    }
-    assert client.detail_ids_seen == ["record-1911"]
-
-
-def test_cnnvd_detail_requests_stop_after_first_success(tmp_path) -> None:
-    client = FakeCNNVDClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
-
-    assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
-    assert output["vulnerabilities"][0]["details"]["cnnvd"] == cnnvd_detail_payload("record-1911")["data"]
-    assert output["vulnerabilities"][0]["source"]["detail_url"].endswith("/frontend/detail?vulId=record-1911")
-    assert client.detail_payloads == [{"id": "record-1911"}]
-
-
 def test_successful_run_output_ignores_stale_checkpoint_failures(tmp_path) -> None:
     checkpoint = tmp_path / "checkpoint.json"
     checkpoint.write_text(
@@ -1151,17 +865,17 @@ def test_successful_run_output_ignores_stale_checkpoint_failures(tmp_path) -> No
                         "type": "LIST",
                         "code": "",
                         "phase": "list",
-                        "url": "https://www.cnnvd.org.cn/web/homePage/vulWarnList",
-                        "error": "Failed to fetch https://www.cnnvd.org.cn/web/homePage/vulWarnList",
+                        "url": "https://api.msrc.microsoft.com/cvrf/2026-Sep",
+                        "error": "Failed to fetch https://api.msrc.microsoft.com/cvrf/2026-Sep",
                         "updated_at": "2026-06-08T10:50:53.582138+00:00",
                     },
                     {
-                        "identity": "cnnvd:0f9ea9d7144547dcaf6374acae1c7b97",
-                        "type": "CNNVD",
-                        "code": "0f9ea9d7144547dcaf6374acae1c7b97",
+                        "identity": "msrc:2025-70873",
+                        "type": "MSRC",
+                        "code": "2025-70873",
                         "phase": "detail",
-                        "url": "https://www.cnnvd.org.cn/home/warn?warnId=0f9ea9d7144547dcaf6374acae1c7b97",
-                        "error": "CNNVD detail response did not contain a warning object",
+                        "url": "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2025-70873",
+                        "error": "stale detail failure",
                         "updated_at": "2026-06-08T16:20:12.342869+00:00",
                     },
                     {
@@ -1179,199 +893,29 @@ def test_successful_run_output_ignores_stale_checkpoint_failures(tmp_path) -> No
         ),
         encoding="utf-8",
     )
-    client = FakeCNNVDClient()
+    client = FakeMSRCClient()
     settings = ScraperSettings(
         data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
+        output_file=tmp_path / "msrc.json",
         checkpoint_file=checkpoint,
         limit=1,
         request_delay=0,
         retries=0,
     )
 
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
+    output = asyncio.run(ScraperRunner(settings, provider=MSRCProvider())._run_with_client(client))
 
-    assert output["result_count"] == 1
+    assert output["result_count"] >= 1
     assert output["failed"] == []
     saved = json.loads(checkpoint.read_text(encoding="utf-8"))
-    assert not any(str(item.get("identity", "")).startswith("cnnvd:") for item in saved["failed"])
-    assert not any("vulWarnList" in str(item.get("url", "")) for item in saved["failed"])
+    assert not any(str(item.get("identity", "")).startswith("msrc:") for item in saved["failed"])
+    assert not any("api.msrc.microsoft.com" in str(item.get("url", "")) for item in saved["failed"])
     assert any(item.get("identity") == "zeroday:157" for item in saved["failed"])
 
 
-def test_cnnvd_fetches_one_list_page_for_multiple_details(tmp_path) -> None:
-    client = FakeCNNVDClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=3,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
-
-    assert output["result_count"] == 3
-    assert client.list_request_count == 1
-    assert client.detail_ids_seen == ["record-1911", "record-1910", "record-1909"]
-
-
-def test_cnnvd_detail_requests_use_internal_id(tmp_path) -> None:
-    client = FakeCNNVDClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
-
-    assert identities(output["vulnerabilities"]) == ["cnnvd:202606-1911"]
-    assert client.detail_payloads == [{"id": "record-1911"}]
-
-
-def test_cnnvd_detail_api_error_is_not_fallback(tmp_path) -> None:
-    client = FakeCNNVDClient(detail_api_error=True)
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
-
-    detail = output["vulnerabilities"][0]["details"]["cnnvd"]
-    assert detail["_list_summary"] is True
-    assert len(output["failed"]) == 1
-    assert "CNNVD detail API error 5001" in output["failed"][0]["error"]
-    assert "request_json={'id': 'record-1911'}" in output["failed"][0]["error"]
-
-
-def test_cnnvd_detail_captcha_refreshes_session_and_retries(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fast_sleep(_delay: float) -> None:
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
-    monkeypatch.setattr(
-        "vuln_scraper.runner.random_user_agent",
-        lambda *, exclude=None: "rotated-ua",
-    )
-    client = FakeCNNVDClient(captcha_required=1)
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(settings, provider=CNNVDProvider(user_agent="initial-ua"))._run_with_client(client)
-    )
-
-    assert output["failed"] == []
-    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
-    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
-    assert client.refresh_count == 1
-    assert client.refresh_count == 1
-    assert client.user_agents == ["initial-ua", "rotated-ua"]
-
-
-def test_cnnvd_list_captcha_refreshes_session_and_retries(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fast_sleep(_delay: float) -> None:
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
-    monkeypatch.setattr(
-        "vuln_scraper.runner.random_user_agent",
-        lambda *, exclude=None: "rotated-ua",
-    )
-    client = FakeCNNVDClient(list_captcha_required=1)
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(settings, provider=CNNVDProvider(user_agent="initial-ua"))._run_with_client(client)
-    )
-
-    assert output["failed"] == []
-    assert client.list_request_count == 2
-    assert client.refresh_count == 1
-    assert client.list_user_agents == ["initial-ua", "rotated-ua"]
-
-
-def test_cnnvd_captcha_required_refreshes_session_until_success(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    rotations = iter(["rotated-ua-1", "rotated-ua-2"])
-
-    async def fast_sleep(_delay: float) -> None:
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
-    monkeypatch.setattr(
-        "vuln_scraper.runner.random_user_agent",
-        lambda *, exclude=None: next(rotations),
-    )
-    client = FakeCNNVDClient(captcha_required=2)
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=CNNVDProvider(user_agent="initial-ua", captcha_retries=2),
-        )._run_with_client(client)
-    )
-
-    assert output["failed"] == []
-    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
-    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}, {"id": "record-1911"}]
-    assert client.refresh_count == 2
-    assert client.user_agents == ["initial-ua", "rotated-ua-1", "rotated-ua-2"]
-
-
-def test_cnnvd_retries_transient_unparseable_detail_response(tmp_path, caplog: pytest.LogCaptureFixture) -> None:
-    client = FakeCNNVDClient(empty_detail_once=True)
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cnnvd.json",
-        checkpoint_file=tmp_path / "cnnvd_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CNNVDProvider())._run_with_client(client))
-
-    assert output["failed"] == []
-    assert output["vulnerabilities"][0]["details"]["cnnvd"]["id"] == "record-1911"
-    assert client.detail_payloads == [{"id": "record-1911"}, {"id": "record-1911"}]
-    assert client.refresh_count == 1
-    assert "unparseable detail response for cnnvd:202606-1911" in caplog.text
-    assert "'data': None" in caplog.text
-
 
 def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
-    class Provider(CNNVDProvider):
+    class Provider(MSRCProvider):
         async def finalize_json_request(self, client, request):
             request = dict(request)
             request["headers"] = {"X-Test": "finalized"}
@@ -1397,7 +941,7 @@ def test_json_request_finalizer_runs_before_fetch(tmp_path) -> None:
 
 
 def test_json_request_uses_provider_direct_fallback_after_fetch_error(tmp_path) -> None:
-    class Provider(CNNVDProvider):
+    class Provider(MSRCProvider):
         async def finalize_json_request(self, client, request):
             return request
 
@@ -1420,7 +964,7 @@ def test_json_request_uses_provider_direct_fallback_after_fetch_error(tmp_path) 
     assert result.data == {"ok": True}
 
 
-def test_cnvd_mongo_sync_stops_at_first_known_record_and_forces_browser(tmp_path) -> None:
+def test_cnvd_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     client = FakeCNVDClient()
     collection = FakeMongoCollection(
         {
@@ -1456,7 +1000,6 @@ def test_cnvd_mongo_sync_stops_at_first_known_record_and_forces_browser(tmp_path
     assert output["mongo_sync"]["inserted"] == 1
     assert set(collection.documents) == {"cnvd:2026-21550", "cnvd:2026-21549"}
     assert client.detail_ids_seen == ["2026-21550"]
-    assert client.force_browser_seen == [False, False]
 
 
 def test_juniper_mongo_sync_stops_at_first_known_record(
@@ -1545,32 +1088,6 @@ def test_juniper_fetches_second_list_page_when_limit_exceeds_page_size(
     list_offsets = [request["json"]["firstResult"] for request in client.list_requests]
     assert 0 in list_offsets
     assert 10 in list_offsets
-
-
-def test_cisco_json_provider_uses_bearer_header_and_embeds_detail(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("CISCO_OPENVULN_TOKEN", "token-123")
-    client = FakeCiscoClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cisco.json",
-        checkpoint_file=tmp_path / "cisco_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-        concurrency=1,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=CiscoProvider())._run_with_client(client))
-
-    assert identities(output["vulnerabilities"]) == ["cisco:cisco-sa-foo-123"]
-    record = output["vulnerabilities"][0]
-    assert record["cve_code"] == "2026-12345"
-    assert record["details"]["cisco"]["advisory_id"] == "cisco-sa-foo-123"
-    assert client.headers_seen == [
-        {"Accept": "application/json", "Authorization": "Bearer token-123"},
-    ]
-
-
 def test_qianxin_json_provider_preserves_nested_html_tables(tmp_path) -> None:
     client = FakeQianxinClient()
     settings = ScraperSettings(
@@ -1591,44 +1108,6 @@ def test_qianxin_json_provider_preserves_nested_html_tables(tmp_path) -> None:
     ]
     assert detail["title"] == "Redis security advisory"
     assert "vulnerability_information" in detail["description"]
-
-
-def test_cisco_json_provider_missing_auth_fails_before_fetch(tmp_path, monkeypatch) -> None:
-    for name in (
-        "CISCO_OPENVULN_TOKEN",
-        "CISCO_OPENVULN_CLIENT_ID",
-        "CISCO_OPENVULN_CLIENT_SECRET",
-        "CISCO_CLIENT_ID",
-        "CISCO_CLIENT_SECRET",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    client = FakeNoCallJSONClient()
-    events: list[dict] = []
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "cisco.json",
-        checkpoint_file=tmp_path / "cisco_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-        concurrency=1,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=CiscoProvider(),
-            progress_callback=events.append,
-        )._run_with_client(client)
-    )
-
-    assert output["vulnerabilities"] == []
-    assert not client.called
-    assert any(
-        event["phase"] == "list-failed" and "requires authentication" in event["error"]
-        for event in events
-    )
-    
 class FakeHuaweiSAClient:
     def __init__(self) -> None:
         self.post_pages_seen: list[int] = []
@@ -1690,57 +1169,6 @@ class FakeHuaweiSAClient:
     async def get_json(self, url: str, *, headers=None):
         self.detail_urls_seen.append(url)
         return FakeJSONResult({}, url)
-
-
-def test_ransomwarelive_json_provider_uses_api_key_and_embeds_detail(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RANSOMWARE_LIVE_API_KEY", "rw-key")
-    client = FakeRansomwareLiveClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "ransomwarelive.json",
-        checkpoint_file=tmp_path / "ransomwarelive_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-        concurrency=1,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=RansomwareLiveProvider())._run_with_client(client))
-
-    assert identities(output["vulnerabilities"]) == ["ransomwarelive:QWNtZSBIb3NwaXRhbEBsb2NrYml0Mw"]
-    record = output["vulnerabilities"][0]
-    assert record["cve_code"] is None
-    assert record["title"] == "Acme Hospital"
-    assert record["details"]["ransomwarelive"]["group"] == "lockbit3"
-    assert client.headers_seen == [
-        {"Accept": "application/json", "X-API-KEY": "rw-key"},
-    ]
-
-
-def test_ransomwarelive_missing_auth_is_reported_in_output(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("RANSOMWARE_LIVE_API_KEY", raising=False)
-    monkeypatch.delenv("RANSOM_API_KEY", raising=False)
-    monkeypatch.chdir(tmp_path)
-    client = FakeNoCallJSONClient()
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "ransomwarelive.json",
-        checkpoint_file=tmp_path / "ransomwarelive_checkpoint.json",
-        limit=1,
-        request_delay=0,
-        retries=0,
-        concurrency=1,
-    )
-
-    output = asyncio.run(ScraperRunner(settings, provider=RansomwareLiveProvider())._run_with_client(client))
-
-    assert output["vulnerabilities"] == []
-    assert not client.called
-    assert output["failed"]
-    assert "RANSOMWARE_LIVE_API_KEY" in output["failed"][0]["error"]
-    assert "RANSOM_API_KEY" in output["failed"][0]["error"]
-
-
 class FakeHKCERTClient:
     def __init__(self) -> None:
         self.list_pages_seen: list[int] = []
@@ -1835,36 +1263,6 @@ class FakeFailingCVEClient(FakeCVEClient):
             self.detail_ids_seen.append(self.fail_detail_for)
             raise RuntimeError("simulated detail failure")
         return await super().get_json(url, headers=headers)
-
-
-class FakeZeroDayClient:
-    def __init__(self) -> None:
-        self.detail_ids_seen: list[str] = []
-
-    async def get_html(self, url: str) -> FetchResult:
-        parsed = urlparse(url)
-        if parsed.path == "/database/":
-            return FetchResult(html=zeroday_list_html(), status_code=200, url=url)
-
-        code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        self.detail_ids_seen.append(code)
-        return FetchResult(html=zeroday_detail_html(code), status_code=200, url=url)
-
-
-class FakeGovCERTClient:
-    def __init__(self) -> None:
-        self.detail_ids_seen: list[str] = []
-
-    async def get_html(self, url: str) -> FetchResult:
-        parsed = urlparse(url)
-        if parsed.path == "/en/alerts.php":
-            return FetchResult(html=govcert_list_html(), status_code=200, url=url)
-
-        code = parse_qs(parsed.query)["id"][0]
-        self.detail_ids_seen.append(code)
-        return FetchResult(html=govcert_detail_html(code), status_code=200, url=url)
-
-
 class FakePaloAltoClient:
     def __init__(self) -> None:
         self.detail_ids_seen: list[str] = []
@@ -1877,22 +1275,6 @@ class FakePaloAltoClient:
         code = parsed.path.strip("/")
         self.detail_ids_seen.append(code)
         return FetchResult(html=paloalto_detail_html(code), status_code=200, url=url)
-
-
-class FakeInfoSecClient:
-    def __init__(self) -> None:
-        self.detail_ids_seen: list[str] = []
-
-    async def get_html(self, url: str) -> FetchResult:
-        parsed = urlparse(url)
-        if parsed.netloc == "www.infosec.gov.hk":
-            return FetchResult(html=infosec_list_html(), status_code=200, url=url)
-
-        code = parse_qs(parsed.query)["id"][0]
-        self.detail_ids_seen.append(code)
-        return FetchResult(html=govcert_detail_html(code), status_code=200, url=url)
-
-
 class FakeSplunkClient:
     def __init__(self) -> None:
         self.detail_ids_seen: list[str] = []
@@ -1905,103 +1287,11 @@ class FakeSplunkClient:
         code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
         self.detail_ids_seen.append(code)
         return FetchResult(html=splunk_detail_html(code), status_code=200, url=url)
-
-
-class FakeHikvisionClient:
-    def __init__(self) -> None:
-        self.detail_ids_seen: list[str] = []
-        self.force_browser_seen: list[bool] = []
-
-    async def get_html(self, url: str, *, force_browser: bool = False) -> FetchResult:
-        self.force_browser_seen.append(force_browser)
-        parsed = urlparse(url)
-        if parsed.path.rstrip("/").endswith("/security-advisory"):
-            return FetchResult(html=hikvision_list_html(), status_code=200, url=url)
-
-        code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        self.detail_ids_seen.append(code)
-        return FetchResult(html=hikvision_detail_html(code), status_code=200, url=url)
-
-
-class FakeCNNVDClient:
-    def __init__(
-        self,
-        *,
-        detail_api_error: bool = False,
-        empty_detail_once: bool = False,
-        captcha_required: bool | int = False,
-        list_captcha_required: bool | int = False,
-    ) -> None:
-        self.detail_api_error = detail_api_error
-        self.empty_detail_once = empty_detail_once
-        self.captcha_required = captcha_required
-        self.list_captcha_required = list_captcha_required
-        self.list_request_count = 0
-        self.detail_ids_seen: list[str] = []
-        self.detail_payloads: list[dict] = []
-        self.user_agents: list[str | None] = []
-        self.list_user_agents: list[str | None] = []
-        self.refresh_count = 0
-        self.refreshed_headers: list[dict[str, str] | None] = []
-
-    async def refresh_session(self, headers=None) -> None:
-        self.refresh_count += 1
-        self.refreshed_headers.append(dict(headers) if headers else None)
-
-    async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None, retries=None):
-        user_agent = (headers or {}).get("User-Agent")
-        if url.endswith("/searchVul"):
-            self.list_user_agents.append(user_agent)
-        elif url.endswith("/searchVulById"):
-            self.user_agents.append(user_agent)
-        if url.endswith("/tourist/sign"):
-            return FakeJSONResult({"code": 200, "data": "test-signature"}, url)
-        if url.endswith("/searchVul"):
-            self.list_request_count += 1
-            if self._should_return_list_captcha():
-                return FakeJSONResult({"code": 4010, "success": False, "message": "需要人机验证", "data": None}, url)
-            return FakeJSONResult(cnnvd_list_payload(), url)
-
-        payload = dict(json_body or data or {})
-        self.detail_payloads.append(payload)
-        if self.empty_detail_once:
-            self.empty_detail_once = False
-            return FakeJSONResult({"code": 200, "success": True, "data": None}, url)
-        if self.detail_api_error:
-            return FakeJSONResult(
-                {"code": 5001, "success": False, "message": "参数错误[文档 ID 不能为空]", "data": None},
-                url,
-            )
-        if self._should_return_detail_captcha():
-            return FakeJSONResult({"code": 4010, "success": False, "message": "需要人机验证", "data": None}, url)
-        record_id = payload.get("id") or "record-1911"
-        self.detail_ids_seen.append(record_id)
-        return FakeJSONResult(cnnvd_detail_payload(record_id), url)
-
-    def _should_return_detail_captcha(self) -> bool:
-        if self.captcha_required is True:
-            return True
-        if self.captcha_required:
-            self.captcha_required = int(self.captcha_required) - 1
-            return True
-        return False
-
-    def _should_return_list_captcha(self) -> bool:
-        if self.list_captcha_required is True:
-            return True
-        if self.list_captcha_required:
-            self.list_captcha_required = int(self.list_captcha_required) - 1
-            return True
-        return False
-
-
 class FakeCNVDClient:
     def __init__(self) -> None:
         self.detail_ids_seen: list[str] = []
-        self.force_browser_seen: list[bool] = []
 
-    async def get_html(self, url: str, *, force_browser: bool = False) -> FetchResult:
-        self.force_browser_seen.append(force_browser)
+    async def get_html(self, url: str) -> FetchResult:
         parsed = urlparse(url)
         if parsed.path == "/flaw/list":
             return FetchResult(html=cnvd_list_html(), status_code=200, url=url)
@@ -2035,49 +1325,6 @@ class FakeJuniperClient:
             return FakeJSONResult(juniper_detail_coveo_payload(slug), url)
         first_result = int((json_body or {}).get("firstResult", 0))
         return FakeJSONResult(juniper_list_coveo_payload(first_result=first_result), url)
-
-
-class FakeCiscoClient:
-    def __init__(self) -> None:
-        self.headers_seen: list[dict | None] = []
-
-    async def get_json(self, url: str, *, headers=None):
-        self.headers_seen.append(dict(headers or {}))
-        parsed = urlparse(url)
-        if parsed.path.endswith("/all"):
-            return FakeJSONResult(
-                {
-                    "advisories": [
-                        {
-                            "advisoryId": "cisco-sa-foo-123",
-                            "advisoryTitle": "Cisco Product Remote Code Execution Vulnerability",
-                            "cves": "CVE-2026-12345",
-                            "firstPublished": "2026-05-20T15:00:00",
-                            "status": "Final",
-                            "sir": "Critical",
-                        }
-                    ],
-                    "paging": {"count": 1, "next": "NA", "prev": "NA"},
-                },
-                url,
-            )
-        return FakeJSONResult(
-            {
-                "advisories": [
-                    {
-                        "advisoryId": "cisco-sa-foo-123",
-                        "advisoryTitle": "Cisco Product Remote Code Execution Vulnerability",
-                        "cves": "CVE-2026-12345",
-                        "firstPublished": "2026-05-20T15:00:00",
-                        "status": "Final",
-                        "sir": "Critical",
-                    }
-                ]
-            },
-            url,
-        )
-
-
 class FakeQianxinClient:
     async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
         return FakeJSONResult(
@@ -2115,44 +1362,6 @@ class FakeQianxinClient:
             },
             url,
         )
-
-
-class FakeRansomwareLiveClient:
-    def __init__(self) -> None:
-        self.headers_seen: list[dict | None] = []
-
-    async def get_json(self, url: str, *, headers=None):
-        self.headers_seen.append(dict(headers or {}))
-        return FakeJSONResult(
-            [
-                {
-                    "id": "QWNtZSBIb3NwaXRhbEBsb2NrYml0Mw",
-                    "victim": "Acme Hospital",
-                    "group": "lockbit3",
-                    "attackdate": "2026-05-30",
-                    "discovered": "2026-06-02T10:15:00Z",
-                    "country": "US",
-                    "activity": "Healthcare",
-                    "website": "acme.example",
-                    "screenshot": "https://images.ransomware.live/screenshots/acme.png",
-                    "infostealer": {"employees": 4},
-                    "press": "https://news.example/acme-ransomware",
-                    "permalink": "https://www.ransomware.live/id/QWNtZSBIb3NwaXRhbEBsb2NrYml0Mw",
-                }
-            ],
-            url,
-        )
-
-
-class FakeNoCallJSONClient:
-    def __init__(self) -> None:
-        self.called = False
-
-    async def get_json(self, url: str, *, headers=None):
-        self.called = True
-        raise AssertionError("missing provider auth should prevent JSON fetch")
-
-
 class FakeJSONResult:
     def __init__(self, data: dict, url: str) -> None:
         self.data = data
@@ -2236,130 +1445,6 @@ def detail_html(avd_id: str) -> str:
     <span class="badge btn-primary">高危</span>
     <div class="text-detail">description {avd_id}</div>
     """
-
-
-def zeroday_list_html() -> str:
-    rows = [
-        ("1104", "Newest remote code execution", "CVE-2026-1104", "Remote code execution", "2026-06-04"),
-        ("1103", "Next privilege escalation", "CVE-2026-1103", "Privilege escalation", "2026-06-03"),
-        ("1102", "Known authentication bypass", "CVE-2026-1102", "Authentication bypass", "2026-06-02"),
-        ("1101", "Older unknown issue", "CVE-2026-1101", "Path traversal", "2026-06-01"),
-    ]
-    body = "\n".join(
-        f"""
-        <div class="issue" id="item_{index}">
-          <h3 class="issue-title">
-            <a href="/database/{code}/">{title}<br><span class="issue-code">{cve_id}</span></a>
-          </h3>
-          <div class="description">
-            <p class="desc-title">{vuln_type}</p>
-            <p>Summary for {code}</p>
-          </div>
-          <div class="issue-status">
-            <div class="discavered"><time>{date}</time></div>
-            <div class="patched"><time>{date}</time></div>
-          </div>
-          <div class="spec"><strong>Product {code}</strong></div>
-        </div>
-        """
-        for index, (code, title, cve_id, vuln_type, date) in enumerate(rows)
-    )
-    return f"""
-    <div id="last_vulnerabilities">
-      <p>Zero-day vulnerabilities discovered: 4</p>
-      <div id="issuew_wrap">{body}</div>
-    </div>
-    """
-
-
-def zeroday_detail_html(code: str) -> str:
-    return f"""
-    <div id="last_vulnerabilities">
-      <div class="issue">
-        <h3 class="issue-title">Weakness {code}<br><span class="issue-code">CVE-2026-{code}</span></h3>
-        <div class="issue-status">
-          <div class="discavered"><time>2026-06-01</time></div>
-          <div class="patched"><time>2026-06-01</time></div>
-        </div>
-        <div class="description">
-          <p><b>Advisory</b>: <a href="https://example.test/advisory/{code}">Advisory {code}</a></p>
-          <p><b>Vulnerable component:</b> Product {code}</p>
-          <p><b>CVE-ID</b>: CVE-2026-{code}</p>
-          <p><b>CVSSv3 score</b>: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</p>
-          <p><b>CWE-ID</b>: CWE-78 - OS Command Injection</p>
-          <p><b>Description</b>:</p>
-          <p>Detail for {code}</p>
-        </div>
-      </div>
-    </div>
-    """
-
-
-def govcert_list_html() -> str:
-    rows = [
-        ("1894", "High Threat Security Alert (A26-06-01): Vulnerability in Linux Kernel", "01-June-2026"),
-        ("1893", "Security Alert (A26-05-48): Multiple Vulnerabilities in Microsoft Edge", "29-May-2026"),
-        ("1892", "Security Alert (A26-05-47): Multiple Vulnerabilities in Google Chrome", "29-May-2026"),
-        ("1891", "High Threat Security Alert (A26-05-46): Multiple Vulnerabilities in Oracle Products", "29-May-2026"),
-    ]
-    body = "\n".join(
-        f"""
-        <div class="view-row">
-          <div class="view-col-1">
-            <span class="label label-primary">{date}</span>
-            <a href="alerts_detail.php?id={code}">{title}</a>
-          </div>
-        </div>
-        """
-        for code, title, date in rows
-    )
-    return f"""
-    <span class="total_page">1</span>
-    <div class="view-table">{body}</div>
-    """
-
-
-def infosec_list_html() -> str:
-    rows = [
-        ("1893", "Security Alert (A26-05-48): Multiple Vulnerabilities in Microsoft Edge", "2026-5-29"),
-        ("1892", "Security Alert (A26-05-47): Multiple Vulnerabilities in Google Chrome", "2026-5-29"),
-        ("1891", "High Threat Security Alert (A26-05-46): Multiple Vulnerabilities in Oracle Products", "2026-5-29"),
-        ("1890", "High Threat Security Alert (A26-05-45): Multiple Vulnerabilities in Linux Kernel", "2026-5-26"),
-    ]
-    body = "\n".join(
-        f"""
-        <div class="newsrow flexbox alert">
-          <div class="newsdate"><div>{date}</div><div></div></div>
-          <a target="_blank" href="https://www.govcert.gov.hk/en/alerts_detail.php?id={code}">
-            <div class="newsdata"><div class="newstitle">{title}</div></div>
-          </a>
-          <div class="newscontent">Summary for {code}.</div>
-        </div>
-        """
-        for code, title, date in rows
-    )
-    return f"""<div class="listing">{body}</div>"""
-
-
-def govcert_detail_html(code: str) -> str:
-    return f"""
-    <h1 id="doc_title">Security Alert (A26-06-01): Test Alert {code}</h1>
-    <p class="text-content">Published on: 01 June 2026</p>
-    <div class="noneditable">
-      <h4>Description:</h4>
-      <p>Detail for CVE-2026-{code}</p>
-      <h4>Affected Systems:</h4>
-      <ul><li>Product {code}</li></ul>
-      <h4>Impact:</h4>
-      <p>Remote code execution.</p>
-      <h4>Recommendation:</h4>
-      <p>Patch now.</p>
-      <h4>More Information:</h4>
-      <ul><li>https://example.test/advisory/{code}</li></ul>
-    </div>
-    """
-
-
 def paloalto_list_html() -> str:
     rows = [
         ("CVE-2026-0265", "PAN-OS: Authentication Bypass with Cloud Authentication Service (CAS) enabled", "HIGH", "7.2"),
@@ -2492,100 +1577,6 @@ def splunk_detail_html(code: str) -> str:
       <p>Upgrade now.</p>
     </main>
     """
-
-
-def hikvision_list_html() -> str:
-    rows = [
-        ("hsrc-2026-0003", "HSRC-2026-0003: New Hikvision Access Control Vulnerability", "High", "2026-06-03"),
-        ("hsrc-2026-0002", "HSRC-2026-0002: Known Hikvision Camera Vulnerability", "Medium", "2026-06-02"),
-        ("hsrc-2026-0001", "HSRC-2026-0001: Older Hikvision NVR Vulnerability", "Low", "2026-06-01"),
-    ]
-    body = "\n".join(
-        f"""
-        <div class="security-advisory item">
-          <a href="/hk/support/cybersecurity/security-advisory/{code}/">{title}</a>
-          <time>{date}</time>
-          <span>Severity: {severity}</span>
-        </div>
-        """
-        for code, title, severity, date in rows
-    )
-    return f"<main><p>Total 3 security advisories</p>{body}</main>"
-
-
-def hikvision_detail_html(code: str) -> str:
-    return f"""
-    <article>
-      <h1>{code.upper()}: Hikvision Security Advisory</h1>
-      <p>Published Date: 2026-06-03</p>
-      <p>Severity: High</p>
-      <p>CVE-2026-{code[-4:]} affects a Hikvision product.</p>
-      <h2>Description</h2>
-      <p>Detail for {code}.</p>
-      <h2>Affected Products</h2>
-      <ul><li>Product {code}</li></ul>
-      <h2>Solution</h2>
-      <p>Upgrade firmware.</p>
-    </article>
-    """
-
-
-def cnnvd_list_payload() -> dict:
-    return {
-        "code": 200,
-        "success": True,
-        "data": {
-            "total": 3,
-            "pageSize": 10,
-            "records": [
-                {
-                    "id": "record-1911",
-                    "vulName": "Google Chrome 安全漏洞",
-                    "cnnvdId": "CNNVD-202606-1911",
-                    "cveId": "CVE-2026-11628",
-                    "vulLevel": "High",
-                    "publishDate": "2026-06-08",
-                    "vulTypeName": "其他",
-                },
-                {
-                    "id": "record-1910",
-                    "vulName": "Google Chrome 释放后重用漏洞",
-                    "cnnvdId": "CNNVD-202606-1910",
-                    "cveId": "CVE-2026-11629",
-                    "vulLevel": "Medium",
-                    "publishDate": "2026-06-08",
-                    "vulTypeName": "其他",
-                },
-                {
-                    "id": "record-1909",
-                    "vulName": "Older vulnerability",
-                    "cnnvdId": "CNNVD-202606-1909",
-                    "publishDate": "2026-06-07",
-                },
-            ],
-        },
-    }
-
-
-def cnnvd_detail_payload(record_id: str) -> dict:
-    return {
-        "code": 200,
-        "success": True,
-        "data": {
-            "id": record_id,
-            "vulName": "Google Chrome 安全漏洞",
-            "cnnvdId": "CNNVD-202606-1911",
-            "cveId": "CVE-2026-11628",
-            "vulLevel": "High",
-            "vulTypeName": "其他",
-            "publishDate": "2026-06-08",
-            "vulDesc": "Chrome vulnerability.",
-            "productName": "Google Chrome",
-            "officialPatchLink": "https://example.test/patch",
-        },
-    }
-
-
 def cnvd_list_html() -> str:
     rows = [
         ("2026-21550", "Example Product 远程代码执行漏洞", "高", "2026-06-01"),

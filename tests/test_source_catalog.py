@@ -41,10 +41,10 @@ def write_config(tmp_path, content: str):
 def test_catalog_uses_explicit_catch_up_provider_list(tmp_path) -> None:
     config = write_config(
         tmp_path,
-        '[scrapers.catch_up]\nproviders = ["fortiguard", "cve"]\n',
+        '[scrapers.catch_up]\nproviders = ["hkcert", "cve"]\n',
     )
 
-    assert configured_source_keys(config) == ["fortiguard", "cve"]
+    assert configured_source_keys(config) == ["hkcert", "cve"]
 
 
 @pytest.mark.parametrize(
@@ -62,14 +62,13 @@ def test_catalog_uses_all_registered_providers_when_list_is_unrestricted(
     assert configured_source_keys(config) == list(provider_keys())
 
 
-def test_catalog_rejects_unknown_configured_provider(tmp_path) -> None:
+def test_catalog_skips_unknown_configured_provider(tmp_path) -> None:
     config = write_config(
         tmp_path,
-        '[scrapers.catch_up]\nproviders = ["missing-provider"]\n',
+        '[scrapers.catch_up]\nproviders = ["missing-provider", "hkcert"]\n',
     )
 
-    with pytest.raises(ValueError, match="unknown catch-up provider"):
-        configured_source_keys(config)
+    assert configured_source_keys(config) == ["hkcert"]
 
 
 def test_source_catalog_replaces_single_document_atomically() -> None:
@@ -77,12 +76,12 @@ def test_source_catalog_replaces_single_document_atomically() -> None:
     updated_at = datetime(2026, 9, 23, tzinfo=UTC)
 
     document = write_source_catalog(
-        database, ["fortiguard", "cve", "cve"], updated_at=updated_at
+        database, ["hkcert", "cve", "cve"], updated_at=updated_at
     )
 
     assert document == {
         "_id": SOURCE_CATALOG_ID,
-        "providers": ["fortiguard", "cve"],
+        "providers": ["hkcert", "cve"],
         "updated_at": updated_at,
     }
     assert database.collection.calls == [

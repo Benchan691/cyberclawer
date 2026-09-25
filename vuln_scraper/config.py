@@ -89,24 +89,6 @@ def _env(name: str, *, legacy: str | None = None) -> str | None:
     return None
 
 
-def default_chrome_executable() -> str | None:
-    env_path = _env("SCRAPER_CHROME_PATH", legacy="AVD_CHROME_PATH")
-    if env_path:
-        return env_path
-
-    candidates = [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-    ]
-    for candidate in candidates:
-        if Path(candidate).exists():
-            return candidate
-    return None
-
-
 @dataclass(slots=True)
 class ScraperRetryConfig:
     retries: int = DEFAULT_RETRIES
@@ -142,23 +124,14 @@ class ScraperSettings:
     data_dir: Path = DEFAULT_DATA_DIR
     output_file: Path = DEFAULT_OUTPUT_FILE
     checkpoint_file: Path = DEFAULT_CHECKPOINT_FILE
-    browser_fallback: bool = False
-    browser_headless: bool = True
-    browser_timeout_ms: int = 30_000
-    browser_user_data_dir: Path | None = None
-    manual_verification: bool = False
-    manual_verification_timeout_ms: int = 300_000
-    chrome_executable: str | None = None
 
     def for_provider(
         self,
         provider_key: str,
         *,
         default_collection: str | None = None,
-        browser_fallback: bool | None = None,
         default_request_delay: float | None = None,
         default_concurrency: int | None = None,
-        manual_verification: bool | None = None,
     ) -> "ScraperSettings":
         # Every provider shares one physical collection.  Provider-specific
         # defaults remain on the provider classes only so the migration command
@@ -170,18 +143,6 @@ class ScraperSettings:
         concurrency = self.concurrency
         if default_concurrency is not None and self.concurrency == 3:
             concurrency = max(1, default_concurrency)
-        provider_manual_verification = self.manual_verification if manual_verification is None else manual_verification
-        browser_headless = self.browser_headless
-        browser_user_data_dir = self.browser_user_data_dir
-        browser_timeout_ms = self.browser_timeout_ms
-        if provider_manual_verification:
-            browser_headless = False
-            browser_timeout_ms = max(browser_timeout_ms, self.manual_verification_timeout_ms)
-            if browser_user_data_dir is None:
-                browser_user_data_dir = Path(self.data_dir) / "browser_profiles" / provider_key
-        resolved_browser_fallback = self.browser_fallback if browser_fallback is None else browser_fallback
-        if provider_key == "cnvd":
-            resolved_browser_fallback = False
 
         retry_cfg = retry_config_for_provider(provider_key, self.scrapers_config_file)
         retries = self.retries
@@ -215,13 +176,8 @@ class ScraperSettings:
         return replace(
             self,
             mongo_collection=mongo_collection,
-            browser_fallback=resolved_browser_fallback,
             request_delay=request_delay,
             concurrency=concurrency,
-            browser_headless=browser_headless,
-            browser_timeout_ms=browser_timeout_ms,
-            browser_user_data_dir=browser_user_data_dir,
-            manual_verification=provider_manual_verification,
             retries=retries,
             backoff_base=backoff_base,
             backoff_max=backoff_max,
@@ -235,16 +191,11 @@ class ScraperSettings:
         data_dir = Path(self.data_dir)
         output_file = Path(self.output_file)
         checkpoint_file = Path(self.checkpoint_file)
-        browser_user_data_dir = Path(self.browser_user_data_dir) if self.browser_user_data_dir is not None else None
 
         if output_file == DEFAULT_OUTPUT_FILE:
             output_file = data_dir / DEFAULT_OUTPUT_FILE.name
         if checkpoint_file == DEFAULT_CHECKPOINT_FILE:
             checkpoint_file = data_dir / DEFAULT_CHECKPOINT_FILE.name
-
-        chrome_executable = self.chrome_executable
-        if self.browser_fallback and not chrome_executable:
-            chrome_executable = default_chrome_executable()
 
         if not 1 <= self.limit <= MAX_RESULT_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_RESULT_LIMIT}")
@@ -297,13 +248,6 @@ class ScraperSettings:
             data_dir=data_dir,
             output_file=output_file,
             checkpoint_file=checkpoint_file,
-            browser_fallback=self.browser_fallback,
-            browser_headless=self.browser_headless,
-            browser_timeout_ms=self.browser_timeout_ms,
-            browser_user_data_dir=browser_user_data_dir,
-            manual_verification=self.manual_verification,
-            manual_verification_timeout_ms=self.manual_verification_timeout_ms,
-            chrome_executable=chrome_executable,
         )
 
 
@@ -467,7 +411,6 @@ def default_scrape_settings(*, limit: int = MAX_RESULT_LIMIT, mongo_enabled: boo
         limit=limit,
         mongo_enabled=mongo_enabled,
         mongo_config_file=DEFAULT_MONGO_CONFIG_FILE,
-        browser_fallback=False,
         mongo_interactive=False,
     )
 

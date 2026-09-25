@@ -21,7 +21,6 @@ def test_fetch_avd_html_uses_sigchl_redirect(tmp_path) -> None:
         data_dir=tmp_path,
         limit=1,
         mongo_enabled=False,
-        browser_fallback=False,
         request_delay=0,
         retries=0,
     ).normalized()

@@ -11,7 +11,6 @@ def test_msrc_provider_registry_and_defaults() -> None:
     assert isinstance(provider, MSRCProvider)
     assert "msrc" in provider_keys()
     assert provider.content_type == "json"
-    assert not provider.browser_fallback
     assert provider.default_mongo_collection == "msrc"
     assert not provider.stop_on_first_known
 

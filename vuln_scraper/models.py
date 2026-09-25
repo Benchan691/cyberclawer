@@ -62,9 +62,6 @@ class ListEntry:
         if provider == "cve":
             codes: list[str] = []
             cve_code = None
-        elif provider == "cisco":
-            codes = cve_codes(effective_detail)
-            cve_code = normalize_cve_code(_detail_value(effective_detail, "cve_id"))
         else:
             codes = cve_codes(effective_detail)
             cve_code = codes[0] if codes else None

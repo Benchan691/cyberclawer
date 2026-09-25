@@ -14,7 +14,10 @@ from vuln_scraper.catch_up import (
     run_catch_up_cycle,
 )
 from vuln_scraper.config import default_scrape_settings
-from vuln_scraper.scrapers import CVEProvider, HKCERTProvider, ZeroDayProvider, all_providers
+from vuln_scraper.scrapers import all_providers
+from vuln_scraper.scrapers.cve.provider import CVEProvider
+from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
+from vuln_scraper.scrapers.splunk.provider import SplunkProvider
 
 
 @pytest.fixture(autouse=True)
@@ -113,7 +116,7 @@ def test_run_catch_up_cycle_publishes_selected_sources(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "vuln_scraper.catch_up.providers_for_catch_up",
-        lambda settings: [HKCERTProvider(), ZeroDayProvider()],
+        lambda settings: [HKCERTProvider(), SplunkProvider()],
     )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr(
@@ -124,7 +127,7 @@ def test_run_catch_up_cycle_publishes_selected_sources(monkeypatch) -> None:
 
     run_catch_up_cycle(default_scrape_settings())
 
-    assert published == [["hkcert", "zeroday"]]
+    assert published == [["hkcert", "splunk"]]
 
 
 def test_run_catch_up_cycle_runs_provider_once_for_timestamp_boundary(monkeypatch) -> None:
@@ -198,14 +201,14 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "vuln_scraper.catch_up.providers_for_catch_up",
-        lambda settings: [HKCERTProvider(), ZeroDayProvider()],
+        lambda settings: [HKCERTProvider(), SplunkProvider()],
     )
     monkeypatch.setattr("vuln_scraper.catch_up.ScraperRunner", FakeScraper)
     monkeypatch.setattr("vuln_scraper.catch_up.asyncio.run", fake_asyncio_run)
 
     run_catch_up_cycle(default_scrape_settings())
 
-    assert calls == ["hkcert", "zeroday"]
+    assert calls == ["hkcert", "splunk"]
 
 
 def test_run_catch_up_cycle_uses_one_timestamp_run(monkeypatch) -> None:
@@ -353,7 +356,7 @@ def test_providers_for_catch_up_respects_configured_list(tmp_path) -> None:
     config_file.write_text(
         """
         [scrapers.catch_up]
-        providers = ["zeroday", "hkcert", "zeroday"]
+        providers = ["fortiguard", "hkcert", "fortiguard"]
         """,
         encoding="utf-8",
     )
@@ -363,10 +366,10 @@ def test_providers_for_catch_up_respects_configured_list(tmp_path) -> None:
 
     keys = [provider.key for provider in providers_for_catch_up(settings)]
 
-    assert keys == ["zeroday", "hkcert"]
+    assert keys == ["hkcert"]
 
 
-def test_providers_for_catch_up_rejects_unknown_provider(tmp_path) -> None:
+def test_providers_for_catch_up_skips_unknown_provider(tmp_path, caplog) -> None:
     config_file = tmp_path / "scrapers.toml"
     config_file.write_text(
         """
@@ -379,8 +382,11 @@ def test_providers_for_catch_up_rejects_unknown_provider(tmp_path) -> None:
     settings = default_scrape_settings().normalized()
     settings = replace(settings, scrapers_config_file=config_file)
 
-    with pytest.raises(ValueError, match="unknown catch-up provider"):
-        providers_for_catch_up(settings)
+    with caplog.at_level("WARNING"):
+        selected = providers_for_catch_up(settings)
+
+    assert [provider.key for provider in selected] == ["hkcert"]
+    assert any("not-a-provider" in record.message for record in caplog.records)
 
 
 def test_run_catch_up_cycle_uses_configured_providers(monkeypatch, tmp_path) -> None:

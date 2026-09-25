@@ -11,7 +11,6 @@ class FakeAvdProvider:
     key: str = "fake_avd"
     source_url: str = "https://avd.aliyun.com/high-risk/list"
     default_mongo_collection: str = "avd"
-    browser_fallback: bool = False
     content_type: str = "html"
     default_request_delay: float = 0.0
     stop_on_first_known: bool = False

@@ -26,14 +26,19 @@ def providers_for_catch_up(settings: ScraperSettings) -> list[ScraperProvider]:
         return []
 
     known = set(provider_keys())
-    unknown = [key for key in configured if key not in known]
-    if unknown:
-        choices = ", ".join(provider_keys())
-        bad = ", ".join(unknown)
-        raise ValueError(f"unknown catch-up provider(s): {bad}; choose from: {choices}")
-
     by_key = {provider.key: provider for provider in all_providers()}
-    return [by_key[key] for key in configured]
+    selected: list[ScraperProvider] = []
+    for key in configured:
+        provider = by_key.get(key)
+        if provider is None:
+            # Configuration may lag a removed provider; skip instead of crashing.
+            logger.warning(
+                "Skipping unknown catch-up provider %r (not in the provider registry)",
+                key,
+            )
+            continue
+        selected.append(provider)
+    return selected
 
 
 def provider_caught_up(output: dict) -> bool:
@@ -66,7 +71,6 @@ def no_progress(output: dict) -> bool:
 def run_catch_up_cycle(
     settings: ScraperSettings,
     *,
-    include_manual_verification: bool = False,
     max_runs_per_provider: int = DEFAULT_MAX_RUNS_PER_PROVIDER,
     batch_size: int = CATCH_UP_BATCH_SIZE,
     days: int = 1,
@@ -85,20 +89,11 @@ def run_catch_up_cycle(
         ", ".join(selected_keys) if selected_keys else "(none)",
     )
     for provider in selected_providers:
-        if getattr(provider, "manual_verification", False) and not include_manual_verification:
-            logger.info(
-                "Skipping provider %s because it requires manual browser verification",
-                provider.key,
-            )
-            continue
-
         provider_settings = settings.for_provider(
             provider.key,
             default_collection=provider.default_mongo_collection,
-            browser_fallback=provider.browser_fallback,
             default_request_delay=provider.default_request_delay,
             default_concurrency=getattr(provider, "default_concurrency", None),
-            manual_verification=getattr(provider, "manual_verification", None),
         )
         normalized = provider_settings.normalized()
         runs = 0

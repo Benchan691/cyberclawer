@@ -15,8 +15,6 @@ def test_juniper_provider_registry_and_defaults() -> None:
     assert isinstance(provider, JuniperProvider)
     assert "juniper" in provider_keys()
     assert provider.content_type == "json"
-    assert not provider.browser_fallback
-    assert not provider.always_use_browser
     assert provider.default_mongo_collection == "juniper"
     assert provider.stop_on_first_known
 

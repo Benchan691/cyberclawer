@@ -26,7 +26,6 @@ class CVEProvider:
     key: str = "cve"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = False
     content_type: str = "json"
     default_request_delay: float = 0.2
     stop_on_first_known: bool = False

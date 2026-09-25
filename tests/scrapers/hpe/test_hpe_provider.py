@@ -20,8 +20,6 @@ def test_hpe_provider_registry_and_defaults() -> None:
     assert "hpe" in provider_keys()
     assert provider.source_url == SOURCE_URL
     assert provider.content_type == "html"
-    assert not provider.browser_fallback
-    assert not provider.always_use_browser
     assert provider.default_request_delay == 1.0
     assert provider.stop_on_first_known
     assert provider.default_mongo_collection == "hpe"

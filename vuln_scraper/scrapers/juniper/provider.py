@@ -40,8 +40,6 @@ class JuniperProvider:
     key: str = "juniper"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = False
-    always_use_browser: bool = False
     content_type: str = "json"
     default_request_delay: float = 1.5
     stop_on_first_known: bool = True

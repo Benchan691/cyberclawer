@@ -15,7 +15,6 @@ class AVDProvider:
     key: str = "avd"
     source_url: str = SOURCE_URL
     default_mongo_collection: str = DEFAULT_COLLECTION
-    browser_fallback: bool = True
     content_type: str = "html"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = False

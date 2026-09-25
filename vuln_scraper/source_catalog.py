@@ -18,13 +18,7 @@ def configured_source_keys(scrapers_config_file: Any = None) -> list[str]:
         return list(provider_keys())
 
     available = set(provider_keys())
-    unknown = [key for key in configured if key not in available]
-    if unknown:
-        choices = ", ".join(provider_keys())
-        raise ValueError(
-            f"unknown catch-up provider(s): {', '.join(unknown)}; choose from: {choices}"
-        )
-    return list(configured)
+    return [key for key in configured if key in available]
 
 
 def source_catalog_document(
