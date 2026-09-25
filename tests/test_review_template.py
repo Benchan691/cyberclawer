@@ -187,6 +187,48 @@ def test_cisco_description_strips_paragraph_html_tags() -> None:
     assert template["description"] == "First paragraph.Second paragraph."
 
 
+def test_nvd_review_template_maps_description_metrics_and_links() -> None:
+    template = review_template_from_document(
+        document(
+            "nvd",
+            {
+                "cve_id": "CVE-2026-1234",
+                "title": "Outline OAuth logic error",
+                "description": "A logic error in OAuthInterface allows account takeover.",
+                "vuln_status": "Modified",
+                "severity": "HIGH",
+                "base_score": 9.8,
+                "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "published_date": "2026-05-11",
+                "last_modified": "2026-05-20",
+                "cwe_ids": ["CWE-284"],
+                "reference_links": [
+                    "https://nvd.nist.gov/vuln/detail/CVE-2026-1234",
+                    "https://github.com/advisory",
+                ],
+                "affected_products": ["cpe:2.3:a:outline:outline:1.6.1:*:*:*:*:*:*:*:*"],
+                "detail_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-1234",
+            },
+            cve_code="CVE-2026-1234",
+        )
+    )
+
+    assert template["description"] == "A logic error in OAuthInterface allows account takeover."
+    assert template["impacts"] == "High"
+    assert template["affected"] == ["cpe:2.3:a:outline:outline:1.6.1:*:*:*:*:*:*:*:*"]
+    assert template["cve"] == "CVE-2026-1234"
+    assert template["recommendation"] == ""
+    assert template["related_link"] == [
+        "https://nvd.nist.gov/vuln/detail/CVE-2026-1234",
+        "https://github.com/advisory",
+    ]
+
+    pipeline = json.dumps(review_view_pipeline("nvd"))
+    assert "$details.description" in pipeline
+    assert "$details.affected_products" in pipeline
+    assert "$details.reference_links" in pipeline
+
+
 def test_hikvision_prefers_summary_for_review_description() -> None:
     template = review_template_from_document(
         document(
@@ -402,6 +444,18 @@ def test_providers_without_normalized_products_have_blank_affected(provider: str
         ),
         ("hikvision", {"severity": "High", "affected_products": ["Camera A"]}, "High", "Camera A"),
         (
+            "nvd",
+            {
+                "severity": "HIGH",
+                "affected_products": [
+                    "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*:*",
+                    "cpe:2.3:a:vendor:product2:*:*:*:*:*:*:*:*:*",
+                ],
+            },
+            "High",
+            "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*:*\ncpe:2.3:a:vendor:product2:*:*:*:*:*:*:*:*:*",
+        ),
+        (
             "cnnvd",
             {
                 "hazardLevel": 2,
@@ -453,6 +507,7 @@ def test_provider_severity_and_affected_sources(
         "cnnvd",
         "cnvd",
         "juniper",
+        "nvd",
     ],
 )
 def test_every_provider_returns_exact_string_schema(provider: str) -> None:

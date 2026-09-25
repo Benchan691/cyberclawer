@@ -596,6 +596,17 @@ def _first_available(detail: dict[str, Any], paths: tuple[tuple[str, ...], ...])
     return ""
 
 
+def _nvd(document: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return _base(
+        document,
+        description=detail.get("description"),
+        impacts=detail.get("severity"),
+        affected=_join(detail.get("affected_products")),
+        cve=_document_cve(document),
+        related_link=_join(detail.get("reference_links")),
+    )
+
+
 _MAPPERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
     "avd": _avd,
     "hkcert": _hkcert,
@@ -615,6 +626,7 @@ _MAPPERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] 
     "cnnvd": _cnnvd,
     "cnvd": _cnvd,
     "juniper": _juniper,
+    "nvd": _nvd,
 }
 
 
@@ -684,6 +696,7 @@ def _mongo_description(provider: str, detail: str) -> dict[str, Any]:
         "cnnvd": [f"{detail}.vulDesc", f"{detail}.productDesc"],
         "cnvd": [f"{detail}.description"],
         "juniper": [f"{detail}.description", f"{detail}.summary"],
+        "nvd": [f"{detail}.description"],
     }
     return _mfirst(sources.get(provider, []))
 
@@ -834,6 +847,8 @@ def _mongo_affected(provider: str, detail: str) -> dict[str, Any]:
         return _mjoin(f"{detail}.affected_products")
     if provider == "juniper":
         return _mjoin(f"{detail}.products")
+    if provider == "nvd":
+        return _mjoin(f"{detail}.affected_products")
     return _mstr("")
 
 
@@ -909,6 +924,7 @@ def _mongo_related_link(provider: str, detail: str) -> dict[str, Any]:
         "hikvision": [f"{detail}.reference_links"],
         "cnvd": [f"{detail}.reference_links"],
         "juniper": [f"{detail}.reference_links"],
+        "nvd": [f"{detail}.reference_links"],
     }
     values = sources.get(provider, [])
     return _mjoin(values[0]) if values else _mstr("")
