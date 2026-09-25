@@ -45,6 +45,8 @@ def test_parse_cve_record_extracts_metrics_and_cwes() -> None:
     if record["base_score"] is not None:
         assert 0.0 <= record["base_score"] <= 10.0
         assert record["cvss_vector"]
+        assert record["cvss"]["vector_string"] == record["cvss_vector"]
+        assert record["cvss"]["base_score"] == record["base_score"]
     assert isinstance(record["reference_links"], list)
     assert all(link.startswith(("http", "ftp")) for link in record["reference_links"])
     assert isinstance(record["affected_products"], list)

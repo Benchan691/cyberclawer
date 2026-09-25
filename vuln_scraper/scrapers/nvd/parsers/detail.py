@@ -20,7 +20,7 @@ class NvdDetailRecord:
     severity: str | None = None
     base_score: float | None = None
     cvss_vector: str | None = None
-    cvss_version: str | None = None
+    cvss: dict[str, Any] = field(default_factory=dict)
     published_date: str | None = None
     last_modified: str | None = None
     cwe_ids: list[str] = field(default_factory=list)
@@ -67,7 +67,14 @@ def parse_cve_record(cve: dict[str, Any]) -> NvdDetailRecord:
         severity=severity,
         base_score=base_score,
         cvss_vector=cvss_vector,
-        cvss_version=cvss_version,
+        # Nested so consumers (e.g. the newsletter renderer's cvss walker)
+        # can render vector, score and severity together.
+        cvss={
+            "vector_string": cvss_vector or "",
+            "base_score": base_score if base_score is not None else "",
+            "base_severity": severity or "",
+            "version": cvss_version or "",
+        },
         published_date=_date_part(cve.get("published")),
         last_modified=_date_part(cve.get("lastModified")),
         cwe_ids=cwe_ids,
