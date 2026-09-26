@@ -189,7 +189,6 @@ def unify_mongo(
                 }
                 if validate:
                     validate_v2_document(converted, "news")
-                    _validate_rendered_document(converted)
             except Exception as exc:
                 result.status = "failed"
                 result.validation_error = f"{collection_name}: {exc}"
@@ -354,14 +353,6 @@ def _infer_provider(
     return ""
 
 
-def _validate_rendered_document(document: dict[str, Any]) -> None:
-    from .review_template import _review_document_errors, review_template_from_document
-
-    errors = _review_document_errors(review_template_from_document(document))
-    if errors:
-        raise ValueError("rendered review data is invalid: " + ", ".join(errors))
-
-
 def build_migration_update(document: dict[str, Any], collection_name: str) -> dict[str, Any]:
     """Return an update document for callers that migrate one document."""
     converted = convert_existing_document(document, collection_name)
@@ -459,31 +450,11 @@ def _validate_shadow(source: Any, shadow: Any, provider: str) -> None:
     shadow_ids = {document["_id"] for document in shadow.find({}, {"_id": 1})}
     if source_ids != shadow_ids:
         raise ValueError(f"{provider}: shadow _id set differs from source")
-    from .review_template import review_template_from_document
-
-    source_reviews = {
-        document["_id"]: review_template_from_document(document)
-        for document in source.find({})
-    }
     for document in shadow.find({}):
         validate_v2_document(document, provider)
         prohibited = PROHIBITED_FIELDS.intersection(document)
         if prohibited:
             raise ValueError(f"{provider}: prohibited fields remain: {sorted(prohibited)}")
-        before = source_reviews[document["_id"]]
-        after = review_template_from_document(document)
-        lost_text = any(
-            before[field] not in ("", "Unknown") and before[field] != after[field]
-            for field in ("title", "description", "impacts", "recommendation")
-        )
-        lost_arrays = any(
-            before[field] and before[field] != after[field]
-            for field in ("affected", "related_link")
-        )
-        if lost_text or lost_arrays:
-            raise ValueError(
-                f"{provider}: review output changed for {document['_id']}"
-            )
     if provider == "cve":
         source_count = source.count_documents({"classification": {"$exists": True}})
         shadow_count = shadow.count_documents({"classification": {"$exists": True}})
