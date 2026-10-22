@@ -33,6 +33,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `cnvd` | `cnvd` | Needs `.[cnvd]` |
 | `cve` | `cve` | CVEProject cvelistV5 |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
+| `govcert` | `govcert` | GOVCERT.HK English alerts + full alert pages; HTTP only |
 | `hkcert` | `hkcert` | HTML |
 | `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
 | `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
@@ -50,6 +51,11 @@ The Splunk archive is only the link index. The scraper opens each selected
 `/advisories/SVD-*` page and stores its full article text in `details.content`,
 along with the extracted fields and tables. `--limit` counts individual
 advisories, not index pages.
+
+The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
+and opens each alert page. It stores the full text in `details.content`, plus
+affected systems, impact, recommendations, CVE IDs, tags, references, and tables.
+Both standard and high-threat alerts are included in `run` and `catch-up`.
 
 ## MongoDB layout
 
@@ -89,6 +95,7 @@ vuln-scrape run hkcert --limit 100
 vuln-scrape run avd --limit 100
 vuln-scrape run cnvd --limit 100
 vuln-scrape run splunk --limit 1000
+vuln-scrape run govcert --limit 10
 ```
 
 Catch up all (or configured) scrapers for today's Asia/Hong_Kong window:

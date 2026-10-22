@@ -14,6 +14,7 @@ EXPECTED_KEYS = (
     "cnvd",
     "cve",
     "github_advisory",
+    "govcert",
     "hkcert",
     "hpe",
     "huawei_sa",
