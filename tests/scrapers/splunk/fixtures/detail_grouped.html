@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <nav>Unrelated site navigation</nav>
+    <div id="advisory">
+      <div class="advisory-title"><h1>Security Vulnerabilities in Splunk SOAR - October 2026</h1></div>
+      <div>
+        <div class="advisory-row">
+          <div class="advisory-column-left"><p><b>Advisory&nbsp;ID:</b>&nbsp;SVD-2026-1010</p></div>
+          <div class="advisory-column-right"><p><b>Published:</b>&nbsp;2026-10-21</p></div>
+        </div>
+        <div class="advisory-row">
+          <div class="advisory-column-left"><p><b>Highest&nbsp;CVSSv3.1&nbsp;Score:</b>&nbsp;7.5,&nbsp;High</p></div>
+          <div class="advisory-column-right"><p><b>Last&nbsp;Updated:</b>&nbsp;2026-10-22</p></div>
+        </div>
+      </div>
+      <div>
+        <h2 id="description">Description</h2>
+        <p>Multiple security vulnerabilities were fixed in Splunk SOAR.</p>
+        <h2 id="solutions">Solutions</h2>
+        <p>Upgrade Splunk SOAR to version 8.7.0 or higher.</p>
+        <h2 id="product-status">Product Status</h2>
+        <div>
+          <table class="advisory-table">
+            <thead><tr><th>Product</th><th>Base Version</th><th>Affected Version</th><th>Fix Version</th></tr></thead>
+            <tbody><tr><td>Splunk SOAR</td><td>8.7</td><td>Below 8.7.0</td><td>8.7.0</td></tr></tbody>
+          </table>
+        </div>
+        <h2 id="vulnerabilities">Vulnerabilities</h2>
+        <table id="advisory-table-vulnerabilities">
+          <thead><tr><th>CVE</th><th>Summary</th><th>CWE</th><th>Severity</th><th>Score</th></tr></thead>
+          <tbody>
+            <tr><td>CVE-2026-76303</td><td>Stored cross-site scripting</td><td>CWE-79</td><td>Medium</td><td>5.7</td></tr>
+            <tr><td>CVE-2026-76406</td><td>Information disclosure</td><td>CWE-200</td><td>Medium</td><td>5.9</td></tr>
+          </tbody>
+        </table>
+        <h2 id="cve-details">CVE Details</h2>
+        <div class="advisory-vulnerability-details">
+          <article class="advisory-vulnerability-detail">
+            <h3 id="cve-2026-76303"><a href="https://www.cve.org/CVERecord?id=CVE-2026-76303">CVE-2026-76303</a>: Stored cross-site scripting</h3>
+            <h4>Description</h4>
+            <p>The first vulnerability permits stored cross-site scripting in app documentation.</p>
+            <p><strong>CVSSv3.1 Score:</strong> 5.7, Medium</p>
+            <h4>Mitigations and Workarounds</h4>
+            <p>Limit app installation to trusted users.</p>
+          </article>
+          <article class="advisory-vulnerability-detail">
+            <h3 id="cve-2026-76406"><a href="https://www.cve.org/CVERecord?id=CVE-2026-76406">CVE-2026-76406</a>: Information disclosure</h3>
+            <h4>Description</h4>
+            <p>The second vulnerability discloses sensitive information through the REST API.</p>
+            <p><strong>CVSSv3.1 Score:</strong> 5.9, Medium</p>
+            <h4>Mitigations and Workarounds</h4>
+            <p>Restrict REST API access.</p>
+          </article>
+        </div>
+        <h2 id="changelog">Changelog</h2>
+        <ul><li>2026-10-22: Clarified mitigations.</li></ul>
+        <h2 id="additional-information">Additional Information</h2>
+        <p>For isolated networks, obtain the maintenance package from your support contact.</p>
+      </div>
+    </div>
+  </body>
+</html>

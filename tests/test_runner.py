@@ -854,6 +854,8 @@ def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     assert output["mongo_sync"]["inserted"] == 2
     assert set(collection.documents) == {"splunk:SVD-2026-0516", "splunk:SVD-2026-0501", "splunk:SVD-2026-0500"}
     assert client.detail_ids_seen == ["SVD-2026-0516", "SVD-2026-0501"]
+    for code in client.detail_ids_seen:
+        assert "Detail includes" in collection.documents[f"splunk:{code}"]["details"]["content"]
 def test_successful_run_output_ignores_stale_checkpoint_failures(tmp_path) -> None:
     checkpoint = tmp_path / "checkpoint.json"
     checkpoint.write_text(
@@ -1281,7 +1283,7 @@ class FakeSplunkClient:
 
     async def get_html(self, url: str) -> FetchResult:
         parsed = urlparse(url)
-        if parsed.netloc == "advisory.splunk.com" and parsed.path in {"", "/"}:
+        if parsed.netloc == "advisory.splunk.com" and parsed.path == "/advisories":
             return FetchResult(html=splunk_list_html(), status_code=200, url=url)
 
         code = parsed.path.rstrip("/").rsplit("/", 1)[-1]

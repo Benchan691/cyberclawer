@@ -48,3 +48,29 @@ def test_parse_splunk_detail_extracts_sections_and_tables() -> None:
     assert detail["description_tables"][0]["rows"][0]["package"] == "commons-lang3"
     assert detail["packages"][0]["package"] == "commons-lang3"
     assert detail["product_status"][0]["fix_version"] == "4.0.1"
+
+
+def test_parse_splunk_grouped_advisory_preserves_summary_and_nested_cve_details() -> None:
+    detail = parse_detail_page((FIXTURES / "detail_grouped.html").read_text(encoding="utf-8")).to_dict()
+
+    assert detail["advisory_id"] == "SVD-2026-1010"
+    assert detail["published_date"] == "2026-10-21"
+    assert detail["last_modified"] == "2026-10-22"
+    assert detail["cvss_score"] == "7.5"
+    assert detail["severity"] == "High"
+    assert detail["description"] == "Multiple security vulnerabilities were fixed in Splunk SOAR."
+    assert detail["solution"] == "Upgrade Splunk SOAR to version 8.7.0 or higher."
+    assert detail["cve_ids"] == ["CVE-2026-76303", "CVE-2026-76406"]
+    assert "The first vulnerability" in detail["cve_details"]
+    assert "The second vulnerability" in detail["cve_details"]
+    assert "Limit app installation" in detail["cve_details"]
+    assert "Restrict REST API access" in detail["cve_details"]
+    assert "Clarified mitigations" not in detail["cve_details"]
+    assert detail["changelog"] == "2026-10-22: Clarified mitigations."
+    assert detail["product_status"][0]["fix_version"] == "8.7.0"
+    assert len(detail["tables"][0]["rows"]) == 2
+    assert "The first vulnerability" in detail["content"]
+    assert "The second vulnerability" in detail["content"]
+    assert "Additional Information" in detail["content"]
+    assert "obtain the maintenance package from your support contact" in detail["content"]
+    assert "Unrelated site navigation" not in detail["content"]

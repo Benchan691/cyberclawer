@@ -41,10 +41,15 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `nvd` | `nvd` | NVD CVE API 2.0 (`services.nvd.nist.gov`); optional `NVD_API_KEY`; details embedded in list response |
 | `paloalto` | `paloalto` | HTML |
 | `qianxin` | `qianxin` | JSON API |
-| `splunk` | `splunk` | HTML |
+| `splunk` | `splunk` | HTTP archive + full advisory pages; supports grouped CVEs |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
 The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.com/hpesc/public/api/document/sec_bull_rss_feed) for the latest 50 Critical alerts, then fetches each bulletin from the [HPE document API](https://support.hpe.com/hpesc/public/api/document). It uses ordinary HTTP requests only; the original `docDisplay` URL is retained in each bulletin detail.
+
+The Splunk archive is only the link index. The scraper opens each selected
+`/advisories/SVD-*` page and stores its full article text in `details.content`,
+along with the extracted fields and tables. `--limit` counts individual
+advisories, not index pages.
 
 ## MongoDB layout
 
@@ -83,6 +88,7 @@ Run one scraper:
 vuln-scrape run hkcert --limit 100
 vuln-scrape run avd --limit 100
 vuln-scrape run cnvd --limit 100
+vuln-scrape run splunk --limit 1000
 ```
 
 Catch up all (or configured) scrapers for today's Asia/Hong_Kong window:

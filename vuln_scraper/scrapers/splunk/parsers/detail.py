@@ -19,10 +19,15 @@ from vuln_scraper.scrapers.splunk.parsers.common import (
 SECTION_KEYS = {
     "description": "description",
     "solution": "solution",
+    "solutions": "solution",
     "mitigations": "mitigations",
+    "mitigations_and_workarounds": "mitigations",
     "product_status": "product_status_text",
     "severity": "severity_detail",
     "credit": "credit",
+    "details": "details",
+    "cve_details": "cve_details",
+    "changelog": "changelog",
 }
 
 
@@ -34,6 +39,7 @@ class SplunkDetailRecord:
     published_date: str | None = None
     last_modified: str | None = None
     title: str | None = None
+    severity: str | None = None
     cvss_vector: str | None = None
     cvss_score: str | None = None
     cwe: str | None = None
@@ -43,7 +49,11 @@ class SplunkDetailRecord:
     affected_versions: str | None = None
     all_affected_versions: str | None = None
     affected_components: str | None = None
+    content: str | None = None
     description: str | None = None
+    details: str | None = None
+    cve_details: str | None = None
+    changelog: str | None = None
     description_tables: list[dict[str, Any]] = field(default_factory=list)
     solution: str | None = None
     mitigations: str | None = None
@@ -64,22 +74,25 @@ class SplunkDetailRecord:
 
 def parse_detail_page(html: str) -> SplunkDetailRecord:
     parsed = soup(html)
+    parsed = parsed.select_one("#advisory") or parsed
     text = parsed.get_text("\n", strip=True)
     fields = _label_fields(parsed)
     sections = _sections(parsed)
     tables = _tables(parsed)
     section_tables = _section_tables(parsed)
     cve_ids = cve_ids_from_text("\n".join((text, "\n".join(_flatten_table_values(tables)))))
+    score, _, severity = (fields.get("highest_cvssv3_1_score") or "").partition(",")
 
     return SplunkDetailRecord(
         advisory_id=fields.get("advisory_id"),
         cve_id=cve_ids[0] if cve_ids else None,
         cve_ids=cve_ids,
         published_date=fields.get("published"),
-        last_modified=fields.get("last_update"),
+        last_modified=fields.get("last_updated") or fields.get("last_update"),
         title=_title(parsed),
+        severity=severity.strip() or None,
         cvss_vector=fields.get("cvss_vector"),
-        cvss_score=fields.get("cvss_score"),
+        cvss_score=fields.get("cvss_score") or score.strip() or None,
         cwe=fields.get("cwe"),
         bug_ids=_split_values(fields.get("bug")),
         affected_products=fields.get("affected_products"),
@@ -87,7 +100,11 @@ def parse_detail_page(html: str) -> SplunkDetailRecord:
         affected_versions=fields.get("affected_versions"),
         all_affected_versions=fields.get("all_affected_versions"),
         affected_components=fields.get("affected_components"),
+        content=clean_multiline(parsed) or None,
         description=sections.get("description"),
+        details=sections.get("details"),
+        cve_details=sections.get("cve_details"),
+        changelog=sections.get("changelog"),
         description_tables=section_tables.get("description", []),
         solution=sections.get("solution"),
         mitigations=sections.get("mitigations"),
@@ -131,9 +148,17 @@ def _label_fields(parsed) -> dict[str, str | None]:
     return fields
 
 
+def _section_headings(parsed) -> list[Tag]:
+    headings = parsed.find_all(["h2", "h3", "h4"])
+    level = min((int(heading.name[1]) for heading in headings), default=2)
+    # Grouped advisories repeat labels such as Description inside each CVE.
+    # Only the bulletin's outer headings define its summary fields.
+    return [heading for heading in headings if int(heading.name[1]) == level]
+
+
 def _sections(parsed) -> dict[str, str]:
     sections: dict[str, str] = {}
-    for heading in parsed.find_all(["h2", "h3", "h4"]):
+    for heading in _section_headings(parsed):
         key = SECTION_KEYS.get(normalize_key(clean_text(heading)))
         if key is None:
             continue
@@ -155,7 +180,7 @@ def _sections(parsed) -> dict[str, str]:
 
 def _section_tables(parsed) -> dict[str, list[dict[str, Any]]]:
     section_tables: dict[str, list[dict[str, Any]]] = {}
-    for heading in parsed.find_all(["h2", "h3", "h4"]):
+    for heading in _section_headings(parsed):
         key = SECTION_KEYS.get(normalize_key(clean_text(heading)))
         if key is None:
             continue
