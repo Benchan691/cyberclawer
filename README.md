@@ -56,6 +56,8 @@ The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://w
 and opens each alert page. It stores the full text in `details.content`, plus
 affected systems, impact, recommendations, CVE IDs, tags, references, and tables.
 Both standard and high-threat alerts are included in `run` and `catch-up`.
+Severity is `Critical` when the title contains "High Threat" (case-insensitive),
+and `Medium` otherwise.
 
 ## MongoDB layout
 

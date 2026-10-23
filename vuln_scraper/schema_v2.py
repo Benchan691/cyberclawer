@@ -108,6 +108,7 @@ def _builtin_provider_schemas() -> dict[str, ProviderSchema]:
         "govcert": ProviderSchema(
             identity_fields=("alert_code",),
             cve_fields=("cve_ids",),
+            severity_fields=("severity",),
             published_fields=("published_date",),
         ),
         "hikvision": ProviderSchema(

@@ -30,6 +30,7 @@ def test_parse_alerts_list_extracts_identity_dates_and_pagination() -> None:
         "_list_summary": True,
         "alert_code": "A26-06-01",
         "alert_type": "High Threat Security Alert",
+        "severity": "Critical",
         "published_date": "2026-06-01",
         "detail_url": "https://www.govcert.gov.hk/en/alerts_detail.php?id=1894",
     }
@@ -39,6 +40,7 @@ def test_parse_alerts_list_extracts_identity_dates_and_pagination() -> None:
     assert second.vuln_type == "A26-05-48"
     assert second.status == "Security Alert"
     assert second.disclosure_date == "2026-05-29"
+    assert second.embedded_detail["severity"] == "Medium"
 
 
 def test_parse_high_threat_detail_extracts_sections_tags_and_links() -> None:
@@ -48,6 +50,7 @@ def test_parse_high_threat_detail_extracts_sections_tags_and_links() -> None:
 
     assert detail["alert_code"] == "A26-06-01"
     assert detail["alert_type"] == "High Threat Security Alert"
+    assert detail["severity"] == "Critical"
     assert detail["published_date"] == "2026-06-01"
     assert "CIFSwitch" in detail["description"]
     assert detail["affected_systems"] == [
@@ -68,6 +71,7 @@ def test_parse_multi_cve_detail_extracts_cve_ids_and_links() -> None:
 
     assert detail["alert_code"] == "A26-05-48"
     assert detail["alert_type"] == "Security Alert"
+    assert detail["severity"] == "Medium"
     assert detail["published_date"] == "2026-05-29"
     assert detail["cve_ids"] == ["CVE-2026-9872", "CVE-2026-10022"]
     assert detail["more_information_links"] == [

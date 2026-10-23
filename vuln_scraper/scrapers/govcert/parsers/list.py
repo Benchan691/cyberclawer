@@ -7,7 +7,13 @@ from bs4 import BeautifulSoup, Tag
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
 from vuln_scraper.scrapers.govcert.config import BASE_URL, LIST_URL
-from vuln_scraper.scrapers.govcert.parsers.common import clean_text, normalize_date, parse_alert_title, soup
+from vuln_scraper.scrapers.govcert.parsers.common import (
+    clean_text,
+    normalize_date,
+    parse_alert_title,
+    severity_from_title,
+    soup,
+)
 
 
 DETAIL_PATH = "/en/alerts_detail.php"
@@ -58,6 +64,7 @@ def _entry_from_row(row: Tag, *, provider: str, source_url: str | None) -> ListE
         "_list_summary": True,
         "alert_code": alert_code,
         "alert_type": alert_type,
+        "severity": severity_from_title(title),
         "published_date": published_date,
         "detail_url": urljoin(EN_BASE_URL, str(link["href"])),
     }

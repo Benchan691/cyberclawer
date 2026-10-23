@@ -50,6 +50,10 @@ def parse_alert_title(title: str) -> tuple[str | None, str | None, str]:
     return match.group("code"), match.group("type").strip(), clean_title
 
 
+def severity_from_title(title: str) -> str:
+    return "Critical" if "high threat" in title.casefold() else "Medium"
+
+
 def unique_links(links, *, base_url: str) -> list[str]:
     result: list[str] = []
     for link in links:

@@ -98,6 +98,8 @@ def test_govcert_fetches_full_alerts_and_syncs_to_shared_mongo(tmp_path, updated
     for document in collection.documents.values():
         validate_v2_document(document, "news")
         assert document["source"]["provider"] == "govcert"
+        assert document["severity"] == {"1894": "Critical", "1893": "Medium"}[document["code"]]
+        assert "severity" not in document["details"]
         assert "Recommendation:" in document["details"]["content"]
     if "1893" in expected_ids:
         assert collection.documents["govcert:1893"]["cve_ids"] == ["CVE-2026-9872", "CVE-2026-10022"]

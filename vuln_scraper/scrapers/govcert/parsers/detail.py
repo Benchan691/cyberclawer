@@ -13,6 +13,7 @@ from vuln_scraper.scrapers.govcert.parsers.common import (
     cve_ids_from_text,
     normalize_date,
     parse_alert_title,
+    severity_from_title,
     soup,
     unique_links,
 )
@@ -33,6 +34,7 @@ URL_RE = re.compile(r"https?://[^\s<>\"]+")
 class GovCERTDetailRecord:
     alert_code: str | None = None
     alert_type: str | None = None
+    severity: str | None = None
     published_date: str | None = None
     content: str | None = None
     description: str | None = None
@@ -64,6 +66,7 @@ def parse_detail_page(html: str) -> GovCERTDetailRecord:
     return GovCERTDetailRecord(
         alert_code=alert_code,
         alert_type=alert_type,
+        severity=severity_from_title(title),
         published_date=published_date,
         content=content or None,
         description=sections.get("description") or None,
