@@ -36,6 +36,20 @@ backoff_max = 30.0
 backoff_jitter = 0.4
 error_log = "scraper-errors.log"
 
+# Email alerts for scrape failures. When any URL fetch fails during a run, a
+# CSS-styled HTML report is sent to these recipients. SMTP relay settings are
+# read from the .env file below (SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_FROM,
+# SMTP_USE_TLS, SMTP_USE_SSL); host/port/from/username/password/use_tls/use_ssl
+# can also be set here to override. A failure already reported is only re-sent
+# after repeat_hours has elapsed, so chronic failures do not email every run.
+[scrapers.email]
+enabled = true
+to = ["ben.chan@citictel-cpc.com"]
+cc = []
+bcc = []
+repeat_hours = 24
+env_file = "/home/cpcnet/webserver-rust-zimbra-candidate/.env"
+
 [scrapers.cnvd]
 retries = 5
 backoff_base = 2.0

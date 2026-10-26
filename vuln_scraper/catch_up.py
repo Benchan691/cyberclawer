@@ -5,6 +5,7 @@ import logging
 from dataclasses import replace
 
 from .config import MAX_RESULT_LIMIT, ScraperSettings, catch_up_provider_keys
+from .email_alerts import load_email_alert_config, notify_scrape_exception
 from .error_log import log_uncaught_provider_error
 from .scrapers import ScraperProvider, all_providers, provider_keys
 from .runner import ScraperRunner
@@ -133,6 +134,15 @@ def run_catch_up_cycle(
                 provider=provider.key,
                 error=exc,
             )
+            try:
+                notify_scrape_exception(
+                    load_email_alert_config(settings.scrapers_config_file),
+                    data_dir=normalized.data_dir,
+                    provider=provider.key,
+                    error=exc,
+                )
+            except Exception:
+                logger.exception("scrape exception email alert failed for %s", provider.key)
             continue
 
         last_stop_reason = output.get("stop_reason")

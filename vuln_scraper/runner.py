@@ -19,6 +19,7 @@ from .client import (
     looks_like_waf_challenge,
 )
 from .config import ScraperSettings, error_log_path_for_settings, random_user_agent
+from .email_alerts import load_email_alert_config, notify_scrape_failures
 from .error_log import ScraperErrorLog, install_run_log_handler
 from .models import ListEntry
 from .mongo import (
@@ -1153,10 +1154,25 @@ class ScraperRunner:
                 error=f"run stopped: {stop_reason} ({failed_count} failed item(s))",
                 stop_reason=stop_reason,
             )
+        self._send_failure_alert(stop_reason)
         error_log_path = error_log_path_for_settings(self.settings)
         if error_log_path is not None:
             output["error_log"] = str(error_log_path)
         return output
+
+    def _send_failure_alert(self, stop_reason: str | None) -> None:
+        if not self.run_failed:
+            return
+        try:
+            notify_scrape_failures(
+                load_email_alert_config(self.settings.scrapers_config_file),
+                data_dir=self.settings.data_dir,
+                provider=self.provider.key,
+                failures=sorted(self.run_failed.values(), key=lambda item: item.get("identity", "")),
+                stop_reason=stop_reason,
+            )
+        except Exception:
+            logger.exception("scrape failure email alert failed for %s", self.provider.key)
 
     def _emit(self, **event: Any) -> None:
         if self.progress_callback is None:

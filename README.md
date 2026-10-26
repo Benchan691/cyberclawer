@@ -114,6 +114,33 @@ Limit which scrapers `catch-up` runs in [`scrapers.toml`](scrapers.toml):
 providers = ["hkcert", "cve", "cnvd"]
 ```
 
+## Failure email alerts
+
+When any URL fetch fails during a run (list page, detail page, or a run that
+stops with an error), the scraper sends a CSS-styled HTML report with the failed
+items, errors, and URLs. An uncaught run crash also sends an alert. SMTP relay
+settings are read from the webserver `.env` file (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USERNAME`, `SMTP_FROM`, `SMTP_USE_TLS`, `SMTP_USE_SSL`).
+
+Recipients and alerting behaviour are configured in the `[scrapers.email]`
+table of [`scrapers.toml`](scrapers.toml):
+
+```toml
+[scrapers.email]
+enabled = true
+to = ["ben.chan@citictel-cpc.com"]
+cc = []
+bcc = []
+repeat_hours = 24
+env_file = "/home/cpcnet/webserver-rust-zimbra-candidate/.env"
+```
+
+A failure is only re-reported after `repeat_hours` has elapsed, so chronic
+failures do not email on every hourly run; new failures always trigger an
+email. Sent state is kept in `data/email-alert-state.json`. Alert sending
+never interrupts a scrape run - delivery problems are logged and retried on
+the next run.
+
 Other commands:
 
 ```bash
