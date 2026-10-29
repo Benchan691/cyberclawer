@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from vuln_scraper.client import CaptchaRequiredError, FetchError, FetchResult, ScraperClient
 from vuln_scraper.config import ScraperSettings
@@ -18,7 +18,6 @@ from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
 from vuln_scraper.scrapers.cve.provider import CVEProvider
 from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
 from vuln_scraper.scrapers.huawei_sa.provider import HuaweiSAProvider
-from vuln_scraper.scrapers.juniper.provider import JuniperProvider
 from vuln_scraper.scrapers.msrc.provider import MSRCProvider
 from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
 from vuln_scraper.scrapers.qianxin.provider import QianxinProvider
@@ -1004,92 +1003,8 @@ def test_cnvd_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     assert client.detail_ids_seen == ["2026-21550"]
 
 
-def test_juniper_mongo_sync_stops_at_first_known_record(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        AsyncMock(return_value={
-            "organizationId": "junipernetworks",
-            "accessToken": "test-token",
-        }),
-    )
-    client = FakeJuniperClient()
-    collection = FakeMongoCollection(
-        {
-            "juniper:JSA93455": {
-                "_id": "juniper:JSA93455",
-                "type": "juniper",
-                "code": "JSA93455",
-            },
-        }
-    )
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "juniper.json",
-        checkpoint_file=tmp_path / "juniper_checkpoint.json",
-        limit=5,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=2,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=JuniperProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert identities(output["vulnerabilities"]) == ["juniper:JSA93456"]
-    assert output["vulnerabilities"][0]["cve_code"] == "2026-55555"
-    assert output["mongo_sync"]["inserted"] == 1
-    assert set(collection.documents) == {"juniper:JSA93456", "juniper:JSA93455"}
-    assert client.detail_slugs_seen == ["JSA93456"]
 
 
-def test_juniper_fetches_second_list_page_when_limit_exceeds_page_size(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        AsyncMock(return_value={
-            "organizationId": "junipernetworks",
-            "accessToken": "test-token",
-        }),
-    )
-    known = {f"juniper:JSA{93456 - index}" for index in range(10)}
-    client = FakeJuniperClient()
-    collection = FakeMongoCollection({identity: {"_id": identity} for identity in known})
-    settings = ScraperSettings(
-        data_dir=tmp_path,
-        output_file=tmp_path / "juniper.json",
-        checkpoint_file=tmp_path / "juniper_checkpoint.json",
-        limit=15,
-        mongo_enabled=True,
-        mongo_conflict="skip",
-        request_delay=0,
-        retries=0,
-        concurrency=4,
-    )
-
-    output = asyncio.run(
-        ScraperRunner(
-            settings,
-            provider=JuniperProvider(),
-            mongo_client_factory=fake_mongo_factory(collection),
-        )._run_with_client(client)
-    )
-
-    assert len(identities(output["vulnerabilities"])) == 15
-    expected_new_codes = {f"JSA{93456 - index}" for index in range(10, 25)}
-    assert {record["code"] for record in output["vulnerabilities"]} == expected_new_codes
-    list_offsets = [request["json"]["firstResult"] for request in client.list_requests]
-    assert 0 in list_offsets
-    assert 10 in list_offsets
 def test_qianxin_json_provider_preserves_nested_html_tables(tmp_path) -> None:
     client = FakeQianxinClient()
     settings = ScraperSettings(
@@ -1304,29 +1219,6 @@ class FakeCNVDClient:
         return FetchResult(html=cnvd_detail_html(code), status_code=200, url=url)
 
 
-class FakeJuniperClient:
-    def __init__(self) -> None:
-        self.detail_slugs_seen: list[str] = []
-        self.list_requests: list[dict] = []
-
-    async def request_json(
-        self,
-        method: str,
-        url: str,
-        *,
-        headers=None,
-        json_body=None,
-        data=None,
-    ):
-        self.list_requests.append({"method": method, "url": url, "json": json_body})
-        if json_body and json_body.get("fieldsToInclude"):
-            slug = str(json_body.get("q", "")).split('"')[1] if '"' in str(json_body.get("q", "")) else ""
-            if not slug:
-                slug = "JSA93456"
-            self.detail_slugs_seen.append(slug)
-            return FakeJSONResult(juniper_detail_coveo_payload(slug), url)
-        first_result = int((json_body or {}).get("firstResult", 0))
-        return FakeJSONResult(juniper_list_coveo_payload(first_result=first_result), url)
 class FakeQianxinClient:
     async def request_json(self, method: str, url: str, *, headers=None, json_body=None, data=None):
         return FakeJSONResult(
@@ -1651,45 +1543,8 @@ def cnvd_detail_html(code: str) -> str:
     """
 
 
-def juniper_list_coveo_payload(*, first_result: int = 0, per_page: int = 10) -> dict:
-    all_codes = [f"JSA{93456 - index}" for index in range(25)]
-    page_codes = all_codes[first_result : first_result + per_page]
-    results = [
-        {
-            "title": f"{code}: Junos OS advisory",
-            "raw": {
-                "sfcec_documentid__c": code,
-                "sftitle": f"{code}: Junos OS advisory",
-                "sfrecordtypename": "Security Advisories",
-                "sflastpublisheddate": "2026-05-29",
-                "sfcustomer_url__c": f"https://supportportal.juniper.net/s/article/{code}",
-                "sfurlname": code,
-            },
-        }
-        for code in page_codes
-    ]
-    return {"totalCount": len(all_codes), "results": results}
 
 
-def juniper_detail_coveo_payload(slug: str) -> dict:
-    code = slug if slug.upper().startswith("JSA") else "JSA93456"
-    return {
-        "results": [
-            {
-                "title": f"{code}: Junos OS Security Advisory",
-                "raw": {
-                    "sfcec_documentid__c": code,
-                    "sftitle": f"{code}: Junos OS Security Advisory",
-                    "sfrecordtypename": "Security Advisories",
-                    "sflastpublisheddate": "2026-05-29",
-                    "sfcustomer_url__c": f"https://supportportal.juniper.net/s/article/{slug}",
-                    "sfcec_problem__c": f"Detail includes CVE-2026-55555 for {code}.",
-                    "sfcec_product_affected__c": "Junos OS",
-                    "sfcec_solution__c": "Upgrade Junos OS.",
-                },
-            }
-        ]
-    }
 
 
 def cve_delta_batch(

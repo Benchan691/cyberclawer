@@ -44,7 +44,7 @@ class ProviderSchema:
 
 def _builtin_provider_schemas() -> dict[str, ProviderSchema]:
     # Schemas for providers whose scraper packages have been removed
-    # (cisco, infosec, ransomwarelive, zeroday) are kept so
+    # (cisco, infosec, juniper, ransomwarelive, zeroday) are kept so
     # `migrate-mongo`/`unify-mongo` can still normalize historical documents.
     return {
         "avd": ProviderSchema(

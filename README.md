@@ -38,7 +38,6 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `hkcert` | `hkcert` | HTML |
 | `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
 | `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
-| `juniper` | `juniper` | Coveo JSON API |
 | `msrc` | `msrc` | Microsoft CVRF API |
 | `nvd` | `nvd` | NVD CVE API 2.0 (`services.nvd.nist.gov`); optional `NVD_API_KEY`; details embedded in list response |
 | `paloalto` | `paloalto` | HTML |
@@ -66,11 +65,6 @@ affected systems, impact, recommendations, CVE IDs, tags, references, and tables
 Both standard and high-threat alerts are included in `run` and `catch-up`.
 Severity is `Critical` when the title contains "High Threat" (case-insensitive),
 and `Medium` otherwise.
-
-The Juniper scraper discovers the current Salesforce Aura context from the
-support portal and obtains its Coveo token through the shared HTTP client.
-Bootstrap requests use the configured retry/backoff settings. List results are
-requested in descending date order so incremental runs can find recent advisories.
 
 ## MongoDB layout
 

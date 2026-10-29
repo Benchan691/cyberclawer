@@ -19,7 +19,6 @@ EXPECTED_KEYS = (
     "hkcert",
     "hpe",
     "huawei_sa",
-    "juniper",
     "msrc",
     "nvd",
     "paloalto",

@@ -21,7 +21,6 @@ providers = [
   "hkcert",
   "hpe",
   "huawei_sa",
-  "juniper",
   "msrc",
   "nvd",
   "paloalto",

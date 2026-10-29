@@ -77,12 +77,12 @@ def alert_env_file(tmp_path) -> Path:
 
 def failure(**overrides) -> dict:
     entry = {
-        "identity": "juniper:JSA80837",
+        "identity": "fortiguard:FG-IR-26-182",
         "type": "JSA",
-        "code": "JSA80837",
+        "code": "FG-IR-26-182",
         "phase": "detail",
-        "url": "https://example.com/advisory/JSA80837",
-        "error": "HTTP 503 for https://example.com/advisory/JSA80837",
+        "url": "https://example.com/advisory/FG-IR-26-182",
+        "error": "HTTP 503 for https://example.com/advisory/FG-IR-26-182",
         "updated_at": datetime.now(UTC).isoformat(),
     }
     entry.update(overrides)
@@ -185,7 +185,7 @@ def test_notify_failures_sends_styled_html_and_updates_state(
     sent = notify_scrape_failures(
         config,
         data_dir=tmp_path,
-        provider="juniper",
+        provider="fortiguard",
         failures=[failure()],
         stop_reason="error",
     )
@@ -196,7 +196,7 @@ def test_notify_failures_sends_styled_html_and_updates_state(
     assert message["To"] == "ben.chan@citictel-cpc.com"
     assert message["Cc"] == "cc@example.com"
     assert "bcc@example.com" in smtp_outbox.recipients
-    assert "JSA80837" in message.get_body(preferencelist=("html",)).get_content()
+    assert "FG-IR-26-182" in message.get_body(preferencelist=("html",)).get_content()
     assert "&lt;script&gt;" not in message.get_body(preferencelist=("html",)).get_content()
     assert smtp_outbox.recipients == [
         "ben.chan@citictel-cpc.com",
@@ -226,10 +226,10 @@ def test_notify_failures_suppresses_repeat_within_window(
     tmp_path, alert_env_file, smtp_outbox
 ) -> None:
     config = EmailAlertConfig(smtp_env_file=alert_env_file)
-    failures = [failure(), failure(identity="juniper:JSA112528", url="https://example.com/x")]
+    failures = [failure(), failure(identity="fortiguard:FG-IR-26-183", url="https://example.com/x")]
 
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=failures) is True
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=failures) is False
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=failures) is True
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=failures) is False
     assert len(smtp_outbox.messages) == 1
 
 
@@ -238,7 +238,7 @@ def test_notify_failures_resends_after_repeat_window(
 ) -> None:
     config = EmailAlertConfig(smtp_env_file=alert_env_file, repeat_hours=24)
 
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[failure()]) is True
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[failure()]) is True
 
     state_path = tmp_path / "email-alert-state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -246,7 +246,7 @@ def test_notify_failures_resends_after_repeat_window(
     state["sent"] = {key: stale for key in state["sent"]}
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[failure()]) is True
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[failure()]) is True
     assert len(smtp_outbox.messages) == 2
 
 
@@ -255,21 +255,21 @@ def test_notify_failures_partial_new_failures_still_send(
 ) -> None:
     config = EmailAlertConfig(smtp_env_file=alert_env_file)
     known = failure()
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[known]) is True
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[known]) is True
 
-    fresh = failure(identity="juniper:JSA999999", url="https://example.com/new")
+    fresh = failure(identity="fortiguard:FG-IR-26-999", url="https://example.com/new")
     assert (
         notify_scrape_failures(
             config,
             data_dir=tmp_path,
-            provider="juniper",
+            provider="fortiguard",
             failures=[known, fresh],
         )
         is True
     )
     html = smtp_outbox.messages[1].get_body(preferencelist=("html",)).get_content()
     assert "repeat" in html and "new" in html
-    assert smtp_outbox.messages[1]["Subject"].startswith("[vuln-scraper] juniper: 2 scrape failure(s)")
+    assert smtp_outbox.messages[1]["Subject"].startswith("[vuln-scraper] fortiguard: 2 scrape failure(s)")
 
 
 def test_notify_failures_does_not_mark_state_when_send_fails(
@@ -281,7 +281,7 @@ def test_notify_failures_does_not_mark_state_when_send_fails(
     )
     config = EmailAlertConfig(smtp_env_file=alert_env_file)
 
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[failure()]) is False
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[failure()]) is False
     assert not (tmp_path / "email-alert-state.json").exists()
 
 
@@ -289,13 +289,13 @@ def test_notify_failures_skips_when_disabled_or_empty(
     tmp_path, alert_env_file, smtp_outbox
 ) -> None:
     config = EmailAlertConfig(smtp_env_file=alert_env_file, enabled=False)
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[failure()]) is False
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[failure()]) is False
 
     config = EmailAlertConfig(smtp_env_file=alert_env_file, to=(), cc=(), bcc=())
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[failure()]) is False
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[failure()]) is False
 
     config = EmailAlertConfig(smtp_env_file=alert_env_file)
-    assert notify_scrape_failures(config, data_dir=tmp_path, provider="juniper", failures=[]) is False
+    assert notify_scrape_failures(config, data_dir=tmp_path, provider="fortiguard", failures=[]) is False
 
     assert smtp_outbox.messages == []
 
