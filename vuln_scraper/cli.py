@@ -74,9 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_RUNS_PER_PROVIDER,
         help="Safety cap on scrape runs per provider (default 100).",
     )
-    subparsers.add_parser(
+    catalog_parser = subparsers.add_parser(
         "sync-source-catalog",
         help="Publish the configured source list to MongoDB without scraping.",
+    )
+    catalog_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the source catalog without connecting to MongoDB.",
     )
     migrate_parser = subparsers.add_parser(
         "migrate-mongo",
@@ -253,10 +258,16 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "sync-source-catalog":
-        from .source_catalog import sync_source_catalog_to_mongo
+        from .source_catalog import configured_source_keys, source_catalog_document, sync_source_catalog_to_mongo
 
         try:
             settings = default_scrape_settings(mongo_enabled=True).normalized()
+            if args.dry_run:
+                import json
+
+                catalog = source_catalog_document(configured_source_keys(settings.scrapers_config_file))
+                print(json.dumps(catalog, indent=2, default=str))
+                return
             catalog = sync_source_catalog_to_mongo(settings)
         except ValueError as exc:
             parser.error(str(exc))

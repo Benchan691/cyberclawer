@@ -13,6 +13,7 @@ EXPECTED_KEYS = (
     "avd",
     "cnvd",
     "cve",
+    "fortiguard",
     "github_advisory",
     "govcert",
     "hkcert",

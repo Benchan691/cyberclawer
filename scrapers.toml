@@ -15,6 +15,7 @@ providers = [
   "avd",
   "cnvd",
   "cve",
+  "fortiguard",
   "github_advisory",
   "govcert",
   "hkcert",

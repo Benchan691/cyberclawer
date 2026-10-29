@@ -366,7 +366,7 @@ def test_providers_for_catch_up_respects_configured_list(tmp_path) -> None:
 
     keys = [provider.key for provider in providers_for_catch_up(settings)]
 
-    assert keys == ["hkcert"]
+    assert keys == ["fortiguard", "hkcert"]
 
 
 def test_providers_for_catch_up_skips_unknown_provider(tmp_path, caplog) -> None:

@@ -32,6 +32,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `avd` | `avd` | Needs `.[avd]`; sigchl solved via quickjs |
 | `cnvd` | `cnvd` | Needs `.[cnvd]` |
 | `cve` | `cve` | CVEProject cvelistV5 |
+| `fortiguard` | `fortiguard` | Paginated PSIRT directory + full advisory pages; optional CSAF enrichment |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
 | `govcert` | `govcert` | GOVCERT.HK English alerts + full alert pages; HTTP only |
 | `hkcert` | `hkcert` | HTML |
@@ -51,6 +52,13 @@ The Splunk archive is only the link index. The scraper opens each selected
 `/advisories/SVD-*` page and stores its full article text in `details.content`,
 along with the extracted fields and tables. `--limit` counts individual
 advisories, not index pages.
+
+The FortiGuard scraper uses [the PSIRT directory](https://www.fortiguard.com/psirt)
+to discover advisory IDs, then opens each `/psirt/FG-IR-*` article, such as
+`/psirt/FG-IR-26-182`. It saves the full advisory in `details.content`, including
+workarounds, references, and version tables, plus severity, CVEs, publication and
+update dates, and affected product/solution rows. The shared `news` collection
+identifies these documents with `source.provider = "fortiguard"`.
 
 The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
 and opens each alert page. It stores the full text in `details.content`, plus
@@ -91,6 +99,17 @@ document yet. Sync the catalog without running scrapers with:
 vuln-scrape sync-source-catalog
 ```
 
+Or run the standalone updater using this checkout's `.env`, `mongodb.toml`,
+and `scrapers.toml` settings:
+
+```bash
+python update_source_collection.py --dry-run  # Preview; no database connection
+python update_source_collection.py            # Upsert source_catalog/_id=active
+```
+
+The updater publishes the configured provider list, including `fortiguard`,
+without scraping or modifying `news` documents.
+
 Document shape, indexes, and migration: see [`database.md`](database.md).
 
 ## Usage
@@ -103,6 +122,7 @@ vuln-scrape run avd --limit 100
 vuln-scrape run cnvd --limit 100
 vuln-scrape run splunk --limit 1000
 vuln-scrape run govcert --limit 10
+vuln-scrape run fortiguard --limit 20
 ```
 
 Catch up all (or configured) scrapers for today's Asia/Hong_Kong window:
