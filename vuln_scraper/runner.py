@@ -4,16 +4,19 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .client import (
     CaptchaRequiredError,
     FetchError,
     FetchResult,
+    WAFChallengeError,
     ScraperClient,
     looks_like_captcha_gate,
     looks_like_waf_challenge,
@@ -21,7 +24,7 @@ from .client import (
 from .config import ScraperSettings, error_log_path_for_settings, random_user_agent
 from .email_alerts import load_email_alert_config, notify_scrape_failures
 from .error_log import ScraperErrorLog, install_run_log_handler
-from .models import ListEntry
+from .models import ListEntry, VulnerabilityId
 from .mongo import (
     MongoClientFactory,
     MongoSyncResult,
@@ -136,6 +139,11 @@ class ScraperRunner:
         ).normalized()
         self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
         self._prune_stale_provider_failures()
+        effective_updated_since = getattr(self.provider, "updated_since_for_run", None)
+        if effective_updated_since is not None:
+            self._updated_since = effective_updated_since(self._updated_since)
+        self._recovered_ids: list[str] = []
+        self._recovery_attempted_ids: set[str] = set()
         self.run_failed: dict[str, dict[str, Any]] = {}
         self.records_by_id: dict[str, dict[str, Any]] = {}
         self.list_order: list[str] = []
@@ -177,6 +185,7 @@ class ScraperRunner:
             return await self._finalize_run_output(await self._run_with_client(client))
 
     async def _run_with_client(self, client: ScraperClient) -> dict[str, Any]:
+        await self._retry_cnvd_details(client)
         if self.settings.mongo_enabled:
             return await self._run_mongo_update_with_client(client)
 
@@ -240,7 +249,7 @@ class ScraperRunner:
         self.stop_reason = None
         page = 1
         total_pages: int | None = None
-        selected_ids: list[str] = []
+        selected_ids: list[str] = list(self._recovered_ids)
         pages_without_new = 0
 
         while len(selected_ids) < self.settings.limit:
@@ -332,7 +341,7 @@ class ScraperRunner:
         self.stop_reason = None
         page = 1
         total_pages: int | None = None
-        selected_ids: list[str] = []
+        selected_ids: list[str] = list(self._recovered_ids)
 
         while len(selected_ids) < self.settings.limit:
             if total_pages is not None and page > total_pages:
@@ -369,6 +378,8 @@ class ScraperRunner:
             page_has_parseable_timestamps = False
             hit_timestamp_boundary = False
             for entry in list_page.entries:
+                if entry.key in self._recovery_attempted_ids:
+                    continue
                 if self._detail_url_for_entry(entry) is not None and not self._has_detail(entry.key):
                     await self._scrape_detail(client, entry)
 
@@ -381,9 +392,11 @@ class ScraperRunner:
                         continue
                     page_has_parseable_timestamps = True
                     if not comparison:
-                        hit_timestamp_boundary = True
-                        self.stop_reason = "timestamp_boundary"
-                        break
+                        if getattr(self.provider, "stop_on_timestamp_boundary", True):
+                            hit_timestamp_boundary = True
+                            self.stop_reason = "timestamp_boundary"
+                            break
+                        continue
                     if record_id not in selected_ids:
                         selected_ids.append(record_id)
                     if len(selected_ids) >= self.settings.limit:
@@ -418,7 +431,7 @@ class ScraperRunner:
         self.stop_reason = None
         page = 1
         total_pages: int | None = None
-        selected_ids: list[str] = []
+        selected_ids: list[str] = list(self._recovered_ids)
 
         while len(selected_ids) < self.settings.limit:
             if total_pages is not None and page > total_pages:
@@ -453,6 +466,8 @@ class ScraperRunner:
                 self.checkpoint.total_records = list_page.total_records
 
             for entry in list_page.entries:
+                if entry.key in self._recovery_attempted_ids:
+                    continue
                 if len(selected_ids) >= self.settings.limit:
                     self.stop_reason = "limit"
                     break
@@ -513,6 +528,8 @@ class ScraperRunner:
         saw_new = False
         hit_overlap_boundary = False
         for entry in entries:
+            if entry.key in self._recovery_attempted_ids:
+                continue
             if remaining <= 0:
                 break
             if entry.key in known_ids and not refresh_existing:
@@ -603,11 +620,17 @@ class ScraperRunner:
         return looks_like_captcha_gate(html) or looks_like_waf_challenge(html)
 
     async def _fetch_cnvd_html(self, client: ScraperClient, url: str) -> Any:
-        result = await client.get_html(url)
-        if not self._cnvd_html_blocked(result.html):
+        try:
+            result = await client.get_html(url)
+        except WAFChallengeError:
+            result = None
+        if result is not None and not self._cnvd_html_blocked(result.html):
             return result
         await self._refresh_cnvd_session(client, url)
-        result = await client.get_html(url)
+        try:
+            result = await client.get_html(url)
+        except WAFChallengeError as exc:
+            raise FetchError(f"CNVD gate blocked content for {url}", status_code=exc.status_code) from exc
         if self._cnvd_html_blocked(result.html):
             raise FetchError(f"CNVD gate blocked content for {url}")
         return result
@@ -675,7 +698,7 @@ class ScraperRunner:
     async def _scrape_matching_records(self, client: ScraperClient) -> None:
         page = 1
         total_pages: int | None = None
-        selected_ids: list[str] = []
+        selected_ids: list[str] = list(self._recovered_ids)
 
         while len(selected_ids) < self.settings.limit:
             if total_pages is not None and page > total_pages:
@@ -846,6 +869,8 @@ class ScraperRunner:
         targets: list[ListEntry] = []
 
         for entry in entries:
+            if entry.key in self._recovery_attempted_ids:
+                continue
             if remaining <= 0 and not ignore_limit:
                 break
             if not self._has_detail(entry.key):
@@ -907,6 +932,7 @@ class ScraperRunner:
             self.records_by_id[entry.key] = entry.to_record(detail, detail_url=url)
             self.checkpoint.completed_identity_keys.add(entry.key)
             self.checkpoint.failed.pop(entry.key, None)
+            self.run_failed.pop(entry.key, None)
         except CaptchaRequiredError as exc:
             logger.error(
                 "captcha required for %s detail %s at %s: %s",
@@ -1013,6 +1039,7 @@ class ScraperRunner:
             self.records_by_id[identity]
             for identity in ordered_ids[: self.settings.limit]
             if identity in self.records_by_id
+            and identity not in self.run_failed
         ]
         return {
             "scraped_at": datetime.now(UTC).isoformat(),
@@ -1033,9 +1060,11 @@ class ScraperRunner:
 
     def _prune_stale_provider_failures(self) -> None:
         prefix = f"{self.provider.key}:"
-        current_list_url = self.provider.list_url(1)
+        current_list_url = self.provider.list_url(1, checkpoint=self.checkpoint)
         for key in list(self.checkpoint.failed):
             if key.startswith(prefix):
+                if self.provider.key in {"cnvd", "nvd"} and _transient_fetch_failure(self.checkpoint.failed[key]):
+                    continue
                 self.checkpoint.failed.pop(key, None)
                 continue
             if key in ("LIST",) or key.startswith("LIST-PAGE-"):
@@ -1044,10 +1073,52 @@ class ScraperRunner:
                     self.checkpoint.failed.pop(key, None)
 
     def _clear_list_failures(self, *, page: int) -> None:
-        self.checkpoint.failed.pop(self._list_failure_identity(), None)
+        pending = self.checkpoint.failed.get(self._list_failure_identity())
+        if self.provider.key != "nvd" or not pending or pending.get("url") == self.provider.list_url(page, checkpoint=self.checkpoint):
+            self.checkpoint.failed.pop(self._list_failure_identity(), None)
         self.checkpoint.failed.pop(self._list_page_failure_identity(page), None)
         self.checkpoint.failed.pop("LIST", None)
         self.checkpoint.failed.pop(f"LIST-PAGE-{page}", None)
+
+    async def _retry_cnvd_details(self, client: ScraperClient) -> None:
+        if self.provider.key != "cnvd":
+            return
+        failures = sorted(list(self.checkpoint.failed.values()), key=lambda item: str(item.get("updated_at", "")))
+        for failure in failures:
+            if len(self._recovery_attempted_ids) >= self.settings.limit:
+                break
+            if not str(failure.get("identity", "")).startswith("cnvd:") or failure.get("phase") != "detail":
+                continue
+            if not _transient_fetch_failure(failure):
+                continue
+            url = str(failure.get("url") or "")
+            parsed_url = urlparse(url)
+            if parsed_url.scheme != "https" or parsed_url.netloc != "www.cnvd.org.cn" or not parsed_url.path.startswith("/flaw/show/"):
+                continue
+            saved = failure.get("entry") or {}
+            embedded = dict(saved.get("embedded_detail") or {})
+            embedded["_list_summary"] = True
+            embedded["reference_links"] = [url]
+            code = str(failure.get("code") or str(failure["identity"]).partition(":")[2])
+            entry = ListEntry(
+                identity=VulnerabilityId(type="CNVD", code=code),
+                title=str(saved.get("title") or f"CNVD-{code}"),
+                vuln_type=saved.get("vuln_type"),
+                disclosure_date=saved.get("disclosure_date"),
+                status=saved.get("status"),
+                provider="cnvd", source_url=self.provider.source_url,
+                embedded_detail=embedded,
+            )
+            logger.info("Retrying pending CNVD detail %s", entry.key)
+            self._recovery_attempted_ids.add(entry.key)
+            if entry.key not in self.list_order:
+                self.list_order.append(entry.key)
+            await self._scrape_detail(client, entry)
+            if entry.key not in self.run_failed:
+                if not saved.get("title"):
+                    record = self.records_by_id[entry.key]
+                    record["title"] = record["details"]["cnvd"].get("title") or entry.title
+                self._recovered_ids.append(entry.key)
 
     def _has_detail(self, identity: str) -> bool:
         if identity in self.expanded_entry_ids:
@@ -1131,7 +1202,12 @@ class ScraperRunner:
             "error": message,
             "updated_at": datetime.now(UTC).isoformat(),
         }
+        if isinstance(error, FetchError) and error.status_code is not None:
+            failure["status_code"] = error.status_code
+        if self.provider.key == "cnvd" and isinstance(identity, ListEntry):
+            failure["entry"] = asdict(identity)
         self.checkpoint.failed[identity_key] = failure
+        self.checkpoint.completed_identity_keys.discard(identity_key)
         self.run_failed[identity_key] = failure
         self._emit(phase=f"{phase}-failed", identity=identity_key, type=id_type, code=code, error=message)
         self._error_log.append(
@@ -1199,3 +1275,13 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def _short_repr(value: Any, *, limit: int = 500) -> str:
     text = repr(value)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _transient_fetch_failure(failure: dict[str, Any]) -> bool:
+    status = failure.get("status_code")
+    if status is None:
+        match = re.search(r"\bHTTP\s+(\d{3})\b", str(failure.get("error") or ""))
+        status = int(match.group(1)) if match else None
+    return status in {429, 500, 502, 503, 504, 521} or (
+        status is None and str(failure.get("error") or "").startswith("Failed to fetch ")
+    )

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import math
 import random
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
 from .config import DEFAULT_HEADERS
+
+logger = logging.getLogger(__name__)
 
 
 class ScrapeError(Exception):
@@ -18,6 +24,11 @@ class ScrapeError(Exception):
 
 class FetchError(ScrapeError):
     """Raised when a page cannot be fetched after retries."""
+
+    def __init__(self, message: str, *, status_code: int | None = None, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 
 class CaptchaRequiredError(FetchError):
@@ -171,8 +182,10 @@ class ScraperClient:
             await self.rate_limiter.wait()
             try:
                 response = await self._client.get(url)
+                if response.status_code == 521 and looks_like_waf_challenge(response.text, response.headers):
+                    raise WAFChallengeError(f"CNVD/JSL challenge for {url}", status_code=521)
                 if response.status_code == 429 or response.status_code >= 500:
-                    raise FetchError(f"HTTP {response.status_code} for {url}")
+                    raise _response_error(response, url)
                 response.raise_for_status()
 
                 html = response.text
@@ -195,13 +208,20 @@ class ScraperClient:
                     break
                 if attempt >= retry_count:
                     break
-                await self._backoff(attempt)
+                await self._backoff(attempt, retry_after=getattr(exc, "retry_after", None))
 
-        raise FetchError(f"Failed to fetch {url}: {last_error}") from last_error
+        raise FetchError(
+            f"Failed to fetch {url}: {last_error}",
+            status_code=_http_status(last_error),
+            retry_after=getattr(last_error, "retry_after", None),
+        ) from last_error
 
-    async def _backoff(self, attempt: int) -> None:
+    async def _backoff(self, attempt: int, *, retry_after: float | None = None) -> None:
         delay = min(self.backoff_max, self.backoff_base * (2**attempt))
+        if retry_after is not None:
+            delay = max(delay, retry_after)
         jitter = random.uniform(0, self.backoff_jitter) if self.backoff_jitter > 0 else 0.0
+        logger.info("Retrying HTTP request after %.1fs (retry %d)", delay + jitter, attempt + 1)
         await asyncio.sleep(delay + jitter)
 
     async def request_json(
@@ -220,15 +240,12 @@ class ScraperClient:
         for attempt in range(retry_count + 1):
             await self.rate_limiter.wait()
             try:
-                response = await self._client.request(
-                    method.upper(),
-                    url,
-                    headers=dict(headers or {}),
-                    json=json_body,
-                    data=data,
-                )
+                kwargs: dict[str, Any] = {"headers": dict(headers or {}), "json": json_body}
+                if data is not None:
+                    kwargs["data"] = data
+                response = await self._client.request(method.upper(), url, **kwargs)
                 if response.status_code == 429 or response.status_code >= 500:
-                    raise FetchError(f"HTTP {response.status_code} for {url}")
+                    raise _response_error(response, url)
                 response.raise_for_status()
                 return JSONFetchResult(
                     data=response.json(),
@@ -247,9 +264,13 @@ class ScraperClient:
                     break
                 if attempt >= retry_count:
                     break
-                await self._backoff(attempt)
+                await self._backoff(attempt, retry_after=getattr(exc, "retry_after", None))
 
-        raise FetchError(f"Failed to fetch {url}: {last_error}") from last_error
+        raise FetchError(
+            f"Failed to fetch {url}: {last_error}",
+            status_code=_http_status(last_error),
+            retry_after=getattr(last_error, "retry_after", None),
+        ) from last_error
 
     async def get_json(
         self,
@@ -279,41 +300,30 @@ class ScraperClient:
         json: Any | None = None,
         retries: int | None = None,
     ) -> JSONFetchResult:
-        retry_count = self.retries if retries is None else max(0, retries)
-        last_error: Exception | None = None
+        return await self.request_json(method, url, headers=headers, json_body=json, retries=retries)
 
-        for attempt in range(retry_count + 1):
-            await self.rate_limiter.wait()
+
+def _response_error(response: httpx.Response, url: str) -> FetchError:
+    retry_after: float | None = None
+    value = response.headers.get("Retry-After", "").strip()
+    if value:
+        try:
+            retry_after = float(value)
+        except ValueError:
             try:
-                response = await self._client.request(
-                    method,
-                    url,
-                    headers=dict(headers or {}),
-                    json=json,
-                )
-                if response.status_code == 429 or response.status_code >= 500:
-                    raise FetchError(f"HTTP {response.status_code} for {url}")
-                response.raise_for_status()
-                return JSONFetchResult(
-                    data=response.json(),
-                    status_code=response.status_code,
-                    url=str(response.url),
-                )
-            except (
-                ValueError,
-                httpx.TimeoutException,
-                httpx.TransportError,
-                httpx.HTTPStatusError,
-                FetchError,
-            ) as exc:
-                last_error = exc
-                if _non_retryable_http_status(exc):
-                    break
-                if attempt >= retry_count:
-                    break
-                await self._backoff(attempt)
-
-        raise FetchError(f"Failed to fetch {url}: {last_error}") from last_error
+                when = parsedate_to_datetime(value)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                retry_after = (when - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                pass
+        if retry_after is not None:
+            retry_after = max(0.0, retry_after) if math.isfinite(retry_after) else None
+    return FetchError(
+        f"HTTP {response.status_code} for {url}",
+        status_code=response.status_code,
+        retry_after=retry_after,
+    )
 
 
 def _non_retryable_http_status(exc: Exception) -> bool:
@@ -321,3 +331,9 @@ def _non_retryable_http_status(exc: Exception) -> bool:
         return False
     status_code = exc.response.status_code
     return status_code != 429 and status_code < 500
+
+
+def _http_status(error: Exception | None) -> int | None:
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code
+    return getattr(error, "status_code", None)

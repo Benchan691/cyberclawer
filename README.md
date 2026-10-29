@@ -132,6 +132,16 @@ vuln-scrape catch-up
 vuln-scrape catch-up --limit 200 --days 7
 ```
 
+Transient HTTP errors honor `Retry-After` and use the retry/backoff settings in
+`scrapers.toml`. CNVD and NVD use longer backoff for gateway/service failures.
+Retries remain bounded; an unavailable source is reported as a failure.
+
+Keep `data/checkpoint.json` between runs. Failed CNVD detail requests are retried
+on the next run, including items outside the current catch-up date window.
+Failed fetches do not overwrite existing records with list summaries. NVD
+preserves the failed request's date window and keeps it fixed across pagination
+while recovering, so later runs do not silently move past that window.
+
 Limit which scrapers `catch-up` runs in [`scrapers.toml`](scrapers.toml):
 
 ```toml

@@ -53,9 +53,15 @@ env_file = "/home/cpcnet/webserver-rust-zimbra-candidate/.env"
 
 [scrapers.cnvd]
 retries = 5
-backoff_base = 2.0
+backoff_base = 10.0
+backoff_max = 60.0
 session_max_retries = 50
 session_retry_delay = 0.3
+
+[scrapers.nvd]
+retries = 6
+backoff_base = 10.0
+backoff_max = 60.0
 
 [scrapers.cve]
 retries = 5
