@@ -59,6 +59,11 @@ Both standard and high-threat alerts are included in `run` and `catch-up`.
 Severity is `Critical` when the title contains "High Threat" (case-insensitive),
 and `Medium` otherwise.
 
+The Juniper scraper discovers the current Salesforce Aura context from the
+support portal and obtains its Coveo token through the shared HTTP client.
+Bootstrap requests use the configured retry/backoff settings. List results are
+requested in descending date order so incremental runs can find recent advisories.
+
 ## MongoDB layout
 
 All scrapers write to one physical `news` collection. Every document records

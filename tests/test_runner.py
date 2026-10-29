@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from vuln_scraper.client import CaptchaRequiredError, FetchError, FetchResult, ScraperClient
 from vuln_scraper.config import ScraperSettings
@@ -1009,10 +1009,10 @@ def test_juniper_mongo_sync_stops_at_first_known_record(
 ) -> None:
     monkeypatch.setattr(
         "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        lambda page_uri="/s/global-search/@uri": {
+        AsyncMock(return_value={
             "organizationId": "junipernetworks",
             "accessToken": "test-token",
-        },
+        }),
     )
     client = FakeJuniperClient()
     collection = FakeMongoCollection(
@@ -1056,10 +1056,10 @@ def test_juniper_fetches_second_list_page_when_limit_exceeds_page_size(
 ) -> None:
     monkeypatch.setattr(
         "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        lambda page_uri="/s/global-search/@uri": {
+        AsyncMock(return_value={
             "organizationId": "junipernetworks",
             "accessToken": "test-token",
-        },
+        }),
     )
     known = {f"juniper:JSA{93456 - index}" for index in range(10)}
     client = FakeJuniperClient()

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 from urllib.parse import quote, urlparse
 
+from vuln_scraper.client import ScraperClient
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.juniper.config import (
     ARTICLE_URL,
@@ -43,6 +46,10 @@ class JuniperProvider:
     content_type: str = "json"
     default_request_delay: float = 1.5
     stop_on_first_known: bool = True
+    _config: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    _config_valid_until: float = field(default=0.0, init=False, repr=False)
+    _config_client: object | None = field(default=None, init=False, repr=False)
+    _config_lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         first_result = max(0, (max(1, page) - 1) * PAGE_SIZE)
@@ -72,41 +79,54 @@ class JuniperProvider:
         return self.detail_url(entry.display_id)
 
     def list_json_request(self, page: int, *, checkpoint: object | None = None) -> dict[str, Any]:
-        cfg = get_coveo_config(page_uri="/s/global-search/@uri")
         first_result = max(0, (max(1, page) - 1) * PAGE_SIZE)
         return {
             "method": "POST",
-            "url": coveo_search_url(cfg),
-            "headers": {
-                "Authorization": f"Bearer {cfg['accessToken']}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
+            "url": SEARCH_URL,
+            "_juniper_page_uri": "/s/global-search/@uri",
             "json": coveo_search_body(
                 q=COVEO_LIST_QUERY,
                 first_result=first_result,
                 number_of_results=PAGE_SIZE,
                 facet_filters=list(DEFAULT_FACETS),
+                sort_criteria="date descending",
             ),
         }
 
     def detail_json_request(self, entry: ListEntry, *, detail_url: str) -> dict[str, Any]:
         slug = _slug_from_detail_url(detail_url)
-        cfg = get_coveo_config(page_uri=f"/s/article/{slug}")
         return {
             "method": "POST",
-            "url": coveo_search_url(cfg),
-            "headers": {
-                "Authorization": f"Bearer {cfg['accessToken']}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
+            "url": detail_url,
+            "_juniper_page_uri": f"/s/article/{slug}",
             "json": coveo_search_body(
                 q=f'@sfurlname=="{slug}"',
                 number_of_results=1,
                 fields_to_include=ARTICLE_RAW_FIELDS,
             ),
         }
+
+    async def finalize_json_request(self, client: ScraperClient, request: dict[str, Any]) -> dict[str, Any]:
+        finalized = dict(request)
+        page_uri = finalized.pop("_juniper_page_uri")
+        if self._config_client is not client:
+            self._config_client = client
+            self._config = None
+            self._config_lock = asyncio.Lock()
+        assert self._config_lock is not None
+        async with self._config_lock:
+            if self._config is None or monotonic() >= self._config_valid_until:
+                self._config = await get_coveo_config(client, page_uri=page_uri)
+                self._config_valid_until = monotonic() + 60
+            cfg = self._config
+        finalized["url"] = coveo_search_url(cfg)
+        finalized["headers"] = {
+            **finalized.get("headers", {}),
+            "Authorization": f"Bearer {cfg['accessToken']}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        return finalized
 
     def parse_list(self, data: object, *, page: int) -> ListPage:
         if isinstance(data, dict) and "results" in data:

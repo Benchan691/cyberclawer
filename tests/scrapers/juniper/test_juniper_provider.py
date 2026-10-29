@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -60,19 +61,20 @@ def test_juniper_provider_uses_list_detail_link_when_available() -> None:
 def test_juniper_list_json_request_uses_coveo_facets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        lambda page_uri="/s/global-search/@uri": {
+        AsyncMock(return_value={
             "organizationId": "junipernetworks",
             "accessToken": "test-token",
-        },
+        }),
     )
     provider = JuniperProvider()
-    request = provider.list_json_request(2)
+    request = asyncio.run(provider.finalize_json_request(object(), provider.list_json_request(2)))
 
     assert request["method"] == "POST"
     assert "coveo.com" in request["url"]
     assert request["headers"]["Authorization"] == "Bearer test-token"
     assert request["json"]["firstResult"] == 10
     assert request["json"]["q"] == '@sfrecordtypename=="Security Advisories"'
+    assert request["json"]["sortCriteria"] == "date descending"
     assert request["json"]["facetFilters"] == [
         {"field": "@primarysourcename", "values": ["Knowledge"]},
         {"field": "@articletype", "values": ["Security Advisories"]},
@@ -157,10 +159,10 @@ def _detail_payload(slug: str) -> dict:
 def test_juniper_runner_uses_coveo_without_browser(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "vuln_scraper.scrapers.juniper.provider.get_coveo_config",
-        lambda page_uri="/s/global-search/@uri": {
+        AsyncMock(return_value={
             "organizationId": "junipernetworks",
             "accessToken": "test-token",
-        },
+        }),
     )
     client = _FakeJuniperClient()
     settings = ScraperSettings(
