@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from vuln_scraper.scrapers.nvd.parsers.detail import parse_cve_record
 from vuln_scraper.scrapers.nvd.parsers.list import parse_advisory_list
+from vuln_scraper.scrapers.nvd.provider import NvdProvider
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -12,6 +15,8 @@ def test_parse_advisory_list_from_live_fixture() -> None:
     page = parse_advisory_list(payload, page=1)
 
     assert page.total_records == payload["totalResults"]
+    assert page.start_index == payload["startIndex"]
+    assert page.results_per_page == payload["resultsPerPage"]
     assert len(page.entries) == len(payload["vulnerabilities"])
 
     entry = page.entries[0]
@@ -59,3 +64,32 @@ def test_parse_list_deduplicates_entries() -> None:
 
     page = parse_advisory_list(payload, page=1)
     assert len(page.entries) == 1
+
+
+def test_short_page_does_not_inflate_total_pages() -> None:
+    payload = json.loads((FIXTURES / "cve_response.json").read_text(encoding="utf-8"))
+    payload.update(resultsPerPage=123, startIndex=25000, totalResults=25123)
+    cve = payload["vulnerabilities"][0]["cve"]
+    payload["vulnerabilities"] = [
+        {"cve": {**cve, "id": f"CVE-2026-{10000 + index}"}}
+        for index in range(123)
+    ]
+
+    page = NvdProvider(page_size=200).parse_list(payload, page=126)
+
+    assert len(page.entries) == 123
+    assert page.total_pages == 126
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"resultsPerPage": 0, "startIndex": 0, "totalResults": 0},
+    {"resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": None},
+    {"resultsPerPage": 0, "totalResults": 0, "vulnerabilities": []},
+    {"resultsPerPage": 0, "startIndex": 0, "vulnerabilities": []},
+    {"resultsPerPage": 1, "startIndex": 0, "totalResults": 0, "vulnerabilities": []},
+    {"resultsPerPage": 0, "startIndex": 0, "totalResults": False, "vulnerabilities": []},
+    {"resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": [None]},
+])
+def test_malformed_empty_responses_are_not_exhausted(payload) -> None:
+    assert not parse_advisory_list(payload, page=1).exhausted

@@ -135,6 +135,10 @@ on the next run, including items outside the current catch-up date window.
 Failed fetches do not overwrite existing records with list summaries. NVD
 preserves the failed request's date window and keeps it fixed across pagination
 while recovering, so later runs do not silently move past that window.
+NVD pagination uses the requested page size, including when the final response
+contains fewer records. Empty results are accepted only when the response's
+pagination metadata confirms that the result set is exhausted; unexpected empty
+pages still produce failure alerts.
 
 Limit which scrapers `catch-up` runs in [`scrapers.toml`](scrapers.toml):
 

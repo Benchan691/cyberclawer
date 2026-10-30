@@ -24,7 +24,7 @@ from .client import (
 from .config import ScraperSettings, error_log_path_for_settings, random_user_agent
 from .email_alerts import load_email_alert_config, notify_scrape_failures
 from .error_log import ScraperErrorLog, install_run_log_handler
-from .models import ListEntry, VulnerabilityId
+from .models import ListEntry, ListPage, VulnerabilityId
 from .mongo import (
     MongoClientFactory,
     MongoSyncResult,
@@ -271,8 +271,7 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
-                self.stop_reason = "no_rows"
+                self._handle_empty_list_page(list_page, url=url, page=page)
                 break
 
             self._clear_list_failures(page=page)
@@ -362,8 +361,7 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
-                self.stop_reason = "no_rows"
+                self._handle_empty_list_page(list_page, url=url, page=page)
                 break
 
             self._clear_list_failures(page=page)
@@ -452,8 +450,7 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
-                self.stop_reason = "no_rows"
+                self._handle_empty_list_page(list_page, url=url, page=page)
                 break
 
             self._clear_list_failures(page=page)
@@ -717,7 +714,7 @@ class ScraperRunner:
                 break
 
             if not list_page.entries:
-                self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
+                self._handle_empty_list_page(list_page, url=url, page=page)
                 break
 
             self._clear_list_failures(page=page)
@@ -1057,6 +1054,21 @@ class ScraperRunner:
 
     def _list_page_failure_identity(self, page: int) -> str:
         return f"{self.provider.key}:LIST-PAGE-{page}"
+
+    def _handle_empty_list_page(self, list_page: ListPage, *, url: str, page: int) -> None:
+        if not list_page.exhausted:
+            self._record_failure(self._list_page_failure_identity(page), url, "No rows parsed", phase="list")
+            self.stop_reason = "no_rows"
+            return
+
+        self._clear_list_failures(page=page)
+        self.checkpoint.last_list_page = page
+        if list_page.total_pages is not None:
+            self.checkpoint.total_pages = list_page.total_pages
+        if list_page.total_records is not None:
+            self.checkpoint.total_records = list_page.total_records
+        self.stop_reason = "timestamp_boundary" if self._updated_since is not None else "exhausted"
+        logger.info("Reached the end of %s results at list page %s", self.provider.key, page)
 
     def _prune_stale_provider_failures(self) -> None:
         prefix = f"{self.provider.key}:"

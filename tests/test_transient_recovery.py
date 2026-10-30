@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from pathlib import Path
@@ -227,3 +228,143 @@ def test_nvd_does_not_stop_at_first_older_modified_record(tmp_path):
 
     output = asyncio.run(run())
     assert [item["code"] for item in output["vulnerabilities"]] == ["CVE-2026-10002"]
+
+
+NVD_RUN_MODES = ["file", "newest", "compare_content", "updated_since"]
+
+
+def nvd_runner_for_mode(tmp_path, mode):
+    settings = replace(settings_for(tmp_path, limit=10), mongo_enabled=mode != "file")
+    return ScraperRunner(
+        settings, provider=NvdProvider(page_size=2),
+        mongo_client_factory=fake_mongo_factory(FakeMongoCollection()),
+        stop_on_unchanged_content=mode == "compare_content",
+        updated_since=datetime(2026, 10, 28, tzinfo=UTC) if mode == "updated_since" else None,
+    )
+
+
+def run_nvd_with_responses(runner, respond):
+    async def run():
+        async with mock_client(respond) as (client, _):
+            return await runner._finalize_run_output(await runner._run_with_client(client))
+
+    with patch("vuln_scraper.runner.notify_scrape_failures") as notify:
+        output = asyncio.run(run())
+    return output, notify
+
+
+@pytest.mark.parametrize("mode", NVD_RUN_MODES)
+def test_nvd_short_final_page_stops_without_fetching_an_extra_page(tmp_path, mode):
+    runner = nvd_runner_for_mode(tmp_path, mode)
+    offsets = []
+
+    def respond(request):
+        offset = int(request.url.params["startIndex"])
+        offsets.append(offset)
+        records = [
+            cve(f"CVE-2026-{10001 + index}", "2026-10-29T00:00:00.000")
+            for index in range(offset, min(offset + 2, 3))
+        ]
+        return httpx.Response(200, json={
+            "resultsPerPage": len(records), "startIndex": offset,
+            "totalResults": 3, "vulnerabilities": records,
+        })
+
+    output, notify = run_nvd_with_responses(runner, respond)
+
+    assert offsets == [0, 2]
+    assert output["result_count"] == 3
+    assert output["failed"] == []
+    assert Checkpoint.load(tmp_path / "checkpoint.json").total_pages == 2
+    notify.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", NVD_RUN_MODES)
+def test_nvd_zero_matches_is_a_successful_empty_result(tmp_path, mode):
+    runner = nvd_runner_for_mode(tmp_path, mode)
+
+    def respond(request):
+        assert request.url.params["startIndex"] == "0"
+        return httpx.Response(200, json={
+            "resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": [],
+        })
+
+    output, notify = run_nvd_with_responses(runner, respond)
+
+    assert output["result_count"] == 0
+    assert output["failed"] == []
+    assert output["stop_reason"] == ("timestamp_boundary" if mode == "updated_since" else "exhausted")
+    checkpoint = Checkpoint.load(tmp_path / "checkpoint.json")
+    assert checkpoint.total_pages == checkpoint.total_records == 0
+    assert checkpoint.failed == {}
+    notify.assert_not_called()
+
+
+def test_nvd_valid_empty_response_clears_a_pending_fetch_failure(tmp_path):
+    provider = NvdProvider(page_size=2)
+    failed_url = provider.list_url(1)
+    Checkpoint(failed={"nvd:LIST": {
+        "identity": "nvd:LIST", "phase": "list", "url": failed_url,
+        "error": f"Failed to fetch {failed_url}: HTTP 503",
+    }}).save(tmp_path / "checkpoint.json")
+    runner = nvd_runner_for_mode(tmp_path, "updated_since")
+    assert "nvd:LIST" in runner.checkpoint.failed
+
+    def respond(request):
+        assert str(request.url) == failed_url
+        return httpx.Response(200, json={
+            "resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": [],
+        })
+
+    output, notify = run_nvd_with_responses(runner, respond)
+
+    assert output["failed"] == []
+    assert Checkpoint.load(tmp_path / "checkpoint.json").failed == {}
+    notify.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", NVD_RUN_MODES)
+def test_nvd_result_set_shrinking_between_pages_does_not_alert(tmp_path, mode):
+    runner = nvd_runner_for_mode(tmp_path, mode)
+    offsets = []
+
+    def respond(request):
+        offset = int(request.url.params["startIndex"])
+        offsets.append(offset)
+        records = [cve(f"CVE-2026-{10001 + index}", "2026-10-29T00:00:00.000") for index in range(2)] if offset == 0 else []
+        return httpx.Response(200, json={
+            "resultsPerPage": len(records), "startIndex": offset,
+            "totalResults": 3 if offset == 0 else 2, "vulnerabilities": records,
+        })
+
+    output, notify = run_nvd_with_responses(runner, respond)
+
+    assert offsets == [0, 2]
+    assert output["result_count"] == 2
+    assert output["failed"] == []
+    assert output["stop_reason"] == ("timestamp_boundary" if mode == "updated_since" else "exhausted")
+    assert Checkpoint.load(tmp_path / "checkpoint.json").total_records == 2
+    notify.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", NVD_RUN_MODES)
+def test_nvd_unexpected_empty_page_still_alerts(tmp_path, mode):
+    runner = nvd_runner_for_mode(tmp_path, mode)
+    offsets = []
+
+    def respond(request):
+        offset = int(request.url.params["startIndex"])
+        offsets.append(offset)
+        records = [cve(f"CVE-2026-{10001 + index}", "2026-10-29T00:00:00.000") for index in range(2)] if offset == 0 else []
+        return httpx.Response(200, json={
+            "resultsPerPage": len(records), "startIndex": offset,
+            "totalResults": 3, "vulnerabilities": records,
+        })
+
+    output, notify = run_nvd_with_responses(runner, respond)
+
+    assert offsets == [0, 2]
+    assert output["stop_reason"] == "no_rows"
+    assert [failure["identity"] for failure in output["failed"]] == ["nvd:LIST-PAGE-2"]
+    assert output["failed"][0]["error"] == "No rows parsed"
+    notify.assert_called_once()

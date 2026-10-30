@@ -105,7 +105,10 @@ class NvdProvider:
         return headers
 
     def parse_list(self, data: Any, *, page: int) -> ListPage:
-        return parse_advisory_list(data, page=page, provider=self.key, source_url=self.source_url)
+        return parse_advisory_list(
+            data, page=page, provider=self.key, source_url=self.source_url,
+            page_size=self.page_size,
+        )
 
     def parse_detail(self, data: Any) -> NvdDetailRecord:
         if isinstance(data, dict) and isinstance(data.get("cve"), dict):

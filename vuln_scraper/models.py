@@ -102,6 +102,8 @@ class ListPage:
     total_records: int | None = None
     start_index: int | None = None
     results_per_page: int | None = None
+    # The provider verified that an empty page is the end of the result set.
+    exhausted: bool = False
 
 
 @dataclass(slots=True)
