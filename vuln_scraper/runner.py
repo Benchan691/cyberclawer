@@ -806,6 +806,11 @@ class ScraperRunner:
                     page=page,
                 )
                 attempt += 1
+            except FetchError as exc:
+                list_fetch_fallback = getattr(self.provider, "list_fetch_fallback", None)
+                if list_fetch_fallback is None:
+                    raise
+                return await list_fetch_fallback(client, url=url, page=page, error=exc)
 
         raise FetchError(f"captcha retry attempts exhausted for {url}")
 

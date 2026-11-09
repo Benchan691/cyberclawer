@@ -4,19 +4,23 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
+from xml.etree import ElementTree
 
+from vuln_scraper.client import FetchError
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.fortiguard.config import (
     DEFAULT_COLLECTION,
     LIST_URL,
+    RSS_URL,
     SOURCE_URL,
 )
 from vuln_scraper.scrapers.fortiguard.parsers.detail import (
     FortiguardDetailRecord,
     parse_detail_page,
 )
-from vuln_scraper.scrapers.fortiguard.parsers.list import parse_advisory_list
 from vuln_scraper.scrapers.fortiguard.parsers.common import IR_CODE_RE
+from vuln_scraper.scrapers.fortiguard.parsers.list import parse_advisory_list
+from vuln_scraper.scrapers.fortiguard.parsers.rss import parse_rss_list
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,30 @@ class FortiguardProvider:
 
     def parse_list(self, html: str, *, page: int) -> ListPage:
         return parse_advisory_list(html, page=page, provider=self.key, source_url=self.source_url)
+
+    async def list_fetch_fallback(
+        self,
+        client: Any,
+        *,
+        url: str,
+        page: int,
+        error: FetchError,
+    ) -> ListPage:
+        # The feed has no historical pagination. Never replace a failed later
+        # directory page with the latest items and falsely report completion.
+        if page != 1 or (error.status_code is not None and error.status_code < 500):
+            raise error
+        logger.warning(
+            "FortiGuard directory unavailable at %s (%s); using %s (latest 50 advisories)",
+            url,
+            error,
+            RSS_URL,
+        )
+        result = await client.get_html(RSS_URL)
+        try:
+            return parse_rss_list(result.html, page=page, provider=self.key, source_url=self.source_url)
+        except (ValueError, ElementTree.ParseError) as exc:
+            raise FetchError(f"Invalid FortiGuard PSIRT feed at {RSS_URL}: {exc}") from exc
 
     def parse_detail(self, html: str) -> FortiguardDetailRecord:
         return parse_detail_page(html)

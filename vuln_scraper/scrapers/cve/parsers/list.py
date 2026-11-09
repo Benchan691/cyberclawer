@@ -77,6 +77,9 @@ def parse_cve_list_updated_since(
         total_records=len(entries),
         start_index=0,
         results_per_page=len(entries),
+        # deltaLog.json is a complete, single-page snapshot. An empty result
+        # can mean there were no changes in the requested time window.
+        exhausted=True,
     )
 
 
@@ -117,6 +120,9 @@ def parse_cve_list(
         total_records=len(entries),
         start_index=0,
         results_per_page=len(entries),
+        # deltaLog.json is a complete, single-page snapshot, so zero entries
+        # is a valid end-of-results response rather than a parse failure.
+        exhausted=True,
     )
 
 

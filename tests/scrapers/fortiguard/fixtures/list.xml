@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+     xmlns:csaf="https://fortiguard.fortinet.com/rss/ns/csaf"
+     xmlns:cvrf="https://fortiguard.fortinet.com/rss/ns/cvrf">
+  <channel>
+    <title>FortiGuard Labs | FortiGuard Center - IR Advisories</title>
+    <item>
+      <title>Broken access control in the RADIUS type admin group</title>
+      <link>https://fortiguard.fortinet.com/psirt/FG-IR-26-158</link>
+      <description><![CDATA[<p>CVE-2026-26035 affects RADIUS authentication.</p>]]></description>
+      <pubDate>Thu, 13 Aug 2026 00:00:00 -0700</pubDate>
+    </item>
+    <item>
+      <title>FGFM Authentication Weakening via CLI Configuration</title>
+      <link>https://fortiguard.fortinet.com/psirt/FG-IR-26-160</link>
+      <description><![CDATA[<p>CVE-2026-70468 affects FGFM authentication.</p><p><em>Revised on 2026-11-08 00:00:00</em></p>]]></description>
+      <guid isPermaLink="true">https://fortiguard.fortinet.com/psirt/FG-IR-26-160</guid>
+      <pubDate>Wed, 12 Aug 2026 00:00:00 -0700</pubDate>
+      <csaf:link>https://filestore.fortinet.com/fortiguard/psirt/csaf_fgfm-authentication-weakening-via-cli-configuration_fg-ir-26-160.json</csaf:link>
+      <cvrf:link>https://fortiguard.fortinet.com/psirt/cvrf/FG-IR-26-160</cvrf:link>
+    </item>
+    <item>
+      <title>Duplicate advisory</title>
+      <link>https://www.fortiguard.com/psirt/FG-IR-26-160</link>
+    </item>
+  </channel>
+</rss>

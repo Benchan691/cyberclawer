@@ -2,6 +2,8 @@
 
 Terminal scrapers that ingest vulnerability bulletins into MongoDB. There is no web UI.
 
+詳細開發與維運說明（繁體中文）：[Cyberclawer 開發與維運手冊](docs/DEVELOPMENT.zh-Hant.md)。
+
 ## Start guide
 
 Requires Python 3.11+.
@@ -58,6 +60,10 @@ to discover advisory IDs, then opens each `/psirt/FG-IR-*` article, such as
 workarounds, references, and version tables, plus severity, CVEs, publication and
 update dates, and affected product/solution rows. The shared `news` collection
 identifies these documents with `source.provider = "fortiguard"`.
+If the first directory page remains unavailable after retries, the scraper falls
+back to [Fortinet's PSIRT RSS feed](https://filestore.fortinet.com/fortiguard/rss/ir.xml),
+which covers the latest 50 advisories. Full advisory pages are still fetched;
+failures on later directory pages or advisory pages are reported normally.
 
 The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
 and opens each alert page. It stores the full text in `details.content`, plus
