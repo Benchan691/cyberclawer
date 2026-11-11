@@ -6,8 +6,8 @@ def test_fortiguard_provider_urls_and_registry() -> None:
 
     assert "fortiguard" in provider_keys()
     assert get_provider("fortiguard").key == "fortiguard"
-    assert provider.list_url(1) == "https://www.fortiguard.com/psirt?page=1&filter=1"
-    assert provider.list_url(3) == "https://www.fortiguard.com/psirt?page=3&filter=1"
+    assert provider.list_url(1) == "https://filestore.fortinet.com/fortiguard/rss/ir.xml"
+    assert provider.list_url(3) == "https://filestore.fortinet.com/fortiguard/rss/ir.xml"
     assert provider.detail_url("FORTIGUARD-FG-IR-26-160") == "https://www.fortiguard.com/psirt/FG-IR-26-160"
     assert provider.default_mongo_collection == "fortiguard"
     assert not provider.browser_fallback

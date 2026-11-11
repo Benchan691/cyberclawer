@@ -1107,7 +1107,7 @@ print(output["result_count"], output["stop_reason"])
 | `avd` | HTML | 1.0 | 3 | False | 高危目錄、需詳情、sigchl 處理 |
 | `cnvd` | HTML | 3.0 | 1 | True | JSL／OCR Session、20 筆 offset 分頁 |
 | `cve` | JSON | 0.2 | 3 | False | Delta 單頁列表、CVE v5 詳情 |
-| `fortiguard` | HTML | 1.0 | 3 | True | PSIRT 分頁、全文、可選 CSAF |
+| `fortiguard` | RSS／HTML | 1.0 | 3 | True | PSIRT RSS 最新 50 筆、全文、可選 CSAF |
 | `github_advisory` | JSON | 1.0 | 3 | True | Reviewed 公告，列表內嵌詳情 |
 | `govcert` | HTML | 1.0 | 3 | True | 香港保安警報分頁與全文 |
 | `hkcert` | HTML | 1.0 | 3 | False | Security Bulletin、每頁 10 筆 |
@@ -1164,7 +1164,8 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.5 FortiGuard：`fortiguard`
 
-- 列表：`https://www.fortiguard.com/psirt?page=N&filter=1`。
+- 唯一列表來源：`https://filestore.fortinet.com/fortiguard/rss/ir.xml`，涵蓋最新 50 筆公告，沒有歷史分頁；提高 `--limit` 不會擴大 Feed 的範圍。
+- Feed 重試後仍失敗會記錄為抓取失敗，不會切換至 PSIRT 網頁目錄。
 - 詳情：`/psirt/FG-IR-*`，會驗證詳情 ID 與列表身份一致。
 - 保存全文 `content`、描述、解決方案、workaround、受影響產品／解決版本、時間線、參考連結及表格。
 - 提取嚴重程度、CVSS、CVE、公開及更新日期。

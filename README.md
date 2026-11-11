@@ -34,7 +34,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `avd` | `avd` | Needs `.[avd]`; sigchl solved via quickjs |
 | `cnvd` | `cnvd` | Needs `.[cnvd]` |
 | `cve` | `cve` | CVEProject cvelistV5 |
-| `fortiguard` | `fortiguard` | Paginated PSIRT directory + full advisory pages; optional CSAF enrichment |
+| `fortiguard` | `fortiguard` | PSIRT RSS feed + full advisory pages; optional CSAF enrichment |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
 | `govcert` | `govcert` | GOVCERT.HK English alerts + full alert pages; HTTP only |
 | `hkcert` | `hkcert` | HTML |
@@ -54,16 +54,15 @@ The Splunk archive is only the link index. The scraper opens each selected
 along with the extracted fields and tables. `--limit` counts individual
 advisories, not index pages.
 
-The FortiGuard scraper uses [the PSIRT directory](https://www.fortiguard.com/psirt)
-to discover advisory IDs, then opens each `/psirt/FG-IR-*` article, such as
+The FortiGuard scraper uses [Fortinet's PSIRT RSS feed](https://filestore.fortinet.com/fortiguard/rss/ir.xml)
+as its only advisory list source. The feed covers the latest 50 advisories and
+has no historical pagination. The scraper then opens each `/psirt/FG-IR-*` article, such as
 `/psirt/FG-IR-26-182`. It saves the full advisory in `details.content`, including
 workarounds, references, and version tables, plus severity, CVEs, publication and
 update dates, and affected product/solution rows. The shared `news` collection
 identifies these documents with `source.provider = "fortiguard"`.
-If the first directory page remains unavailable after retries, the scraper falls
-back to [Fortinet's PSIRT RSS feed](https://filestore.fortinet.com/fortiguard/rss/ir.xml),
-which covers the latest 50 advisories. Full advisory pages are still fetched;
-failures on later directory pages or advisory pages are reported normally.
+Feed failures after retries and advisory page failures are reported normally;
+there is no fallback to the PSIRT directory.
 
 The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
 and opens each alert page. It stores the full text in `details.content`, plus

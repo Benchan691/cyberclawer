@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 from xml.etree import ElementTree
 
 from vuln_scraper.client import FetchError
@@ -19,7 +19,6 @@ from vuln_scraper.scrapers.fortiguard.parsers.detail import (
     parse_detail_page,
 )
 from vuln_scraper.scrapers.fortiguard.parsers.common import IR_CODE_RE
-from vuln_scraper.scrapers.fortiguard.parsers.list import parse_advisory_list
 from vuln_scraper.scrapers.fortiguard.parsers.rss import parse_rss_list
 
 logger = logging.getLogger(__name__)
@@ -36,39 +35,17 @@ class FortiguardProvider:
     stop_on_first_known: bool = True
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
-        query = urlencode({"page": max(1, page), "filter": 1})
-        return f"{LIST_URL}?{query}"
+        return LIST_URL
 
     def detail_url(self, identity_display: str) -> str:
         code = identity_display.removeprefix("FORTIGUARD-").strip()
         if not IR_CODE_RE.fullmatch(code):
             raise ValueError(f"invalid FortiGuard advisory identifier: {identity_display!r}")
-        return f"{LIST_URL}/{quote(code.upper(), safe='')}"
+        return f"{SOURCE_URL}/{quote(code.upper(), safe='')}"
 
-    def parse_list(self, html: str, *, page: int) -> ListPage:
-        return parse_advisory_list(html, page=page, provider=self.key, source_url=self.source_url)
-
-    async def list_fetch_fallback(
-        self,
-        client: Any,
-        *,
-        url: str,
-        page: int,
-        error: FetchError,
-    ) -> ListPage:
-        # The feed has no historical pagination. Never replace a failed later
-        # directory page with the latest items and falsely report completion.
-        if page != 1 or (error.status_code is not None and error.status_code < 500):
-            raise error
-        logger.warning(
-            "FortiGuard directory unavailable at %s (%s); using %s (latest 50 advisories)",
-            url,
-            error,
-            RSS_URL,
-        )
-        result = await client.get_html(RSS_URL)
+    def parse_list(self, xml: str, *, page: int) -> ListPage:
         try:
-            return parse_rss_list(result.html, page=page, provider=self.key, source_url=self.source_url)
+            return parse_rss_list(xml, page=page, provider=self.key, source_url=self.source_url)
         except (ValueError, ElementTree.ParseError) as exc:
             raise FetchError(f"Invalid FortiGuard PSIRT feed at {RSS_URL}: {exc}") from exc
 

@@ -33,22 +33,19 @@ def test_rss_preserves_ids_dates_and_namespaced_links_and_orders_revisions():
     assert detail["cvrf_url"].endswith("/cvrf/FG-IR-26-160")
 
 
-@pytest.mark.parametrize("status", [500, 503, None])
-def test_directory_failure_recovers_feed_and_fetches_full_advisory(tmp_path, status):
+def test_runner_fetches_rss_first_and_full_advisory(tmp_path):
     provider = FortiguardProvider()
     requests = []
 
     def respond(request):
         requests.append(str(request.url))
-        if str(request.url) == provider.list_url(1):
-            if status is None:
-                raise httpx.ReadTimeout("directory timed out", request=request)
-            return httpx.Response(status)
         if str(request.url) == RSS_URL:
             return httpx.Response(200, text=(FIXTURES / "list.xml").read_text())
         if request.url.path == "/psirt/FG-IR-26-160":
             return httpx.Response(200, text=(FIXTURES / "detail.html").read_text())
-        return httpx.Response(200, json={"document": {"tracking": {"id": "FG-IR-26-160"}}})
+        if request.url.path.endswith("_fg-ir-26-160.json"):
+            return httpx.Response(200, json={"document": {"tracking": {"id": "FG-IR-26-160"}}})
+        raise AssertionError(f"Unexpected request: {request.url}")
 
     settings = ScraperSettings(
         data_dir=tmp_path, limit=1, retries=1, request_delay=0,
@@ -63,7 +60,6 @@ def test_directory_failure_recovers_feed_and_fetches_full_advisory(tmp_path, sta
 
     output = asyncio.run(run())
 
-    assert requests[:3] == [provider.list_url(1), provider.list_url(1), RSS_URL]
     assert output["result_count"] == 1
     assert output["failed"] == []
     record = output["vulnerabilities"][0]
@@ -71,43 +67,48 @@ def test_directory_failure_recovers_feed_and_fetches_full_advisory(tmp_path, sta
     assert record["source"]["detail_url"] == provider.detail_url("FG-IR-26-160")
     assert "set fgfm-peercert-withoutsn disable" in detail["content"]
     assert detail["affected_products"][1]["solution"] == "Upgrade to 7.6.2 or above"
+    assert requests == [RSS_URL, record["source"]["detail_url"], detail["csaf_url"]]
+    assert detail["csaf"]["document"]["tracking"]["id"] == "FG-IR-26-160"
     assert not detail.get("_list_summary")
     assert Checkpoint.load(runner.settings.checkpoint_file).failed == {}
 
 
-@pytest.mark.parametrize("page,status", [(1, 403), (2, 500)])
-def test_permanent_or_later_page_failures_do_not_use_rss(tmp_path, page, status):
+@pytest.mark.parametrize("status", [403, 500, 503, None])
+def test_feed_failure_has_no_directory_fallback(tmp_path, status):
     provider = FortiguardProvider()
     urls = []
 
     def respond(request):
         urls.append(str(request.url))
+        if status is None:
+            raise httpx.ReadTimeout("feed timed out", request=request)
         return httpx.Response(status)
 
     runner = ScraperRunner(ScraperSettings(data_dir=tmp_path), provider=provider)
 
     async def run():
         with patch.object(ScraperClient, "_build_http_client", lambda _: httpx.AsyncClient(transport=httpx.MockTransport(respond))):
-            async with ScraperClient(delay=0, retries=0) as client:
+            async with ScraperClient(delay=0, retries=1, backoff_base=0, backoff_jitter=0) as client:
                 with pytest.raises(FetchError) as failure:
-                    await runner._fetch_list_page(client, provider.list_url(page), page)
+                    await runner._fetch_list_page(client, provider.list_url(1), 1)
                 assert failure.value.status_code == status
 
     asyncio.run(run())
-    assert urls == [provider.list_url(page)]
+    assert urls == [RSS_URL] * (1 if status == 403 else 2)
 
 
-@pytest.mark.parametrize("feed_status,xml", [
-    (503, ""),
-    (200, "<rss>"),
-    (200, "<html><body>Service unavailable</body></html>"),
-    (200, '<rss><channel><item><link>https://example.test/psirt/FG-IR-26-160</link></item></channel></rss>'),
+@pytest.mark.parametrize("xml", [
+    "<rss>",
+    "<html><body>Service unavailable</body></html>",
+    '<rss><channel><item><link>https://example.test/psirt/FG-IR-26-160</link></item></channel></rss>',
 ])
-def test_invalid_or_unavailable_feed_remains_a_fetch_failure(tmp_path, feed_status, xml):
+def test_invalid_feed_remains_a_fetch_failure_without_fallback(tmp_path, xml):
     provider = FortiguardProvider()
+    urls = []
 
     def respond(request):
-        return httpx.Response(feed_status, text=xml) if str(request.url) == RSS_URL else httpx.Response(500)
+        urls.append(str(request.url))
+        return httpx.Response(200, text=xml)
 
     runner = ScraperRunner(ScraperSettings(data_dir=tmp_path), provider=provider)
 
@@ -118,3 +119,4 @@ def test_invalid_or_unavailable_feed_remains_a_fetch_failure(tmp_path, feed_stat
                     await runner._fetch_list_page(client, provider.list_url(1), 1)
 
     asyncio.run(run())
+    assert urls == [RSS_URL]
