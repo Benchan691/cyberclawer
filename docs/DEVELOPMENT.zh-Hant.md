@@ -885,7 +885,7 @@ Provider 可定義 `detail_failure_fallback()`，但那是一種明確宣告的�
 | `limit` | 已達選取上限；部分非日期路徑亦用於到達總頁數 |
 | `overlap` | 遇到已知身份／內容邊界，依啟用策略判斷 |
 | `timestamp_boundary` | 到達日期邊界、日期範圍已結束，或相關流程無可比較時間 |
-| `exhausted` | 非日期模式遇到經 Parser 確認的合法空結果 |
+| `exhausted` | 非日期模式遇到合法空結果，或 FortiGuard 已完成目前 RSS Feed 的核對 |
 | `error` | 列表擷取在重試後仍失敗 |
 | `no_rows` | 空列表未被確認為合法耗盡 |
 | `None` | 某些非 Mongo 或未明確設定原因的完成路徑 |
@@ -923,6 +923,10 @@ Provider 可定義 `detail_failure_fallback()`，但那是一種明確宣告的�
 4. 強制使用 `mongo_conflict="overwrite"`。
 5. 傳入日期下界及每來源 `limit`。
 6. 記錄摘要；該來源拋出未捕捉例外時，記錄並嘗試通知，再繼續下一來源。
+
+FortiGuard 使用 `catch_up_full_feed=True`：每輪核對目前 RSS Feed 中的全部公告（仍受 `--limit` 限制），不套用 `--days` 下界，也不因已知公告而提前停止。缺少的公告會新增、內容不同的會更新、相同的會略過。這可在下一次排程補回延遲上架、舊日期或先前寫入失敗的公告；Feed 以外的既有資料不會被刪除。摘要使用 `full-feed catch-up`，並列出 `mongo_errors` 及逐筆寫入錯誤。
+
+MongoDB 內容比較會把有／無時區的 UTC 時間統一至 BSON 的毫秒精度，避免從資料庫讀回的時間表示差異，令相同公告在每輪被誤判為更新。
 
 來源目錄同步位於逐來源錯誤捕捉之外；若這一步因 MongoDB 等問題失敗，整輪會在開始爬取前中止。Provider 設定正規化等初始化錯誤也不一定落在逐來源 Runner 的捕捉範圍內。
 
@@ -1166,6 +1170,7 @@ print(output["result_count"], output["stop_reason"])
 
 - 唯一列表來源：`https://filestore.fortinet.com/fortiguard/rss/ir.xml`，涵蓋最新 50 筆公告，沒有歷史分頁；提高 `--limit` 不會擴大 Feed 的範圍。
 - Feed 重試後仍失敗會記錄為抓取失敗，不會切換至 PSIRT 網頁目錄。
+- `catch-up` 每輪核對完整的目前 Feed（仍受 `--limit` 限制），不按 `--days` 篩選，也不因已知公告而提前停止；完整掃描後回報 `exhausted`。Feed 的重建時間不代表各公告的公開或更新日期。
 - 詳情：`/psirt/FG-IR-*`，會驗證詳情 ID 與列表身份一致。
 - 保存全文 `content`、描述、解決方案、workaround、受影響產品／解決版本、時間線、參考連結及表格。
 - 提取嚴重程度、CVSS、CVE、公開及更新日期。
@@ -1535,6 +1540,7 @@ Registry 掃描不以底線開頭的來源目錄，匯入 `provider.py`。模組
 | --- | --- | --- |
 | `default_concurrency` | 屬性 | CNVD、NVD 的來源併發預設 |
 | `stop_on_timestamp_boundary` | 屬性 | NVD 避免碰到第一筆舊日期就停止 |
+| `catch_up_full_feed` | 屬性 | FortiGuard 在 Catch-up 核對目前 RSS 全部公告，不套用日期下界或已知項目停止條件 |
 | `request_headers()` | 同步 | Token、語言與來源 Header |
 | `async_request_headers()` | 可 await | 執行時取得 Header |
 | `request_method`、`request_payload()` | 同步 | Huawei SA 的 POST 列表 |

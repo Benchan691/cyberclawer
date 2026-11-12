@@ -37,6 +37,14 @@ def test_provider_caught_up_on_timestamp_boundary() -> None:
     assert provider_caught_up({"stop_reason": "timestamp_boundary"})
 
 
+def test_provider_caught_up_on_exhausted_feed_only_when_all_writes_succeeded() -> None:
+    assert provider_caught_up({"stop_reason": "exhausted"})
+    assert not provider_caught_up({"stop_reason": "exhausted", "failed": [{"error": "HTTP 503"}]})
+    assert not provider_caught_up({
+        "stop_reason": "exhausted", "mongo_sync": {"errors": [{"error": "insert failed"}]},
+    })
+
+
 def test_no_progress_on_empty_result() -> None:
     assert no_progress({"result_count": 0, "mongo_sync": {}})
     assert not no_progress({"result_count": 0, "mongo_sync": {"deleted": 1}})

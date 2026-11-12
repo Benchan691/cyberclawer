@@ -33,6 +33,8 @@ class FortiguardProvider:
     content_type: str = "html"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = True
+    # RSS can expose backdated advisories after the scheduled date window.
+    catch_up_full_feed: bool = True
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_URL

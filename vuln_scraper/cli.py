@@ -65,7 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help=(
             "Calendar days to include ending today (Asia/Hong_Kong). "
-            "Default 1 is today only; use 7 for the last week."
+            "Default 1 is today only; use 7 for the last week. "
+            "FortiGuard always reconciles its full current RSS feed, regardless of --days."
         ),
     )
     catch_up_parser.add_argument(

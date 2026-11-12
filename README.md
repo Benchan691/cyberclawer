@@ -64,6 +64,15 @@ identifies these documents with `source.provider = "fortiguard"`.
 Feed failures after retries and advisory page failures are reported normally;
 there is no fallback to the PSIRT directory.
 
+During `catch-up`, FortiGuard reconciles every advisory currently in the feed,
+up to `--limit`, regardless of `--days` or whether an earlier advisory is already
+in MongoDB. Missing records are inserted, changed records are overwritten, and
+unchanged records are skipped. This catches late or backdated feed entries and
+repairs gaps on the next scheduled run. A feed rebuild time is not an advisory's
+publication or revision date. Records no longer present in the feed are retained.
+Content comparison accounts for MongoDB's UTC timestamp representation and
+millisecond precision so unchanged records are not rewritten on each run.
+
 The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
 and opens each alert page. It stores the full text in `details.content`, plus
 affected systems, impact, recommendations, CVE IDs, tags, references, and tables.
@@ -124,7 +133,8 @@ vuln-scrape run govcert --limit 10
 vuln-scrape run fortiguard --limit 20
 ```
 
-Catch up all (or configured) scrapers for today's Asia/Hong_Kong window:
+Catch up all (or configured) scrapers for today's Asia/Hong_Kong window
+(FortiGuard always reconciles its full current RSS feed):
 
 ```bash
 vuln-scrape catch-up

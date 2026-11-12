@@ -43,10 +43,9 @@ def providers_for_catch_up(settings: ScraperSettings) -> list[ScraperProvider]:
 
 
 def provider_caught_up(output: dict) -> bool:
-    stop_reason = output.get("stop_reason")
-    if stop_reason == "timestamp_boundary":
-        return True
-    return False
+    if output.get("failed") or (output.get("mongo_sync") or {}).get("errors"):
+        return False
+    return output.get("stop_reason") in {"timestamp_boundary", "exhausted"}
 
 
 def no_progress(output: dict) -> bool:
@@ -109,15 +108,26 @@ def run_catch_up_cycle(
             limit=per_provider_limit,
             mongo_conflict="overwrite",
         ).normalized()
-        logger.info(
-            "Timestamp catch-up for provider %s collection %s "
-            "(updated_since=%s, days=%s, limit=%s)",
-            provider.key,
-            normalized.mongo_collection,
-            updated_since.isoformat(),
-            days,
-            per_provider_limit,
-        )
+        full_feed = bool(getattr(provider, "catch_up_full_feed", False))
+        if full_feed:
+            logger.info(
+                "Full-feed catch-up for provider %s collection %s "
+                "(all current RSS advisories, limit=%s; --days=%s does not filter this feed)",
+                provider.key,
+                normalized.mongo_collection,
+                per_provider_limit,
+                days,
+            )
+        else:
+            logger.info(
+                "Timestamp catch-up for provider %s collection %s "
+                "(updated_since=%s, days=%s, limit=%s)",
+                provider.key,
+                normalized.mongo_collection,
+                updated_since.isoformat(),
+                days,
+                per_provider_limit,
+            )
         try:
             output = asyncio.run(
                 ScraperRunner(
@@ -127,7 +137,7 @@ def run_catch_up_cycle(
                 ).run()
             )
         except Exception as exc:
-            logger.exception("Timestamp catch-up failed for provider %s", provider.key)
+            logger.exception("Catch-up failed for provider %s", provider.key)
             log_uncaught_provider_error(
                 data_dir=normalized.data_dir,
                 error_log_name=normalized.error_log,
@@ -155,15 +165,27 @@ def run_catch_up_cycle(
             and isinstance(item["details"].get(provider.key), dict)
         )
         mongo = output.get("mongo_sync") or {}
+        mongo_errors = mongo.get("errors") or []
         logger.info(
-            "Provider %s timestamp catch-up: fetched %s window records "
-            "(%s with details, stop_reason=%s); inserted=%s overwritten=%s deleted=%s skipped=%s",
+            "Provider %s %s catch-up: fetched %s %s records "
+            "(%s with details, stop_reason=%s); "
+            "inserted=%s overwritten=%s deleted=%s skipped=%s mongo_errors=%s",
             provider.key,
+            "full-feed" if full_feed else "timestamp",
             len(vulnerabilities),
+            "feed" if full_feed else "window",
             completed,
             last_stop_reason,
             mongo.get("inserted", 0),
             mongo.get("overwritten", 0),
             mongo.get("deleted", 0),
             mongo.get("skipped", 0),
+            len(mongo_errors),
         )
+        for error in mongo_errors:
+            logger.error(
+                "MongoDB sync failed for %s advisory %s: %s",
+                provider.key,
+                error.get("identity") or error.get("code") or "(unknown)",
+                error.get("error"),
+            )

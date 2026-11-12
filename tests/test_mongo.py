@@ -1,8 +1,10 @@
 import copy
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
+from bson import BSON
+from bson.codec_options import CodecOptions
 
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.mongo import (
@@ -113,6 +115,34 @@ def test_build_mongo_document_sets_normalized_timestamps() -> None:
 
     assert document["published_at"] == datetime(2026, 6, 17, 16, tzinfo=timezone.utc)
     assert document["updated_at"] == datetime(2026, 6, 17, 16, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("tz_aware", [False, True])
+def test_sync_skips_unchanged_records_after_bson_timestamp_conversion(tz_aware) -> None:
+    incoming = {
+        **record("2026-10001"),
+        "published_at": "2026-11-10T16:12:13.123456+08:00",
+        "updated_at": "2026-11-11T16:12:13.234567+08:00",
+    }
+    output = output_payload([incoming])
+    document = build_mongo_document(incoming, output)
+    stored = BSON(BSON.encode(document)).decode(codec_options=CodecOptions(tz_aware=tz_aware))
+    collection = FakeCollection()
+    collection.documents[stored["_id"]] = stored
+
+    result = sync_output_to_mongo(
+        output, ScraperSettings(mongo_enabled=True, mongo_conflict="overwrite"),
+        client_factory=fake_factory(collection),
+    )
+
+    assert result.skipped == result.unchanged == 1
+    assert result.overwritten == 0
+    assert result.errors == []
+    assert documents_content_match(stored, document)
+
+    document["updated_at"] += timedelta(milliseconds=1)
+    assert not documents_match(stored, document)
+    assert not documents_content_match(stored, document)
 
 
 def test_sync_stores_all_raw_output_records() -> None:

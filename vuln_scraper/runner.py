@@ -230,6 +230,9 @@ class ScraperRunner:
                 source={"provider": self.provider.key, "url": self.provider.source_url},
             )
             output["mongo_sync"] = self.mongo_result.to_dict()
+            if self.mongo_result.errors:
+                self.stop_reason = "error"
+                output["stop_reason"] = self.stop_reason
             self._emit(phase="mongo-complete", mongo_sync=output["mongo_sync"])
             self._emit(phase="completed")
             return output
@@ -239,6 +242,17 @@ class ScraperRunner:
                 close()
 
     async def _scrape_newest_records(self, client: ScraperClient, *, known_ids: set[str]) -> None:
+        if self._updated_since is not None and getattr(self.provider, "catch_up_full_feed", False):
+            # Reconcile the bounded feed even when its advisory dates are old or
+            # missing, and continue past known items to fill gaps in MongoDB.
+            await self._scrape_matching_records(client)
+            if self.run_failed:
+                self.stop_reason = self.stop_reason or "error"
+            elif len(self.selected_ids) >= self.settings.limit:
+                self.stop_reason = "limit"
+            else:
+                self.stop_reason = "exhausted"
+            return
         if self._updated_since is not None:
             await self._scrape_updated_since_records(client)
             return

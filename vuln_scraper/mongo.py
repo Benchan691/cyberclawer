@@ -4,6 +4,7 @@ import copy
 import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -158,7 +159,19 @@ def document_content_payload(document: dict[str, Any]) -> dict[str, Any]:
     }
     source = document.get("source") if isinstance(document.get("source"), dict) else {}
     payload["source_provider"] = source.get("provider")
-    return payload
+    return _mongo_comparison_value(payload)
+
+
+def _mongo_comparison_value(value: Any) -> Any:
+    """Compare timestamps as BSON stores them: UTC with millisecond precision."""
+    if isinstance(value, datetime):
+        normalized = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+        return normalized.replace(microsecond=(normalized.microsecond // 1000) * 1000)
+    if isinstance(value, dict):
+        return {key: _mongo_comparison_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_mongo_comparison_value(item) for item in value]
+    return value
 
 
 def _ensure_indexes(collection: Any, provider: str | None = None) -> None:
@@ -235,7 +248,7 @@ def _documents_match(existing: dict[str, Any], document: dict[str, Any]) -> bool
     existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
     document_source = document.get("source") if isinstance(document.get("source"), dict) else {}
     return (
-        existing_core == document_core
+        _mongo_comparison_value(existing_core) == _mongo_comparison_value(document_core)
         and existing_source.get("provider") == document_source.get("provider")
     )
 
