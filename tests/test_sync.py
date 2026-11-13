@@ -106,6 +106,16 @@ def test_fixed_windows_resume_from_saved_progress_instead_of_midnight(tmp_path):
     assert h.calls[0][0].until == NOW + timedelta(hours=18)
 
 
+def test_empty_provider_bootstraps_exactly_seven_days_then_uses_overlap(tmp_path):
+    h = Harness(tmp_path, NvdProvider())
+    h.pages = lambda context, page: ListPage(page, [], total_pages=0, exhausted=True)
+    h.run()
+    assert h.calls[0][0].since == NOW - timedelta(days=7)
+    h.calls.clear()
+    h.run(now=NOW + timedelta(hours=1))
+    assert h.calls[0][0].since == NOW - timedelta(days=1)
+
+
 def test_identical_snapshot_resumes_past_limit_without_starving_tail(tmp_path):
     h = Harness(tmp_path)
     outputs = [h.run(limit=2, now=NOW + timedelta(hours=i)) for i in range(3)]
@@ -113,6 +123,28 @@ def test_identical_snapshot_resumes_past_limit_without_starving_tail(tmp_path):
     assert all(output["sync"]["checked"] <= 2 for output in outputs)
     assert outputs[-1]["sync"]["incremental_status"] == "up_to_date"
     assert sum(output["mongo_sync"]["inserted"] for output in outputs) == 5
+
+
+def test_overlapping_windows_do_not_spend_the_budget_replaying_committed_entries(tmp_path):
+    h = Harness(tmp_path, NvdProvider())
+    h.pages = lambda context, page: ListPage(page, [entry(i, "nvd") for i in range(1, 6)], total_pages=1)
+    h.run(limit=2)
+    h.pages = lambda context, page: ListPage(page, [entry(6, "nvd")] + [entry(i, "nvd") for i in range(1, 6)], total_pages=1)
+    second = h.run(limit=2, now=NOW + timedelta(hours=1))
+    assert second["sync"]["checked"] == 2
+    assert {"nvd:1", "nvd:2", "nvd:3", "nvd:6"} <= set(h.news.documents)
+
+
+def test_an_older_queued_observation_cannot_suppress_a_newer_revision(tmp_path):
+    h = Harness(tmp_path, NvdProvider())
+    h.pages = lambda context, page: ListPage(page, [entry(1, "nvd"), entry(2, "nvd")], total_pages=1)
+    h.run(limit=1)
+    revised = entry(2, "nvd")
+    revised.title = "Revised advisory"
+    revised.embedded_detail["content"] = "Revised content, original publication date"
+    h.pages = lambda context, page: ListPage(page, [entry(3, "nvd"), revised], total_pages=1)
+    h.run(limit=3, now=NOW + timedelta(hours=1))
+    assert h.news.documents["nvd:2"]["title"] == "Revised advisory"
 
 
 def test_mongo_error_is_retried_and_blocks_success_position(tmp_path):
@@ -243,6 +275,33 @@ def test_retries_survive_missing_cached_payloads(tmp_path):
     second = h.run(now=NOW + timedelta(hours=1), configure=configure)
     assert second["sync"]["pending_retries"] == 0
     assert entry(1).key in h.news.documents
+
+
+def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_path):
+    h = Harness(tmp_path, GovCERTProvider())
+    advisory = entry(1, "govcert")
+    advisory.embedded_detail["_list_summary"] = True
+    h.pages = lambda context, page: ListPage(page, [advisory], total_pages=1)
+    attempts = []
+
+    def configure(runner):
+        async def detail(client, value):
+            attempts.append(value.key)
+            if len(attempts) == 2:
+                runner._record_failure(value, "https://example.test/detail", "HTTP 503", phase="detail")
+                return
+            complete = entry(1, "govcert")
+            complete.embedded_detail["content"] = "Revised body" if len(attempts) > 2 else "Original body"
+            runner.records_by_id[value.key] = complete.to_record()
+        runner._scrape_detail = detail
+
+    h.run(configure=configure)
+    second = h.run(now=NOW + timedelta(hours=1), configure=configure)
+    assert second["sync"]["pending_retries"] == 1
+    third = h.run(now=NOW + timedelta(hours=2), configure=configure)
+    assert third["sync"]["pending_retries"] == 0
+    assert h.news.documents["govcert:1"]["details"]["content"] == "Revised body"
+    assert len(attempts) == 3
 
 
 def test_unacknowledged_insert_does_not_commit_sync_success(tmp_path):

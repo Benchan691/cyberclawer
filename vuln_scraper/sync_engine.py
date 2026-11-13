@@ -36,7 +36,7 @@ class SyncEngine:
         self.limit = runner.settings.limit
         self.checked = 0
         self.pages = 0
-        self.seen: set[str] = set()
+        self.seen: dict[str, datetime] = {}
         self.new_tasks: set[str] = set()
         self.list_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
         self.initial_failures = self.store.failures()
@@ -56,6 +56,9 @@ class SyncEngine:
             self.state["legacy_failures_imported"] = True
         anchor = min(utc(self.state["scheduled_until"]), self.now)
         since = anchor - timedelta(days=self.options.overlap_days)
+        if self.state.get("bootstrap_empty") and not self.state.get("discovery_started"):
+            since = anchor
+        self.state["discovery_started"] = True
         if self.provider.key in WINDOWS:
             if self.now > anchor:
                 while since < self.now:
@@ -110,13 +113,14 @@ class SyncEngine:
     def ledger(self, identity: str) -> dict[str, Any] | None:
         return self.store.collection.find_one({"_id": f"{self.provider.key}:item:{identity}"})
 
-    def mark(self, entry: Any) -> None:
-        if self.provider.key in WINDOWS | FEEDS:
-            return
+    def mark(self, entry: Any, observed_at: str) -> None:
         identity = f"{self.provider.key}:item:{entry.key}"
+        previous = self.ledger(entry.key)
+        if previous and utc(previous.get("observed_at")) and utc(previous["observed_at"]) > utc(observed_at):
+            return
         result = self.store.collection.replace_one({"_id": identity}, {
             "_id": identity, "kind": "item", "provider": self.provider.key,
-            "signature": self.signature(entry), "checked_at": self.now,
+            "signature": self.signature(entry), "checked_at": self.now, "observed_at": observed_at,
         }, upsert=True)
         if getattr(result, "acknowledged", True) is False:
             raise RuntimeError("advisory fingerprint write was not acknowledged")
@@ -139,6 +143,8 @@ class SyncEngine:
                              max(0, self.limit - self.checked))
         await self.finish_tasks()
         failures = self.store.failures()
+        if not self.state["tasks"] and not failures:
+            self.state["bootstrap_complete"] = True
         self.state["pending_retries"] = len(failures)
         self.state["last_run"] = {"at": self.now, "checked": self.checked,
                                   "listing_requests": self.pages, "mongo_sync": self.result.to_dict()}
@@ -241,7 +247,8 @@ class SyncEngine:
                 if not self.state.get("archive"):
                     self.state["archive"] = self.task("baseline", utc(self.state["recovery_since"]), self.now)
                 self.store.save(self.state)
-        if self.provider.key in FEEDS and not self.state.get("bootstrap_empty") and parsed.entries:
+        if (self.provider.key in FEEDS and parsed.entries
+                and (not self.state.get("bootstrap_empty") or self.state.get("bootstrap_complete"))):
             dates = [parse_timestamp(entry.disclosure_date) for entry in parsed.entries]
             dates = [value for value in dates if value is not None]
             if dates and min(dates) > utc(task["since"]) and not self.state.get("history_gap"):
@@ -299,16 +306,25 @@ class SyncEngine:
                         task.pop("seek_anchor")
                     task["index"] += 1
                     continue
-                if entry.key in self.seen and not task.get("child_cache"):
+                if (entry.key in self.seen and not task.get("child_cache")
+                        and self.seen[entry.key] >= utc(payload["observed_at"])):
                     task["index"] += 1
                     continue
                 ledger = self.ledger(entry.key)
+                # Overlapping windows can contain the same already-acknowledged
+                # observation. Drain that queued work without spending the next
+                # run's allowance on replaying it instead of unfinished entries.
+                if (task["id"] not in self.new_tasks and not task.get("child_cache")
+                        and ledger and utc(ledger.get("observed_at"))
+                        and utc(ledger["observed_at"]) >= utc(payload["observed_at"])):
+                    task["index"] += 1
+                    continue
                 metadata_unchanged = (self.provider.key not in FEEDS and task["kind"] == "head"
                                       and ledger and ledger.get("signature") == self.signature(entry)
                                       and self.news.find_one({"_id": entry.key}) is not None)
                 if metadata_unchanged:
                     self.checked += 1
-                    self.seen.add(entry.key)
+                    self.seen[entry.key] = utc(ledger.get("observed_at")) or datetime.min.replace(tzinfo=UTC)
                     self.result.skipped += 1
                     self.result.unchanged += 1
                     task["index"] += 1
@@ -366,7 +382,7 @@ class SyncEngine:
                 observed = datetime.now(UTC).isoformat()
                 if entry.key in self.runner.run_failed:
                     self.checked += 1
-                    self.seen.add(entry.key)
+                    self.seen[entry.key] = utc(observed)
                     self.store.defer(entry.key, {"task_id": task["id"], "entry": retry_entry_data(entry),
                         "error": self.runner.run_failed[entry.key]["error"][:2000]})
                     return True
@@ -388,9 +404,9 @@ class SyncEngine:
             self.store.save(self.state)
         if task["child_index"] < len(records):
             return False
-        self.seen.add(entry.key)
+        self.seen[entry.key] = utc(child["observed_at"])
         if not any(item.get("entry", {}).get("identity") == entry_data(entry)["identity"] for item in self.store.failures()):
-            self.mark(entry)
+            self.mark(entry, child["observed_at"])
         task["child_cache"], task["child_index"] = None, 0
         return True
 
@@ -430,14 +446,15 @@ class SyncEngine:
                 return
             entry = restore_entry(reference["entry"])
             identity = reference["identity"]
-            if entry.key in self.seen:
+            cached = self.cache.read(reference.get("cache"))
+            required_observation = utc((cached or {}).get("observed_at") or reference.get("failed_at"))
+            if entry.key in self.seen and required_observation and self.seen[entry.key] >= required_observation:
                 # Clear old parent failures if a fresh observation succeeded.
                 if entry.key not in self.runner.run_failed and identity not in {item["identity"] for item in self.result.errors} and self.news.find_one({"_id": identity}):
                     self.store.clear(identity)
                 continue
             task = self.task("retry", utc(self.state["last_successful_until"]), self.now)
             task["id"] = reference.get("task_id")
-            cached = self.cache.read(reference.get("cache"))
             if cached is not None and reference.get("record_index", 0) < len(cached["records"]):
                 index = reference.get("record_index", 0)
                 task["child_cache"] = reference["cache"]

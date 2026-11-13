@@ -23,6 +23,13 @@ from vuln_scraper.scrapers.github_advisory.parsers.detail import (
 from vuln_scraper.scrapers.github_advisory.parsers.list import parse_advisory_list
 
 
+def _cursor_url(url: str) -> str:
+    target = urlparse(url)
+    if target.scheme != "https" or target.netloc != "api.github.com" or target.path != "/advisories":
+        raise ValueError("invalid GitHub advisory pagination URL")
+    return url
+
+
 @dataclass(frozen=True, slots=True)
 class GitHubAdvisoryProvider:
     key: str = "github_advisory"
@@ -50,10 +57,7 @@ class GitHubAdvisoryProvider:
 
     def sync_list_url(self, context: Any, page: int) -> str:
         if context.cursor:
-            target = urlparse(context.cursor)
-            if target.scheme != "https" or target.netloc != "api.github.com" or target.path != "/advisories":
-                raise ValueError("invalid GitHub advisory pagination URL")
-            return context.cursor
+            return _cursor_url(context.cursor)
         params = {"type": "reviewed", "sort": "updated", "direction": "desc",
                   "per_page": DEFAULT_PAGE_SIZE,
                   "modified": f"{context.since.isoformat()}..{context.until.isoformat()}"}
@@ -69,7 +73,7 @@ class GitHubAdvisoryProvider:
         match = re.search(r'<([^>]+)>;\s*rel="next"', link)
         result.next_cursor = match.group(1) if match else None
         if result.next_cursor:
-            self.sync_list_url(type("Cursor", (), {"cursor": result.next_cursor})(), page + 1)
+            _cursor_url(result.next_cursor)
         else:
             result.total_pages = page
             result.exhausted = not data

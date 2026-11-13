@@ -155,7 +155,8 @@ class SyncStateStore:
 
     def defer(self, identity: str, reference: dict[str, Any]) -> None:
         document = {**reference, "_id": f"{self.provider}:retry:{identity}",
-                    "provider": self.provider, "kind": "retry", "identity": identity}
+                    "provider": self.provider, "kind": "retry", "identity": identity,
+                    "failed_at": datetime.now(UTC).isoformat()}
         result = self.collection.replace_one({"_id": document["_id"]}, document, upsert=True)
         if getattr(result, "acknowledged", True) is False:
             raise RuntimeError("retry reference write was not acknowledged")
