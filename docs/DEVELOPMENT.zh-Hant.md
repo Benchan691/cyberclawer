@@ -471,7 +471,7 @@ vuln-scrape catch-up --days 7 --limit 200
 | `--batch-size` | `5` | 每批已確認寫入及儲存進度的公告數量上限 |
 | `--max-runs-per-provider` | `100` | 每來源每輪列表工作的上限 |
 
-Catch-up 會為每個來源保存獨立進度、失敗重試及歷史掃描游標；排程重疊時不重複執行。完整規格見 [Resumable catch-up](CATCH_UP.md)。
+Catch-up 會為每個來源保存獨立進度及更新失敗重試；不補抓歷史缺漏、不輪查舊公告，排程重疊時不重複執行。完整規格見 [Resumable catch-up](CATCH_UP.md)。
 
 ### 6.4 `sync-source-catalog`
 
@@ -901,15 +901,15 @@ Provider 可定義 `detail_failure_fallback()`，但那是一種明確宣告的�
 <a id="catch-up"></a>
 ## 11. Catch-up 持續同步與恢復
 
-現行 Catch-up 使用 MongoDB `news_sync_state` 保存每來源的完成進度、發現進度、未完成視窗／頁面、失敗公告及歷史掃描位置。原有公告 Schema 及集合不變。
+現行 Catch-up 使用 MongoDB `news_sync_state` 保存每來源的完成進度、發現進度、未完成更新視窗／頁面及失敗公告。原有公告 Schema 及集合不變。
 
-- 首次從該來源已儲存的最新 `updated_at` 開始，沒有時用 `published_at`；空來源讀目前 Feed／索引或最近七日。
+- 首次從該來源已儲存的最新 `updated_at` 開始，沒有時用 `published_at`；空來源讀目前 Feed 或最近七日的更新。
 - `--days 1` 代表已儲存進度之前重查 24 小時，不再只查今日。日期視窗固定為 UTC，未確認寫入成功不推進完成進度。
-- 最新列表會先檢查；舊失敗不阻擋新資料。最近資料／重試和歷史掃描分配 80%／20% 的公告檢查預算，未用額度可借用。
+- 最新列表會先檢查；更新失敗不阻擋新資料。全部公告檢查額度用於更新及重試，不保留歷史掃描額度。
 - NVD 使用固定、最多 120 日的修改日期視窗；GitHub Advisory 使用修改範圍及 Link 游標；CVE 使用 Delta batch 的 `fetchTime`。
-- FortiGuard／HPE 核對完整目前 RSS；FortiGuard 不改用目錄 fallback。其他索引及分頁來源會持續輪查舊公告，不能因第一筆舊日期或相同資料就假定全站沒有更新。
-- CVE 歷史不足時，以官方 baseline 建立可恢復的 ID 清單，取得目前的完整公告；仍繼續每輪 Delta。同步不會寫入過時的 baseline 內容。
-- RSS 已移出且來源沒有歷史入口的資料無法補回；摘要會明確表示覆蓋缺口。
+- FortiGuard／HPE 核對完整目前 RSS；FortiGuard 不改用目錄 fallback。其他索引只處理近期或列表有變更的公告；分頁來源遇到整頁超出更新視窗後停止，不輪查歷史頁面。
+- CVE 只讀可取得的 Delta；歷史不足時記錄並略過缺口，不下載 baseline。RSS 也不補抓已移出 Feed 的公告。
+- 已保存的歷史掃描／baseline 游標及其重試會自動停用；保留未完成更新及其重試，也保留資料庫既有歷史公告。略過的歷史缺口不會讓更新狀態永久顯示 partial。
 - `data/catch-up.lock` 防止排程重疊；`data/sync-cache/` 保存具 checksum 的頁面及 MSRC 子公告快照。快照遺失會重抓，不盲用舊 offset。
 - MongoDB UTC／毫秒時間比較、穩定身份及已確認寫入使重跑保持冪等；來源不再列出的既有公告不會被刪除。
 

@@ -117,11 +117,12 @@ def _run_catch_up_cycle(settings: ScraperSettings, context: SyncContext) -> None
         sync = output.get("sync") or {}
         logger.info(
             "Provider %s resumable catch-up: checked=%s fetched=%s stop_reason=%s "
-            "incremental=%s history=%s pending_windows=%s pending_retries=%s "
+            "incremental=%s history=%s outside_window=%s pending_windows=%s pending_retries=%s "
             "inserted=%s overwritten=%s deleted=%s skipped=%s mongo_errors=%s",
             provider.key, sync.get("checked", output.get("result_count", 0)), output.get("result_count", 0),
             output.get("stop_reason"), sync.get("incremental_status", "unknown"),
-            sync.get("history_status", "unknown"), sync.get("pending_windows", 0), sync.get("pending_retries", 0),
+            sync.get("history_status", "unknown"), sync.get("outside_window", 0),
+            sync.get("pending_windows", 0), sync.get("pending_retries", 0),
             mongo.get("inserted", 0), mongo.get("overwritten", 0), mongo.get("deleted", 0),
             mongo.get("skipped", 0), len(mongo.get("errors") or []),
         )
@@ -129,4 +130,4 @@ def _run_catch_up_cycle(settings: ScraperSettings, context: SyncContext) -> None
             logger.error("MongoDB sync failed for %s advisory %s: %s", provider.key,
                          error.get("identity") or error.get("code") or "(unknown)", error.get("error"))
         if sync.get("history_gap"):
-            logger.warning("%s source history cannot cover the saved position: %s", provider.key, sync["history_gap"])
+            logger.warning("%s historical coverage gap skipped (recovery disabled): %s", provider.key, sync["history_gap"])

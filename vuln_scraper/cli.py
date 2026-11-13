@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     catch_up_parser = subparsers.add_parser(
         "catch-up",
-        help="Resume each provider from saved sync progress and recheck older advisories.",
+        help="Resume recent updates from saved sync progress without historical recovery.",
     )
     catch_up_parser.add_argument(
         "--limit",

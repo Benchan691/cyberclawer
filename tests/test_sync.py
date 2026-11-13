@@ -34,8 +34,9 @@ def entry(number, provider="fortiguard", *, old=True):
         code = f"SVD-2611-{number:03}"
     return ListEntry(VulnerabilityId(provider.upper(), code), f"Advisory {number}", None,
         "2026-01-01" if old else "2026-11-13", None, provider, "https://example.test",
-        {"title": f"Advisory {number}", "advisory_id": code, "published_date": "2026-01-01",
-         "updated_date": "2026-01-01", "content": f"Full advisory {number}"})
+        {"title": f"Advisory {number}", "advisory_id": code,
+         "published_date": "2026-01-01" if old else "2026-11-13",
+         "updated_date": "2026-01-01" if old else "2026-11-13", "content": f"Full advisory {number}"})
 
 
 class Harness:
@@ -169,15 +170,83 @@ def test_mongo_error_is_retried_and_blocks_success_position(tmp_path):
     assert second["sync"]["last_successful_until"] == (NOW + timedelta(hours=1)).isoformat()
 
 
-def test_archive_continues_after_an_old_known_head_page(tmp_path):
+def test_recent_listing_stops_before_missing_history_without_fetching_old_details(tmp_path):
     h = Harness(tmp_path, GovCERTProvider())
-    h.pages = lambda context, page: ListPage(page, [entry(page, "govcert")], total_pages=3)
-    first = h.run(limit=10, max_pages=2)
+    h.pages = lambda context, page: ListPage(page, [entry(page, "govcert", old=page > 1)], total_pages=3)
+    first = h.run(limit=10)
     assert len(h.calls) == 2
-    assert {"govcert:1", "govcert:2"} <= set(h.news.documents)
-    assert first["sync"]["archive_cursor"] is not None
-    h.run(limit=10, max_pages=3, now=NOW + timedelta(hours=1))
-    assert "govcert:3" in h.news.documents
+    assert set(h.news.documents) == {"govcert:1"}
+    assert first["sync"]["outside_window"] == 1
+    assert first["sync"]["history_status"] == "disabled"
+    assert first["sync"]["archive_cursor"] is None
+    assert first["sync"]["incremental_status"] == "up_to_date"
+    h.calls.clear()
+    h.run(limit=10, now=NOW + timedelta(hours=1))
+    assert [page for _, page in h.calls] == [1, 2]
+    assert set(h.news.documents) == {"govcert:1"}
+
+
+def test_listing_revision_to_a_known_old_record_is_still_synced(tmp_path):
+    h = Harness(tmp_path, GovCERTProvider())
+    advisory = entry(1, "govcert", old=False)
+    h.pages = lambda context, page: ListPage(page, [advisory], total_pages=1)
+    h.run()
+    advisory.disclosure_date = "2026-01-01"
+    advisory.embedded_detail["updated_date"] = "2026-01-01"
+    advisory.embedded_detail["published_date"] = "2026-01-01"
+    advisory.embedded_detail["content"] = "Revised advisory"
+    output = h.run(now=NOW + timedelta(hours=1))
+    assert output["mongo_sync"]["overwritten"] == 1
+    assert h.news.documents["govcert:1"]["details"]["content"] == "Revised advisory"
+
+
+def test_listing_modification_time_keeps_an_old_publication_in_the_recent_pass(tmp_path):
+    from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
+    h = Harness(tmp_path, PaloAltoProvider())
+    revised = entry(1, "paloalto")
+    revised.embedded_detail["updated_date"] = NOW.isoformat()
+    h.pages = lambda context, page: ListPage(page,
+        [revised] if page == 1 else [entry(2, "paloalto")], total_pages=3)
+    output = h.run()
+    assert [page for _, page in h.calls] == [1, 2]
+    assert set(h.news.documents) == {"paloalto:1"}
+    assert output["sync"]["incremental_status"] == "up_to_date"
+
+
+@pytest.mark.parametrize("kind", ["archive", "index_audit", "baseline"])
+def test_saved_history_and_its_retries_are_retired_but_recent_failures_resume(tmp_path, kind):
+    from vuln_scraper.sync_state import entry_data
+    h = Harness(tmp_path)
+    h.pages = lambda context, page: ListPage(page, [entry(1)], total_pages=1)
+    h.news.fail_insert_once_for = entry(1).key
+    assert h.run()["sync"]["pending_retries"] == 1
+    state = h.states.documents["fortiguard"]
+    state["archive"] = {"id": "old-history", "kind": kind, "page": 67}
+    state["tasks"].append({"id": "old-history-task", "kind": kind})
+    state["history_gap"] = {"since": "2020-01-01", "oldest_visible": "2021-01-01"}
+    store = SyncStateStore(h.states, "fortiguard")
+    store.defer(entry(2).key, {"entry": entry_data(entry(2)), "task_id": "old-history"})
+    store.defer(entry(3).key, {"entry": entry_data(entry(3)), "task_id": "old-history-task"})
+    output = h.run(now=NOW + timedelta(hours=1))
+    assert set(h.news.documents) == {entry(1).key}
+    assert output["sync"]["pending_retries"] == 0
+    assert output["sync"]["incremental_status"] == "up_to_date"
+    assert h.states.documents["fortiguard"]["archive"] is None
+
+
+def test_complete_index_only_fetches_recent_or_changed_entries(tmp_path):
+    h = Harness(tmp_path, SplunkProvider())
+    modified = entry(2, "splunk")
+    modified.embedded_detail["last_modified"] = NOW.isoformat()
+    h.pages = lambda context, page: ListPage(page, [entry(1, "splunk"), modified], total_pages=1)
+    first = h.run()
+    assert set(h.news.documents) == {modified.key}
+    assert first["sync"]["outside_window"] == 1
+    second = h.run(now=NOW + timedelta(hours=1))
+    assert second["mongo_sync"]["inserted"] == 0
+    assert second["mongo_sync"]["overwritten"] == 0
+    assert second["sync"]["history_status"] == "disabled"
+    assert h.states.documents["splunk"]["archive"] is None
 
 
 def test_list_failure_keeps_window_pending_but_next_run_can_recover(tmp_path):
@@ -199,7 +268,7 @@ def test_list_failure_keeps_window_pending_but_next_run_can_recover(tmp_path):
 
 def test_monthly_children_resume_across_limits_without_reexpanding(tmp_path):
     h = Harness(tmp_path, MSRCProvider())
-    parent = entry(1, "msrc")
+    parent = entry(1, "msrc", old=False)
     parent.embedded_detail["_list_summary"] = True
     h.pages = lambda context, page: ListPage(page, [parent], total_pages=1)
     details = []
@@ -231,7 +300,7 @@ def test_cache_loss_replays_uncommitted_work_without_losing_advisories(tmp_path)
 
 def test_manifest_filtering_does_not_shift_saved_candidate_offsets(tmp_path):
     h = Harness(tmp_path, SplunkProvider())
-    h.pages = lambda context, page: ListPage(page, [entry(i, "splunk") for i in range(1, 6)], total_pages=1)
+    h.pages = lambda context, page: ListPage(page, [entry(i, "splunk", old=False) for i in range(1, 6)], total_pages=1)
     for i in range(3):
         h.run(limit=2, now=NOW + timedelta(hours=i))
     assert len(h.news.documents) == 5
@@ -287,7 +356,7 @@ def test_retries_survive_missing_cached_payloads(tmp_path):
 
 def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_path):
     h = Harness(tmp_path, GovCERTProvider())
-    advisory = entry(1, "govcert")
+    advisory = entry(1, "govcert", old=False)
     advisory.embedded_detail["_list_summary"] = True
     h.pages = lambda context, page: ListPage(page, [advisory], total_pages=1)
     attempts = []
@@ -304,6 +373,7 @@ def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_pat
         runner._scrape_detail = detail
 
     h.run(configure=configure)
+    advisory.title = "Updated listing"
     second = h.run(now=NOW + timedelta(hours=1), configure=configure)
     assert second["sync"]["pending_retries"] == 1
     third = h.run(now=NOW + timedelta(hours=2), configure=configure)
@@ -322,31 +392,47 @@ def test_unacknowledged_insert_does_not_commit_sync_success(tmp_path):
     assert output["sync"]["last_successful_until"] != NOW.isoformat()
 
 
-def test_cve_history_gap_runs_a_baseline_without_claiming_early_completion(tmp_path, monkeypatch):
+def test_cve_history_gap_is_reported_without_requesting_a_baseline(tmp_path, monkeypatch):
     h = Harness(tmp_path, CVEProvider())
     h.news.documents["cve:old"] = {"_id": "cve:old", "source": {"provider": "cve"},
                                     "updated_at": NOW - timedelta(days=100)}
     h.pages = lambda context, page: ListPage(page, [], total_pages=1, exhausted=True,
                                              coverage_start=(NOW - timedelta(days=30)).isoformat())
 
-    async def archive(client, task, directory, provider):
-        task["asset"] = {"url": "https://example.test/baseline"}
-        task["until"] = NOW.replace(hour=0, minute=0).isoformat()
-        return ListPage(page=task["page"], entries=[], total_pages=2 if task["page"] == 1 else 2,
-                        exhausted=task["page"] == 2)
+    async def unavailable(*args, **kwargs):
+        pytest.fail("Historical recovery must not request a baseline")
 
-    monkeypatch.setattr("vuln_scraper.sync_engine.baseline_page", archive)
-    async def asset(client):
-        return {"url": "https://example.test/baseline", "asset_id": "1",
-                "timestamp": NOW.replace(hour=0, minute=0).isoformat()}
-    monkeypatch.setattr("vuln_scraper.sync_engine.baseline_asset", asset)
-    first = h.run(max_pages=2)
-    assert first["sync"]["history_status"] == "recovering"
-    assert first["sync"]["incremental_status"] == "partial"
-    assert first["sync"]["last_successful_until"] != NOW.isoformat()
-    second = h.run(max_pages=5, now=NOW + timedelta(hours=1))
-    assert second["sync"]["history_status"] == "idle"
+    monkeypatch.setattr("vuln_scraper.sync_archive.baseline_page", unavailable)
+    monkeypatch.setattr("vuln_scraper.sync_archive.baseline_asset", unavailable)
+    first = h.run(max_pages=1)
+    assert first["sync"]["history_status"] == "disabled"
+    assert first["sync"]["incremental_status"] == "up_to_date"
+    assert first["sync"]["last_successful_until"] == NOW.isoformat()
+    assert first["sync"]["history_gap"]["until"] == (NOW - timedelta(days=30)).isoformat()
+    second = h.run(max_pages=1, now=NOW + timedelta(hours=1))
+    assert second["sync"]["history_status"] == "disabled"
     assert second["sync"]["last_successful_until"] == (NOW + timedelta(hours=1)).isoformat()
+
+
+def test_cve_migrates_a_previously_shortened_window_without_waiting_for_history(tmp_path):
+    h = Harness(tmp_path, CVEProvider())
+    h.pages = lambda context, page: ListPage(page, [], total_pages=1, exhausted=True)
+    h.run()
+    state = h.states.documents["cve"]
+    start = NOW - timedelta(days=100)
+    earliest = NOW - timedelta(days=30)
+    for field in ("last_successful_until", "discovered_until"):
+        state[field] = start.isoformat()
+    state["scheduled_until"] = (NOW - timedelta(hours=1)).isoformat()
+    state["recovery_since"] = start.isoformat()
+    state["archive"] = {"id": "old-baseline", "kind": "baseline"}
+    state["tasks"] = [{"id": "delta-window", "kind": "window", "since": earliest.isoformat(),
+        "until": state["scheduled_until"], "page": 1, "cursor": None, "index": 0,
+        "cache": None, "child_cache": None, "child_index": 0, "enumerated": False}]
+    output = h.run(now=NOW + timedelta(hours=1))
+    assert output["sync"]["last_successful_until"] == (NOW + timedelta(hours=1)).isoformat()
+    assert output["sync"]["incremental_status"] == "up_to_date"
+    assert "recovery_since" not in h.states.documents["cve"]
 
 
 def test_empty_unverified_page_never_advances_progress(tmp_path):

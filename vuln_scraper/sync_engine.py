@@ -1,10 +1,9 @@
-"""Incremental discovery, acknowledged batches, retries and rotating history."""
+"""Incremental discovery, acknowledged batches and resumable retries."""
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,14 +12,14 @@ from uuid import uuid4
 from .client import FetchError
 from .models import ListPage
 from .mongo import MongoSyncResult, sync_records_to_collection
-from .sync_archive import baseline_asset, baseline_page
 from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry, retry_entry_data, utc
-from .timestamps import parse_timestamp
+from .timestamps import document_updated_time, parse_timestamp
 
 logger = logging.getLogger(__name__)
 FEEDS = {"fortiguard", "hpe"}
 INDEXES = {"splunk", "zimbra", "msrc"}
 WINDOWS = {"nvd", "github_advisory", "cve"}
+HISTORY_TASKS = {"archive", "baseline", "index_audit"}
 
 
 class SyncEngine:
@@ -35,6 +34,7 @@ class SyncEngine:
         self.cache = SnapshotCache(runner.settings.data_dir / "sync-cache" / self.provider.key)
         self.limit = runner.settings.limit
         self.checked = 0
+        self.outside_window = 0
         self.pages = 0
         self.total_records: int | None = None
         self.seen: dict[str, datetime] = {}
@@ -52,6 +52,7 @@ class SyncEngine:
                 "child_index": 0, "enumerated": False, **extra}
 
     def schedule(self) -> None:
+        self.discard_history_work()
         if not self.state.get("legacy_failures_imported"):
             self.import_failures()
             self.state["legacy_failures_imported"] = True
@@ -74,6 +75,50 @@ class SyncEngine:
             self.new_tasks.add(task["id"])
         self.state["scheduled_until"] = self.now.isoformat()
         self.store.save(self.state)
+
+    def discard_history_work(self) -> None:
+        """Retire old recovery cursors without discarding incremental work or news."""
+        history = [task for task in self.state["tasks"] if task["kind"] in HISTORY_TASKS]
+        if self.state.get("archive"):
+            history.append(self.state["archive"])
+        history_ids = {task["id"] for task in history}
+        for reference in self.store.failures():
+            if reference.get("task_id") in history_ids:
+                self.store.clear(reference["identity"])
+                self.runner.checkpoint.failed.pop(reference["identity"], None)
+        for identity in history_ids:
+            self.runner.checkpoint.failed.pop(f"{self.provider.key}:LIST-{identity}", None)
+        self.state["tasks"] = [task for task in self.state["tasks"] if task["kind"] not in HISTORY_TASKS]
+        self.state["archive"] = None
+        self.state["history_policy"] = "disabled"
+        self.state.pop("index_audit_offset", None)
+        previous_gap = self.state.pop("history_gap", None)
+        if previous_gap:
+            self.state["skipped_history_gap"] = previous_gap
+        recovery_since = self.state.pop("recovery_since", None)
+        if self.provider.key == "cve" and recovery_since:
+            starts = [utc(task["since"]) for task in self.state["tasks"] if task["kind"] == "window"]
+            # Earlier versions shortened a delta window and waited for a baseline
+            # to bridge this gap. That history is now explicitly waived.
+            if starts and utc(self.state["last_successful_until"]) < min(starts):
+                gap = {"since": self.state["last_successful_until"], "until": min(starts).isoformat()}
+                self.note_history_gap(gap["since"], gap["until"], "CVE delta retention")
+                self.store.advance(self.state, gap, complete=False)
+                self.store.advance(self.state, gap, complete=True)
+        self.initial_failures = self.store.failures()
+
+    def note_history_gap(self, since: str, until: str, reason: str) -> None:
+        gap = {"since": since, "until": until, "reason": reason}
+        if self.state.get("skipped_history_gap") != gap:
+            logger.warning("%s historical recovery disabled; skipping coverage gap %s to %s (%s)",
+                           self.provider.key, since, until, reason)
+        self.state["skipped_history_gap"] = gap
+
+    @staticmethod
+    def listing_time(entry: Any) -> datetime | None:
+        dates = [parse_timestamp(document_updated_time(entry.to_record())),
+                 parse_timestamp(entry.disclosure_date)]
+        return max((value for value in dates if value is not None), default=None)
 
     def import_failures(self) -> None:
         from .models import ListEntry, VulnerabilityId
@@ -129,17 +174,15 @@ class SyncEngine:
     async def run(self, client: Any) -> dict[str, Any]:
         self.schedule()
         self.client = client
-        recent_budget = max(1, math.ceil(self.limit * .8))
         fresh = sorted((task for task in self.state["tasks"] if task["id"] in self.new_tasks),
                        key=lambda task: task["until"], reverse=True)
         # Poll the newest source head before servicing old failures or backlog.
-        fresh_allowance = recent_budget if not self.initial_failures and len(self.state["tasks"]) == len(fresh) else max(1, recent_budget // 2)
+        fresh_allowance = self.limit if not self.initial_failures and len(self.state["tasks"]) == len(fresh) else max(1, self.limit // 2)
         await self.run_tasks(fresh, fresh_allowance)
-        await self.retry_failures(max(0, recent_budget - self.checked))
+        await self.retry_failures(max(0, self.limit - self.checked))
         pending = [task for task in self.state["tasks"] if task["id"] not in self.new_tasks and not task.get("enumerated") and not task.get("superseded")]
-        await self.run_tasks(pending, max(0, recent_budget - self.checked))
-        await self.audit(max(0, self.limit - self.checked))
-        # Borrow unused history capacity to finish incremental work.
+        await self.run_tasks(pending, max(0, self.limit - self.checked))
+        # Use spare capacity for incremental work left after the newest poll.
         await self.run_tasks([task for task in self.state["tasks"] if not task.get("enumerated")],
                              max(0, self.limit - self.checked))
         await self.finish_tasks()
@@ -148,31 +191,30 @@ class SyncEngine:
             self.state["bootstrap_complete"] = True
         self.state["pending_retries"] = len(failures)
         self.state["last_run"] = {"at": self.now, "checked": self.checked,
-                                  "listing_requests": self.pages, "mongo_sync": self.result.to_dict()}
+                                  "listing_requests": self.pages, "outside_window": self.outside_window,
+                                  "history_status": "disabled", "mongo_sync": self.result.to_dict()}
         self.store.save(self.state)
-        referenced = {task.get(key) for task in self.state["tasks"] + [self.state.get("archive") or {}]
+        referenced = {task.get(key) for task in self.state["tasks"]
                       for key in ("cache", "child_cache") if task.get(key)}
         referenced.update(item["cache"] for item in failures if item.get("cache"))
         self.cache.prune(referenced, self.now)
         self.runner.mongo_result = self.result
         self.runner.selection_finalized = True
-        unfinished = bool(self.state["tasks"] or failures or self.state.get("history_gap") or self.state.get("recovery_since"))
+        unfinished = bool(self.state["tasks"] or failures)
         error = bool(self.list_errors or self.runner.run_failed or self.result.errors)
         self.runner.stop_reason = "error" if error else "limit" if unfinished else "exhausted"
         output = self.runner._build_output()
         output["total"] = self.total_records if self.total_records is not None else len(self.runner.records_by_id)
         output["mongo_sync"] = self.result.to_dict()
         output["sync"] = {
-            "checked": self.checked, "listing_requests": self.pages,
+            "checked": self.checked, "listing_requests": self.pages, "outside_window": self.outside_window,
             "last_successful_until": self.state["last_successful_until"],
             "discovered_until": self.state["discovered_until"],
             "pending_windows": len(self.state["tasks"]), "pending_retries": len(failures),
             "incremental_status": "error" if error else "partial" if unfinished else "up_to_date",
-            "history_status": "gap_unrecoverable" if self.state.get("history_gap") else
-                              "recovering" if (self.state.get("archive") or {}).get("kind") == "baseline" else
-                              "rotating" if self.state.get("archive") else "idle",
-            "history_gap": self.state.get("history_gap"),
-            "archive_cursor": self.state.get("archive"),
+            "history_status": "disabled",
+            "history_gap": self.state.get("skipped_history_gap"),
+            "archive_cursor": None,
         }
         self.runner.checkpoint.save(self.runner.settings.checkpoint_file)
         return output
@@ -209,17 +251,6 @@ class SyncEngine:
         if task["kind"] == "retry_parent":
             parsed = ListPage(page=1, entries=[restore_entry(task["retry_entry"])], total_pages=1)
             url = "saved advisory request"
-        elif task["kind"] == "baseline":
-            if not task.get("asset"):
-                self.pages += 1
-                task["asset"] = await baseline_asset(self.client)
-                task["until"] = task["asset"]["timestamp"]
-                self.store.save(self.state)
-                if self.pages >= self.options.max_pages:
-                    return None
-            self.pages += 1
-            parsed = await baseline_page(self.client, task, self.cache.directory, self.provider)
-            url = task["asset"]["url"]
         else:
             factory = getattr(self.provider, "sync_list_url", None)
             url = factory(context, task["page"]) if factory else self.provider.list_url(task["page"], checkpoint=self.runner.checkpoint)
@@ -246,26 +277,23 @@ class SyncEngine:
                    "exhausted": parsed.exhausted, "url": url}
         self.total_records = parsed.total_records
         task["index"] = 0  # Missing local caches must replay, never trust their previous offset.
-        if task["kind"] not in {"baseline", "retry_parent"}:
+        if task["kind"] != "retry_parent":
             self.list_cache[key] = payload
         task["cache"] = self.cache.write(payload)
         task.pop("error", None)
         self.store.save(self.state)
-        if self.provider.key == "cve" and task["kind"] != "baseline" and parsed.coverage_start:
+        if self.provider.key == "cve" and parsed.coverage_start:
             earliest = utc(parsed.coverage_start)
             if earliest and max(utc(task["since"]), utc(self.state["last_successful_until"])) < earliest:
-                self.state["recovery_since"] = self.state.get("recovery_since") or task["since"]
-                task["since"] = earliest.isoformat()
-                if not self.state.get("archive"):
-                    self.state["archive"] = self.task("baseline", utc(self.state["recovery_since"]), self.now)
+                self.note_history_gap(task["since"], min(earliest, utc(task["until"])).isoformat(),
+                                      "CVE delta retention")
                 self.store.save(self.state)
         if (self.provider.key in FEEDS and parsed.entries
                 and (not self.state.get("bootstrap_empty") or self.state.get("bootstrap_complete"))):
             dates = [parse_timestamp(entry.disclosure_date) for entry in parsed.entries]
             dates = [value for value in dates if value is not None]
-            if dates and min(dates) > utc(task["since"]) and not self.state.get("history_gap"):
-                self.state["history_gap"] = {"since": task["since"], "oldest_visible": min(dates).isoformat(),
-                    "reason": "RSS history is bounded; older arrivals cannot be verified from this feed"}
+            if dates and min(dates) > utc(task["since"]):
+                self.note_history_gap(task["since"], min(dates).isoformat(), "RSS history is bounded")
         # Identical snapshots resume their existing offset instead of starving the tail.
         if self.provider.key in FEEDS | INDEXES and task["kind"] == "head":
             version = self.signature_payload(payload["entries"])
@@ -296,20 +324,16 @@ class SyncEngine:
                 return
             entries = payload["entries"]
             if task["kind"] == "head" and self.provider.key in INDEXES and not task.get("ordered"):
-                changed, known = [], []
+                changed = []
                 for data in entries:
                     entry = restore_entry(data)
                     ledger = self.ledger(entry.key)
-                    (known if ledger and ledger.get("signature") == self.signature(entry) else changed).append(data)
+                    if not ledger or ledger.get("signature") != self.signature(entry):
+                        changed.append(data)
                 entries = changed
                 payload = {**payload, "entries": changed}
                 task["cache"] = self.cache.write(payload)
                 task["ordered"] = True
-                if known and not self.state.get("archive"):
-                    archive = self.task("index_audit", utc(task["since"]), utc(task["until"]))
-                    offset = self.state.get("index_audit_offset", 0) % len(known)
-                    archive["cache"] = self.cache.write({**payload, "entries": known[offset:] + known[:offset]})
-                    self.state["archive"] = archive
                 self.store.save(self.state)
             while task["index"] < len(entries) and self.checked < target:
                 entry = restore_entry(entries[task["index"]])
@@ -323,6 +347,15 @@ class SyncEngine:
                     task["index"] += 1
                     continue
                 ledger = self.ledger(entry.key)
+                if (task["kind"] == "head" and self.provider.key not in FEEDS | WINDOWS
+                        and not task.get("child_cache")):
+                    listed_at = self.listing_time(entry)
+                    changed = ledger and ledger.get("signature") != self.signature(entry)
+                    if listed_at is not None and listed_at < utc(task["since"]) and not changed:
+                        self.outside_window += 1
+                        task["index"] += 1
+                        self.store.save(self.state)
+                        continue
                 # Overlapping windows can contain the same already-acknowledged
                 # observation. Drain that queued work without spending the next
                 # run's allowance on replaying it instead of unfinished entries.
@@ -347,18 +380,16 @@ class SyncEngine:
                     return
                 task["anchor"] = entry.key
                 task["index"] += 1
-                if task["kind"] == "index_audit":
-                    self.state["index_audit_offset"] = self.state.get("index_audit_offset", 0) + 1
                 self.store.save(self.state)
             if task["index"] < len(entries):
                 return
             last = payload["total_pages"] is not None and task["page"] >= payload["total_pages"]
             if self.provider.key in {"github_advisory"}:
                 last = not payload["next_cursor"]
-            # Finish the recent pass at a whole old publication page, while the
-            # independent archive cursor continues checking the rest of the site.
+            # A whole page older than the saved overlap ends recent discovery.
+            # Use listing modification dates where the provider exposes them.
             if task["kind"] == "head" and self.provider.key not in FEEDS | INDEXES | WINDOWS:
-                dates = [parse_timestamp(data.get("disclosure_date")) for data in entries]
+                dates = [self.listing_time(restore_entry(data)) for data in entries]
                 if dates and all(value is not None and value < utc(task["since"]) for value in dates):
                     last = True
             if last or payload["exhausted"]:
@@ -486,31 +517,6 @@ class SyncEngine:
                 elif entry.key not in self.runner.run_failed:
                     self.store.clear(identity)
             self.store.save(self.state)
-
-    async def audit(self, allowance: int) -> None:
-        if allowance <= 0:
-            return
-        task = self.state.get("archive")
-        if task is None and self.provider.key not in FEEDS | WINDOWS | INDEXES:
-            task = self.state["archive"] = self.task("archive", utc(self.state["last_successful_until"]), self.now)
-        if task is None:
-            return
-        if task.get("resume_boundary") and not task.get("cache"):
-            task["page"] = max(1, task["page"] - 1)
-            task["seek_anchor"] = task.get("anchor")
-            task.pop("resume_boundary")
-        await self.run_tasks([task], allowance)
-        if task.get("enumerated"):
-            failures = self.store.failures()
-            if not any(item.get("task_id") == task["id"] for item in failures):
-                if task["kind"] == "baseline":
-                    self.store.advance(self.state, task, complete=True)
-                    self.state.pop("recovery_since", None)
-                self.state["archive_completed_at"] = self.now.isoformat()
-                self.state["archive"] = None
-        elif not task.get("cache"):
-            task["resume_boundary"] = True
-        self.store.save(self.state)
 
     async def finish_tasks(self) -> None:
         failures = self.store.failures()

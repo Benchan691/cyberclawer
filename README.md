@@ -142,12 +142,13 @@ vuln-scrape catch-up --limit 200 --days 7
 
 `--days 1` rechecks a rolling 24-hour overlap before each source's saved position,
 rather than starting at midnight. New and changed advisories are inserted or
-updated; matching records are skipped. Older pages are progressively rechecked,
-and unfinished pages, monthly CVEs, and failed writes resume on later runs.
+updated; matching records are skipped. Historical recovery and rotating archive
+scans are disabled. Unfinished update pages, monthly CVEs, and failed writes
+resume on later runs. Existing historical news records are retained.
 `--limit` counts advisories checked, `--batch-size` controls write/checkpoint
 batches, and `--max-runs-per-provider` caps listing work. Overlapping scheduled
 runs are skipped using a process lock. See [resumable catch-up](docs/CATCH_UP.md)
-for source strategies, recovery, state storage and rollout.
+for source strategies, state storage and rollout.
 
 Transient HTTP errors honor `Retry-After` and use the retry/backoff settings in
 `scrapers.toml`. CNVD and NVD use longer backoff for gateway/service failures.
