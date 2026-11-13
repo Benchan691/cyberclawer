@@ -985,7 +985,8 @@ class ScraperRunner:
             self.records_by_id[entry.key] = entry.to_record(None, detail_url=url)
             self._record_failure(entry, url, exc, phase="detail")
         finally:
-            self.checkpoint.save(self.settings.checkpoint_file)
+            if self.sync_context is None:
+                self.checkpoint.save(self.settings.checkpoint_file)
             self._emit(phase="detail-complete", identity=entry.key, type=entry.identity.type, code=entry.identity.code)
 
     async def _fetch_json_detail(

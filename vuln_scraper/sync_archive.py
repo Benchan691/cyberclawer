@@ -82,6 +82,7 @@ async def baseline_page(client: Any, task: dict[str, Any], directory: Path, prov
     if not manifest.exists():
         if not archive.exists():
             await client.download(asset["url"], archive)
+            task.pop("verified_archive_digest", None)
         if asset.get("digest") and not task.get("verified_archive_digest"):
             checksum = hashlib.sha256()
             with archive.open("rb") as handle:

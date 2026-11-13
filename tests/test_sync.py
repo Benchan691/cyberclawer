@@ -126,6 +126,13 @@ def test_identical_snapshot_resumes_past_limit_without_starving_tail(tmp_path):
     assert sum(output["mongo_sync"]["inserted"] for output in outputs) == 5
 
 
+def test_source_totals_do_not_inherit_another_providers_legacy_checkpoint(tmp_path):
+    h = Harness(tmp_path)
+    (tmp_path / "checkpoint.json").write_text(json.dumps({"total_records": 99999}))
+    h.pages = lambda context, page: ListPage(page, [entry(i) for i in range(1, 6)], total_pages=1, total_records=5)
+    assert h.run(limit=2)["total"] == 5
+
+
 def test_overlapping_windows_do_not_spend_the_budget_replaying_committed_entries(tmp_path):
     h = Harness(tmp_path, NvdProvider())
     h.pages = lambda context, page: ListPage(page, [entry(i, "nvd") for i in range(1, 6)], total_pages=1)
@@ -444,3 +451,20 @@ def test_baseline_manifest_is_pinned_and_fetches_current_record_urls(tmp_path, n
     assert all(item.embedded_detail["_github_link"].startswith("https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/") for item in parsed.entries)
     assert task["until"] == "2026-11-13T00:00:00+00:00"
     assert not (tmp_path.parent / "CVE-2025-9999.json").exists()
+
+
+def test_redownloaded_baseline_is_checked_even_if_an_older_copy_was_verified(tmp_path):
+    from types import SimpleNamespace
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as zipped:
+        zipped.writestr("CVE-2026-1234.json", "{}")
+
+    async def download(url, path):
+        path.write_bytes(data.getvalue())
+
+    task = {"page": 1, "asset": {"asset_id": "123", "url": "https://example.test/archive",
+        "timestamp": NOW.isoformat(), "digest": "sha256:" + "0" * 64},
+        "verified_archive_digest": "sha256:" + "0" * 64}
+    with pytest.raises(FetchError, match="checksum"):
+        asyncio.run(baseline_page(SimpleNamespace(download=download), task, tmp_path, CVEProvider()))
+    assert not list(tmp_path.glob("*.sqlite"))

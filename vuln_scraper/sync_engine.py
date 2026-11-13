@@ -36,6 +36,7 @@ class SyncEngine:
         self.limit = runner.settings.limit
         self.checked = 0
         self.pages = 0
+        self.total_records: int | None = None
         self.seen: dict[str, datetime] = {}
         self.new_tasks: set[str] = set()
         self.list_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -159,6 +160,7 @@ class SyncEngine:
         error = bool(self.list_errors or self.runner.run_failed or self.result.errors)
         self.runner.stop_reason = "error" if error else "limit" if unfinished else "exhausted"
         output = self.runner._build_output()
+        output["total"] = self.total_records if self.total_records is not None else len(self.runner.records_by_id)
         output["mongo_sync"] = self.result.to_dict()
         output["sync"] = {
             "checked": self.checked, "listing_requests": self.pages,
@@ -198,6 +200,7 @@ class SyncEngine:
     async def page(self, task: dict[str, Any]) -> dict[str, Any] | None:
         payload = self.cache.read(task.get("cache"))
         if payload is not None:
+            self.total_records = payload.get("total_records")
             return payload
         if self.pages >= self.options.max_pages:
             return None
@@ -224,6 +227,7 @@ class SyncEngine:
                    context.until if self.provider.key in WINDOWS else None)
             if key in self.list_cache:
                 payload = self.list_cache[key]
+                self.total_records = payload.get("total_records")
                 task["cache"] = self.cache.write(payload)
                 task["index"] = 0
                 self.store.save(self.state)
@@ -240,6 +244,7 @@ class SyncEngine:
                    "total_records": parsed.total_records, "next_cursor": parsed.next_cursor,
                    "coverage_start": parsed.coverage_start, "observed_at": datetime.now(UTC).isoformat(),
                    "exhausted": parsed.exhausted, "url": url}
+        self.total_records = parsed.total_records
         task["index"] = 0  # Missing local caches must replay, never trust their previous offset.
         if task["kind"] not in {"baseline", "retry_parent"}:
             self.list_cache[key] = payload
