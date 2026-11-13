@@ -104,6 +104,8 @@ class ListPage:
     results_per_page: int | None = None
     # The provider verified that an empty page is the end of the result set.
     exhausted: bool = False
+    next_cursor: str | None = None
+    coverage_start: str | None = None
 
 
 @dataclass(slots=True)

@@ -26,8 +26,12 @@ def parse_rss_list(
     """Parse HPE's namespace-qualified security bulletin RSS feed."""
     try:
         root = ElementTree.fromstring(xml)
-    except (ElementTree.ParseError, TypeError, ValueError):
-        return ListPage(page=page, entries=[], total_pages=1, total_records=0)
+    except (ElementTree.ParseError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid HPE RSS feed") from exc
+    if _local_name(root.tag) not in {"rss", "RDF"}:
+        raise ValueError("HPE feed must be RSS")
+    if not any(_local_name(element.tag) == "channel" for element in root.iter()):
+        raise ValueError("HPE RSS feed is missing its channel")
 
     entries: list[ListEntry] = []
     seen_doc_ids: set[str] = set()
@@ -83,6 +87,7 @@ def parse_rss_list(
         page=page,
         entries=entries,
         total_pages=1,
+        exhausted=not entries and item_count == 0,
         total_records=len(entries),
         start_index=0,
         results_per_page=len(entries),

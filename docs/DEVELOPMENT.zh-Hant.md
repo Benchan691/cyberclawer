@@ -466,12 +466,12 @@ vuln-scrape catch-up --days 7 --limit 200
 
 | 參數 | 預設 | 現行效果 |
 | --- | --- | --- |
-| `--limit` | `1000` | 每個來源的結果上限，1–1000 |
-| `--days` | `1` | 至今包含幾個香港曆日，最少 1 |
-| `--batch-size` | `5` | 解析及驗證仍存在；現行日期流程沒有使用分批迴圈 |
-| `--max-runs-per-provider` | `100` | 解析仍存在；現行日期流程每個來源只建立一次 Runner |
+| `--limit` | `1000` | 每來源每輪檢查的公告上限，包含相同資料；未完成工作留待下輪 |
+| `--days` | `1` | 已儲存進度之前的滾動重疊日數，不是香港今日零時下界 |
+| `--batch-size` | `5` | 每批已確認寫入及儲存進度的公告數量上限 |
+| `--max-runs-per-provider` | `100` | 每來源每輪列表工作的上限 |
 
-CLI 的英文說明仍提及重複執行至重疊，但應以 `catch_up.py` 的日期視窗實作為準。兩個歷史參數不會使同一來源自動執行 100 次，也不會將總上限乘大。
+Catch-up 會為每個來源保存獨立進度、失敗重試及歷史掃描游標；排程重疊時不重複執行。完整規格見 [Resumable catch-up](CATCH_UP.md)。
 
 ### 6.4 `sync-source-catalog`
 
@@ -841,7 +841,7 @@ NVD 的詳情 Parser 目前會將 `published` 與 `lastModified` 截取成日期
           否 → 最新記錄／已知身份路徑
 ```
 
-一般 CLI `run` 使用第三種；`catch-up` 使用第一種。內容比較停止是 Python 層可用的能力，目前沒有對應 CLI 旗標。
+一般 CLI `run` 使用第三種；CLI `catch-up` 改用持續同步引擎，詳見第 11 章。內容比較停止是 Python 層可用的能力，目前沒有對應 CLI 旗標。
 
 ### 10.4 已知身份與 `overwrite`
 
@@ -899,67 +899,21 @@ Provider 可定義 `detail_failure_fallback()`，但那是一種明確宣告的�
 共用欄位為 `selected_count`、`completed_count`、`failed_count`，其他欄位依事件增加 `page`、`identity`、`type`、`code` 或 `mongo_sync`。其中 `completed_count` 來自 Checkpoint 累計集合，不一定是本次新完成數量。
 
 <a id="catch-up"></a>
-## 11. Catch-up 日期視窗與資料完整性
+## 11. Catch-up 持續同步與恢復
 
-### 11.1 日期視窗的定義
+現行 Catch-up 使用 MongoDB `news_sync_state` 保存每來源的完成進度、發現進度、未完成視窗／頁面、失敗公告及歷史掃描位置。原有公告 Schema 及集合不變。
 
-`window_start(days)` 取香港今日 00:00，再減去 `days - 1` 個曆日，作為**包含下界**的時間。
+- 首次從該來源已儲存的最新 `updated_at` 開始，沒有時用 `published_at`；空來源讀目前 Feed／索引或最近七日。
+- `--days 1` 代表已儲存進度之前重查 24 小時，不再只查今日。日期視窗固定為 UTC，未確認寫入成功不推進完成進度。
+- 最新列表會先檢查；舊失敗不阻擋新資料。最近資料／重試和歷史掃描分配 80%／20% 的公告檢查預算，未用額度可借用。
+- NVD 使用固定、最多 120 日的修改日期視窗；GitHub Advisory 使用修改範圍及 Link 游標；CVE 使用 Delta batch 的 `fetchTime`。
+- FortiGuard／HPE 核對完整目前 RSS；FortiGuard 不改用目錄 fallback。其他索引及分頁來源會持續輪查舊公告，不能因第一筆舊日期或相同資料就假定全站沒有更新。
+- CVE 歷史不足時，以官方 baseline 建立可恢復的 ID 清單，取得目前的完整公告；仍繼續每輪 Delta。同步不會寫入過時的 baseline 內容。
+- RSS 已移出且來源沒有歷史入口的資料無法補回；摘要會明確表示覆蓋缺口。
+- `data/catch-up.lock` 防止排程重疊；`data/sync-cache/` 保存具 checksum 的頁面及 MSRC 子公告快照。快照遺失會重抓，不盲用舊 offset。
+- MongoDB UTC／毫秒時間比較、穩定身份及已確認寫入使重跑保持冪等；來源不再列出的既有公告不會被刪除。
 
-以香港日期 2026-11-06 為例：
-
-| `--days` | 下界（香港時間） | 語意 |
-| --- | --- | --- |
-| `1` | 2026-11-06 00:00 | 今日開始 |
-| `2` | 2026-11-05 00:00 | 昨日及今日 |
-| `7` | 2026-10-31 00:00 | 包括今日的七個曆日 |
-
-這不是「此刻往前 24／168 小時」。共用篩選目前只檢查是否大於等於下界，沒有另外設定固定上界；各來源 API 可能另有自身查詢終點。
-
-### 11.2 一輪 Catch-up 做甚麼
-
-1. 依設定選擇已可用的 Provider。
-2. MongoDB 啟用時，先同步選用來源至 `source_catalog`。
-3. 按順序為每個來源建立一次 Runner。
-4. 強制使用 `mongo_conflict="overwrite"`。
-5. 傳入日期下界及每來源 `limit`。
-6. 記錄摘要；該來源拋出未捕捉例外時，記錄並嘗試通知，再繼續下一來源。
-
-FortiGuard 使用 `catch_up_full_feed=True`：每輪核對目前 RSS Feed 中的全部公告（仍受 `--limit` 限制），不套用 `--days` 下界，也不因已知公告而提前停止。缺少的公告會新增、內容不同的會更新、相同的會略過。這可在下一次排程補回延遲上架、舊日期或先前寫入失敗的公告；Feed 以外的既有資料不會被刪除。摘要使用 `full-feed catch-up`，並列出 `mongo_errors` 及逐筆寫入錯誤。
-
-MongoDB 內容比較會把有／無時區的 UTC 時間統一至 BSON 的毫秒精度，避免從資料庫讀回的時間表示差異，令相同公告在每輪被誤判為更新。
-
-來源目錄同步位於逐來源錯誤捕捉之外；若這一步因 MongoDB 等問題失敗，整輪會在開始爬取前中止。Provider 設定正規化等初始化錯誤也不一定落在逐來源 Runner 的捕捉範圍內。
-
-### 11.3 對列表排序的假設
-
-多數來源預設 `stop_on_timestamp_boundary=True`：當碰到一筆早於下界的資料時，停止翻頁。這隱含列表大致按所比較時間由新到舊排列。
-
-如果來源按公開日期排序，但條目會在原位置更新，第一筆舊資料之後仍可能存在近期更新。這類來源應評估關閉該旗標、使用 API 日期條件，或實作可靠的游標；不能只調整 `--days` 就假定覆蓋全部更新。
-
-NVD 明確使用 `stop_on_timestamp_boundary=False`，因其結果排序不能視為最後修改時間的倒序。GitHub Advisory 目前要求 `sort=published`，但 Schema 可用 `updated_at`；維護時亦應注意這兩種日期的差異。
-
-### 11.4 CVE 的雙層過濾
-
-CVE Delta Parser 先依 `dateUpdated`，或缺少時的 batch `fetchTime`，整理候選並由新到舊排序；Runner 取得完整 CVE v5 詳情後，再依詳情時間判斷。
-
-`deltaLog.json` 是這個 Provider 的列表來源，不是完整 CVE 歷史下載入口。`--days` 不能取回已不在來源快照中的歷史變更。`deleted` Delta 目前被跳過，不會轉成 MongoDB 刪除動作。
-
-### 11.5 NVD 的時間視窗獨立存在
-
-NVD Provider 預設用最近 7 日的 `lastModStartDate`／`lastModEndDate` 查詢；`window_days` 是 Provider 的 Python 屬性，範圍 1–120。CLI 的 `--days` 目前不會直接改寫它。
-
-因此 `catch-up --days 30` 不等於 NVD 自動查回 30 日。需要更長的 NVD 回補，必須另外設計或以 Python 明確調整 Provider 的查詢視窗，並處理頁數、上限與來源限制。
-
-### 11.6 數量與恢復限制
-
-- `limit` 是每來源上限，不是全來源共用上限。
-- 預設上限 1000；日期視窗內若超過此數，單輪不保證收齊。
-- 現行 `catch-up` 沒有靠 `batch-size` 自動循環至所有資料收齊。
-- 成功恢復的 CNVD 舊失敗可早於本次日期下界，而且會佔本次選取名額。
-- 部分失敗項目會佔候選處理的空間，但輸出時被排除，所以結果數可以小於指定上限。
-- 月報展開或群組公告的計數單位需依 Provider 理解；MSRC 的最終結果為展開後的漏洞記錄。
-
-需要歷史全量導入時，應建立明確的分段、游標及完成判定流程，而不是把 `catch-up` 當作通用的無限歷史回補工具。
+詳細實作契約、限制及部署／回復程序見 [Resumable catch-up](CATCH_UP.md)。`timestamps.window_start()` 與 Runner 舊 `updated_since` Python 介面仍可用，但不再控制 CLI Catch-up 的主流程。
 
 <a id="http"></a>
 ## 12. HTTP、速率限制與恢復策略
@@ -2009,7 +1963,7 @@ Checkpoint、Cookie、日誌和通知內容可能帶有來源 URL、公告資料
 | Registry | `tests/test_scrapers_registry.py` | 自動發現、移除及匯入失敗 |
 | Parser／Provider | `tests/scrapers/` | 真實格式樣本、URL、欄位與特殊流程 |
 | Runner | `tests/test_runner.py` | 上限、選取、停止、失敗與詳情 |
-| Catch-up | `tests/test_catch_up.py` | 日期流程、來源選擇、每來源一次執行 |
+| Catch-up | `tests/test_catch_up.py`、`tests/test_sync.py` | 每來源持續進度、失敗恢復、游標、歷史掃描及來源選擇 |
 | Schema | `tests/test_schema_v2.py`、`test_severity.py` | 正規化、欄位、時間與驗證 |
 | MongoDB Mock | `tests/test_mongo.py` | 插入、覆寫、略過、索引、分類保留 |
 | 遷移 Mock | `tests/test_migrate_mongo.py` | 影子、去重、切換及回復 |
@@ -2321,7 +2275,7 @@ Timer 使用主機排程時區，而應用的 catch-up 邊界使用香港時區�
 
 `instruction.md` 對自動發現、目錄及 Provider 方法仍有參考價值，但部分說明停留在舊格式，例如 `details.<provider>` 可能被讀成儲存格式，或要求更新已不存在的 README 段落／測試名稱。
 
-遇到差異時，以目前程式碼及測試所描述的契約核對：內部 record 可以有舊包裝，MongoDB 持久化以 v2 為準；runtime 集合為共用路由；catch-up 為目前的日期流程。本手冊把這些差異明確列出，後續修改亦應同步維護各文件。
+遇到差異時，以目前程式碼及測試所描述的契約核對：內部 record 可以有舊包裝，MongoDB 持久化以 v2 為準；runtime 集合為共用路由；catch-up 為目前的持續同步流程。本手冊把這些差異明確列出，後續修改亦應同步維護各文件。
 
 ### 23.5 相容性檢查清單
 

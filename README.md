@@ -133,20 +133,30 @@ vuln-scrape run govcert --limit 10
 vuln-scrape run fortiguard --limit 20
 ```
 
-Catch up all (or configured) scrapers for today's Asia/Hong_Kong window
-(FortiGuard always reconciles its full current RSS feed):
+Resume all (or configured) scrapers from their saved sync progress:
 
 ```bash
 vuln-scrape catch-up
 vuln-scrape catch-up --limit 200 --days 7
 ```
 
+`--days 1` rechecks a rolling 24-hour overlap before each source's saved position,
+rather than starting at midnight. New and changed advisories are inserted or
+updated; matching records are skipped. Older pages are progressively rechecked,
+and unfinished pages, monthly CVEs, and failed writes resume on later runs.
+`--limit` counts advisories checked, `--batch-size` controls write/checkpoint
+batches, and `--max-runs-per-provider` caps listing work. Overlapping scheduled
+runs are skipped using a process lock. See [resumable catch-up](docs/CATCH_UP.md)
+for source strategies, recovery, state storage and rollout.
+
 Transient HTTP errors honor `Retry-After` and use the retry/backoff settings in
 `scrapers.toml`. CNVD and NVD use longer backoff for gateway/service failures.
 Retries remain bounded; an unavailable source is reported as a failure.
 
-Keep `data/checkpoint.json` between runs. Failed CNVD detail requests are retried
-on the next run, including items outside the current catch-up date window.
+Keep `data/checkpoint.json` and `data/sync-cache/` between runs. Saved catch-up
+positions and retry references live in MongoDB's `news_sync_state` collection;
+legacy failed requests are imported automatically. Failed detail requests from
+every source are retried, including advisories outside the overlap window.
 Failed fetches do not overwrite existing records with list summaries. NVD
 preserves the failed request's date window and keeps it fixed across pagination
 while recovering, so later runs do not silently move past that window.

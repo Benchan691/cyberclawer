@@ -15,6 +15,8 @@ def parse_update_list(
     source_url: str | None = SOURCE_URL,
 ) -> ListPage:
     payload = _coerce_json(content)
+    if not isinstance(payload, (dict, list)) or (isinstance(payload, dict) and not isinstance(payload.get("value"), list) and not payload.get("ID")):
+        raise ValueError("Invalid MSRC update index")
     updates = _updates(payload)
     entries: list[ListEntry] = []
     for update in updates:
@@ -25,8 +27,9 @@ def parse_update_list(
     return ListPage(
         page=page,
         entries=entries,
-        total_pages=1 if entries else None,
-        total_records=len(entries) if entries else None,
+        total_pages=1,
+        total_records=len(entries),
+        exhausted=not updates,
     )
 
 

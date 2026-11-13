@@ -16,7 +16,10 @@ from vuln_scraper.scrapers.cve.parsers.detail import (
     CVEDetailRecord,
     parse_cve_detail_response,
 )
-from vuln_scraper.scrapers.cve.parsers.list import parse_cve_list, parse_cve_list_updated_since
+from vuln_scraper.scrapers.cve.parsers.list import (
+    parse_cve_list, parse_cve_list_updated_since, parse_cve_delta_log,
+    cve_delta_entry_to_list_entry, parse_cve_datetime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,23 @@ class CVEProvider:
 
     def parse_detail(self, data: Any) -> CVEDetailRecord:
         return parse_cve_detail_response(data)
+
+    def parse_sync_list(self, data: Any, *, page: int, context: Any, headers: dict[str, str]) -> ListPage:
+        batches = parse_cve_delta_log(data, after="1970-01-01T00:00:00Z")
+        entries = {}
+        for batch in reversed(batches):
+            fetched = parse_cve_datetime(batch.fetch_time)
+            if not context.since <= fetched <= context.until:
+                continue
+            for item in batch.entries:
+                if item.action != "deleted" and item.identity not in entries:
+                    entry = cve_delta_entry_to_list_entry(item, provider=self.key, source_url=self.source_url)
+                    entry.embedded_detail["_feed_fetch_time"] = batch.fetch_time
+                    entries[item.identity] = entry
+        return ListPage(page=page, entries=list(entries.values()), total_pages=1,
+                        total_records=len(entries), exhausted=not entries,
+                        coverage_start=min((batch.fetch_time for batch in batches),
+                                           key=parse_cve_datetime, default=None))
 
     def finalize_detail(
         self,

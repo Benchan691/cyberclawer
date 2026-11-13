@@ -57,10 +57,6 @@ def feed_catch_up(tmp_path, monkeypatch, caplog):
         lambda *args, **kwargs: {"providers": ["fortiguard"]},
     )
     monkeypatch.setattr(
-        "vuln_scraper.catch_up.window_start",
-        lambda days: datetime(2026, 11, 12, tzinfo=LOCAL_TIMEZONE),
-    )
-    monkeypatch.setattr(
         "vuln_scraper.runner.collection_from_settings",
         lambda *args, **kwargs: (FakeMongoClient(collection), collection),
     )
@@ -91,7 +87,7 @@ def test_catch_up_inserts_backdated_feed_and_repairs_missing_or_changed_records(
     summary = run()
 
     assert set(collection.documents) == {FIRST_ID, SECOND_ID}
-    assert "full-feed catch-up: fetched 2 feed records" in summary
+    assert "resumable catch-up: checked=2 fetched=2" in summary
     assert "stop_reason=exhausted" in summary
     assert "inserted=2 overwritten=0" in summary
     assert requests.count(RSS_URL) == 1
@@ -150,7 +146,7 @@ def test_catch_up_empty_feed_preserves_existing_records(feed_catch_up):
     summary = run()
 
     assert set(collection.documents) == {FIRST_ID, SECOND_ID}
-    assert "fetched 0 feed records" in summary
+    assert "checked=0 fetched=0" in summary
     assert "stop_reason=exhausted" in summary
     assert "deleted=0" in summary
 

@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
+import re
 
 from vuln_scraper.models import ListPage
 from vuln_scraper.scrapers.github_advisory.config import (
@@ -46,6 +47,33 @@ class GitHubAdvisoryProvider:
         if code is None:
             raise ValueError(f"invalid GitHub advisory identifier: {identity_display!r}")
         return f"{DETAIL_URL}/{quote(f'GHSA-{code}', safe='')}"
+
+    def sync_list_url(self, context: Any, page: int) -> str:
+        if context.cursor:
+            target = urlparse(context.cursor)
+            if target.scheme != "https" or target.netloc != "api.github.com" or target.path != "/advisories":
+                raise ValueError("invalid GitHub advisory pagination URL")
+            return context.cursor
+        params = {"type": "reviewed", "sort": "updated", "direction": "desc",
+                  "per_page": DEFAULT_PAGE_SIZE,
+                  "modified": f"{context.since.isoformat()}..{context.until.isoformat()}"}
+        return f"{LIST_URL}?{urlencode(params)}"
+
+    def parse_sync_list(self, data: Any, *, page: int, context: Any, headers: dict[str, str]) -> ListPage:
+        if not isinstance(data, list):
+            raise ValueError("GitHub advisory response must be an array")
+        result = self.parse_list(data, page=page)
+        if len(result.entries) != len(data):
+            raise ValueError("GitHub advisory response contains an invalid advisory identity")
+        link = headers.get("link", headers.get("Link", ""))
+        match = re.search(r'<([^>]+)>;\s*rel="next"', link)
+        result.next_cursor = match.group(1) if match else None
+        if result.next_cursor:
+            self.sync_list_url(type("Cursor", (), {"cursor": result.next_cursor})(), page + 1)
+        else:
+            result.total_pages = page
+            result.exhausted = not data
+        return result
 
     def detail_url_for_entry(self, entry: object) -> str | None:
         embedded_detail = getattr(entry, "embedded_detail", None)

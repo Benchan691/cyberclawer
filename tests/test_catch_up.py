@@ -22,6 +22,7 @@ from vuln_scraper.scrapers.splunk.provider import SplunkProvider
 
 @pytest.fixture(autouse=True)
 def stub_source_catalog_sync(monkeypatch):
+    monkeypatch.setattr("vuln_scraper.catch_up.notify_scrape_exception", lambda *args, **kwargs: False)
     monkeypatch.setattr(
         "vuln_scraper.catch_up.sync_source_catalog_to_mongo",
         lambda settings, *, providers=None: {"providers": list(providers or [])},
@@ -61,7 +62,7 @@ def test_catch_up_default_batch_size_is_five() -> None:
 
 def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
     conflicts: list[str] = []
-    updated_since_seen: list[object] = []
+    sync_context_seen: list[object] = []
 
     class FakeScraper:
         def __init__(
@@ -71,10 +72,10 @@ def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
             provider=None,
             stop_on_first_known=None,
             stop_on_unchanged_content=False,
-            updated_since=None,
+            sync_context=None,
         ) -> None:
             conflicts.append(settings.mongo_conflict)
-            updated_since_seen.append(updated_since)
+            sync_context_seen.append(sync_context)
             self.provider = provider or HKCERTProvider()
 
         async def run(self):
@@ -104,7 +105,7 @@ def test_run_catch_up_cycle_uses_overwrite_conflict(monkeypatch) -> None:
     )
 
     assert conflicts == ["overwrite"]
-    assert updated_since_seen[0] is not None
+    assert sync_context_seen[0] is not None
 
 
 def test_run_catch_up_cycle_publishes_selected_sources(monkeypatch) -> None:
@@ -149,11 +150,11 @@ def test_run_catch_up_cycle_runs_provider_once_for_timestamp_boundary(monkeypatc
             provider=None,
             stop_on_first_known=None,
             stop_on_unchanged_content=False,
-            updated_since=None,
+            sync_context=None,
         ) -> None:
             self.provider = provider or HKCERTProvider()
             assert stop_on_unchanged_content is False
-            assert updated_since is not None
+            assert sync_context is not None
 
         async def run(self):
             calls.append(self.provider.key)
@@ -187,7 +188,7 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, sync_context=None) -> None:
             self.provider = provider
 
         async def run(self):
@@ -219,13 +220,13 @@ def test_run_catch_up_cycle_advances_through_providers(monkeypatch) -> None:
     assert calls == ["hkcert", "splunk"]
 
 
-def test_run_catch_up_cycle_uses_one_timestamp_run(monkeypatch) -> None:
+def test_run_catch_up_cycle_uses_one_resumable_run(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, sync_context=None) -> None:
             self.provider = provider or HKCERTProvider()
-            assert updated_since is not None
+            assert sync_context is not None
 
         async def run(self):
             calls.append(self.provider.key)
@@ -259,7 +260,7 @@ def test_run_catch_up_cycle_uses_per_provider_limit(monkeypatch) -> None:
     limits_seen: list[int] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, sync_context=None) -> None:
             limits_seen.append(settings.limit)
             self.settings = settings
             self.provider = provider or HKCERTProvider()
@@ -292,7 +293,7 @@ def test_run_catch_up_cycle_uses_per_provider_limit(monkeypatch) -> None:
     assert limits_seen == [25]
 
 
-def test_run_catch_up_cycle_routes_cve_through_timestamp_path(monkeypatch) -> None:
+def test_run_catch_up_cycle_routes_cve_through_resumable_path(monkeypatch) -> None:
     calls: list[tuple[int, str, object]] = []
 
     class FakeScraper:
@@ -303,9 +304,9 @@ def test_run_catch_up_cycle_routes_cve_through_timestamp_path(monkeypatch) -> No
             provider=None,
             stop_on_first_known=None,
             stop_on_unchanged_content=False,
-            updated_since=None,
+            sync_context=None,
         ) -> None:
-            calls.append((settings.limit, settings.mongo_conflict, updated_since))
+            calls.append((settings.limit, settings.mongo_conflict, sync_context))
 
         async def run(self):
             return {
@@ -409,7 +410,7 @@ def test_run_catch_up_cycle_uses_configured_providers(monkeypatch, tmp_path) -> 
     calls: list[str] = []
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, updated_since=None) -> None:
+        def __init__(self, settings, *, provider=None, stop_on_first_known=None, stop_on_unchanged_content=False, sync_context=None) -> None:
             self.provider = provider or HKCERTProvider()
 
         async def run(self):

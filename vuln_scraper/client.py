@@ -6,7 +6,8 @@ import math
 import random
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -103,6 +104,7 @@ class FetchResult:
     html: str
     status_code: int | None
     url: str
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -110,6 +112,7 @@ class JSONFetchResult:
     data: Any
     status_code: int | None
     url: str
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class ScraperClient:
@@ -199,6 +202,7 @@ class ScraperClient:
                     html=html,
                     status_code=response.status_code,
                     url=str(response.url),
+                    headers=dict(response.headers),
                 )
             except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError, FetchError) as exc:
                 last_error = exc
@@ -251,6 +255,7 @@ class ScraperClient:
                     data=response.json(),
                     status_code=response.status_code,
                     url=str(response.url),
+                    headers=dict(response.headers),
                 )
             except (
                 ValueError,
@@ -271,6 +276,28 @@ class ScraperClient:
             status_code=_http_status(last_error),
             retry_after=getattr(last_error, "retry_after", None),
         ) from last_error
+
+    async def download(self, url: str, target: Path) -> None:
+        """Stream a public source archive to an atomic local cache file."""
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in range(self.retries + 1):
+            await self.rate_limiter.wait()
+            try:
+                async with self._client.stream("GET", url) as response:
+                    if response.status_code == 429 or response.status_code >= 500:
+                        raise _response_error(response, url)
+                    response.raise_for_status()
+                    with temporary.open("wb") as handle:
+                        async for chunk in response.aiter_bytes():
+                            handle.write(chunk)
+                temporary.replace(target)
+                return
+            except (httpx.HTTPError, FetchError) as exc:
+                temporary.unlink(missing_ok=True)
+                if attempt >= self.retries or _non_retryable_http_status(exc):
+                    raise FetchError(f"Archive download failed at {url}: {exc}") from exc
+                await self._backoff(attempt, retry_after=getattr(exc, "retry_after", None))
 
     async def get_json(
         self,

@@ -88,6 +88,18 @@ class NvdProvider:
             return min(updated_since, datetime.fromisoformat(self._query_window[0]))
         return updated_since
 
+    def sync_list_url(self, context: Any, page: int) -> str:
+        if context.since is None or context.until is None:
+            raise ValueError("NVD sync requires a fixed modification window")
+        if context.until - context.since > timedelta(days=120):
+            raise ValueError("NVD modification window exceeds 120 days")
+        params = {
+            'lastModStartDate': context.since.isoformat(timespec='milliseconds'),
+            'lastModEndDate': context.until.isoformat(timespec='milliseconds'),
+            'resultsPerPage': self.page_size, 'startIndex': (max(1, page) - 1) * self.page_size,
+        }
+        return f"{LIST_URL}?{urlencode(params)}"
+
     def detail_url(self, identity_display: str) -> str:
         return f"{DETAIL_URL}/{quote(identity_display, safe='')}"
 
@@ -111,6 +123,16 @@ class NvdProvider:
         )
 
     def parse_detail(self, data: Any) -> NvdDetailRecord:
+        if isinstance(data, dict) and isinstance(data.get("vulnerabilities"), list):
+            items = data["vulnerabilities"]
+            if len(items) != 1 or not isinstance(items[0].get("cve"), dict):
+                raise ValueError("NVD detail response must contain one CVE")
+            data = items[0]["cve"]
         if isinstance(data, dict) and isinstance(data.get("cve"), dict):
             data = data["cve"]
         return parse_cve_record(data)
+
+    def detail_json_request(self, entry: Any, *, detail_url: str) -> dict[str, Any]:
+        code = entry.identity.code
+        return {"method": "GET", "url": f"{LIST_URL}?{urlencode({'cveId': code})}",
+                "headers": self.request_headers()}

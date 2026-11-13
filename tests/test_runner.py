@@ -722,7 +722,7 @@ def test_cve_timestamp_catch_up_skips_older_delta_entries(tmp_path) -> None:
     )
 
     assert output["result_count"] == 0
-    assert output["stop_reason"] == "no_rows"
+    assert output["stop_reason"] == "timestamp_boundary"
     assert client.detail_ids_seen == []
 
 
@@ -1630,6 +1630,10 @@ class FakeMongoDatabase:
         self.collection = collection
 
     def __getitem__(self, name: str) -> "FakeMongoCollection":
+        if name.endswith("_sync_state"):
+            if not hasattr(self.collection, "sync_collections"):
+                self.collection.sync_collections = {}
+            return self.collection.sync_collections.setdefault(name, FakeMongoCollection())
         return self.collection
 
 
@@ -1668,7 +1672,7 @@ class FakeMongoCollection:
 
             documents = [document for document in documents if matches(document)]
         elif query:
-            documents = []
+            documents = [document for document in documents if all(document.get(key) == value for key, value in query.items())]
         return [copy.deepcopy(document) for document in documents]
 
     def find_one(self, query: dict) -> dict | None:

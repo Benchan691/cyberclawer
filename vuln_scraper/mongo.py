@@ -215,7 +215,9 @@ def _sync_one(
     identity = document["_id"]
     existing = collection.find_one({"_id": identity})
     if existing is None:
-        collection.insert_one(document)
+        written = collection.insert_one(document)
+        if getattr(written, "acknowledged", True) is False:
+            raise RuntimeError("MongoDB insert was not acknowledged")
         result.inserted += 1
         return
 
@@ -231,7 +233,9 @@ def _sync_one(
     if repairs_provider or _should_overwrite(document, existing, settings):
         if document["_id"].startswith("cve:") and isinstance(existing.get("classification"), dict):
             document["classification"] = existing["classification"]
-        collection.replace_one({"_id": identity}, document, upsert=True)
+        written = collection.replace_one({"_id": identity}, document, upsert=True)
+        if getattr(written, "acknowledged", True) is False:
+            raise RuntimeError("MongoDB replacement was not acknowledged")
         result.overwritten += 1
     else:
         result.skipped += 1

@@ -42,38 +42,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     catch_up_parser = subparsers.add_parser(
         "catch-up",
-        help="Scrape and sync each provider repeatedly until MongoDB overlap.",
+        help="Resume each provider from saved sync progress and recheck older advisories.",
     )
     catch_up_parser.add_argument(
         "--limit",
         type=int,
         default=CATCH_UP_DEFAULT_LIMIT,
         help=(
-            f"Maximum new records to scrape per provider/collection across all catch-up "
-            f"runs (1-{MAX_RESULT_LIMIT})."
+            f"Maximum advisories checked per provider per invocation, including unchanged "
+            f"records (1-{MAX_RESULT_LIMIT}); unfinished work resumes next time."
         ),
     )
     catch_up_parser.add_argument(
         "--batch-size",
         type=_positive_int_arg,
         default=CATCH_UP_BATCH_SIZE,
-        help="Records to scrape per catch-up run before re-checking overlap (default 5).",
+        help="Acknowledged records per database write/checkpoint batch (default 5).",
     )
     catch_up_parser.add_argument(
         "--days",
         type=_positive_int_arg,
         default=1,
         help=(
-            "Calendar days to include ending today (Asia/Hong_Kong). "
-            "Default 1 is today only; use 7 for the last week. "
-            "FortiGuard always reconciles its full current RSS feed, regardless of --days."
+            "Rolling overlap before each provider's saved sync position (default 1 day). "
+            "This is not a today-only filter; RSS feeds are fully reconciled."
         ),
     )
     catch_up_parser.add_argument(
         "--max-runs-per-provider",
         type=_positive_int_arg,
         default=DEFAULT_MAX_RUNS_PER_PROVIDER,
-        help="Safety cap on scrape runs per provider (default 100).",
+        help="Maximum source listing requests per provider per invocation (default 100).",
     )
     catalog_parser = subparsers.add_parser(
         "sync-source-catalog",

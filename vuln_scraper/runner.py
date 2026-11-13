@@ -39,6 +39,7 @@ from .schema_v2 import PROVIDER_SCHEMAS
 from .scrapers import ScraperProvider
 from .table_extractor import extract_raw_tables
 from .timestamps import record_updated_at_or_after
+from .sync_state import SyncContext
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ class ScraperRunner:
         stop_on_first_known: bool | None = None,
         stop_on_unchanged_content: bool = False,
         updated_since: datetime | None = None,
+        sync_context: SyncContext | None = None,
     ) -> None:
         self.progress_callback = progress_callback
         self.mongo_client_factory = mongo_client_factory
@@ -129,6 +131,8 @@ class ScraperRunner:
         self._stop_on_first_known_override = stop_on_first_known
         self._stop_on_unchanged_content = stop_on_unchanged_content
         self._updated_since = updated_since
+        self.sync_context = sync_context
+        self._active_sync_context: SyncContext | None = None
         self._existing_documents: dict[str, dict[str, Any]] = {}
         self.stop_reason: str | None = None
         self.settings = settings.for_provider(
@@ -138,9 +142,10 @@ class ScraperRunner:
             default_concurrency=getattr(self.provider, "default_concurrency", None),
         ).normalized()
         self.checkpoint = Checkpoint.load(self.settings.checkpoint_file)
-        self._prune_stale_provider_failures()
+        if sync_context is None:
+            self._prune_stale_provider_failures()
         effective_updated_since = getattr(self.provider, "updated_since_for_run", None)
-        if effective_updated_since is not None:
+        if effective_updated_since is not None and sync_context is None:
             self._updated_since = effective_updated_since(self._updated_since)
         self._recovered_ids: list[str] = []
         self._recovery_attempted_ids: set[str] = set()
@@ -185,7 +190,10 @@ class ScraperRunner:
             return await self._finalize_run_output(await self._run_with_client(client))
 
     async def _run_with_client(self, client: ScraperClient) -> dict[str, Any]:
-        await self._retry_cnvd_details(client)
+        if self.sync_context is None:
+            await self._retry_cnvd_details(client)
+        elif not self.settings.mongo_enabled:
+            raise ValueError("resumable catch-up requires MongoDB sync")
         if self.settings.mongo_enabled:
             return await self._run_mongo_update_with_client(client)
 
@@ -202,6 +210,10 @@ class ScraperRunner:
             client_factory=self.mongo_client_factory,
         )
         try:
+            if self.sync_context is not None:
+                from .sync_engine import SyncEngine
+                state_collection = mongo_client[self.settings.mongo_database][f"{self.settings.mongo_collection}_sync_state"]
+                return await SyncEngine(self, collection, state_collection).run(client)
             storage_provider = self.provider.key
             if storage_provider not in PROVIDER_SCHEMAS:
                 storage_provider = self.provider.default_mongo_collection
@@ -803,6 +815,10 @@ class ScraperRunner:
                         else:
                             result = await client.get_json(url, headers=headers)
                     parse_kwargs: dict[str, Any] = {"page": page}
+                    sync_parser = getattr(self.provider, "parse_sync_list", None)
+                    if self._active_sync_context is not None and sync_parser is not None:
+                        return sync_parser(result.data, page=page, context=self._active_sync_context,
+                                           headers=getattr(result, "headers", {}))
                     if self.provider.key == "cve" and self._updated_since is not None:
                         parse_kwargs["updated_since"] = self._updated_since
                     return self.provider.parse_list(result.data, **parse_kwargs)
