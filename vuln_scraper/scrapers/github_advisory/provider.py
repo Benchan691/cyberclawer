@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 import re
@@ -60,7 +61,8 @@ class GitHubAdvisoryProvider:
             return _cursor_url(context.cursor)
         params = {"type": "reviewed", "sort": "updated", "direction": "desc",
                   "per_page": DEFAULT_PAGE_SIZE,
-                  "modified": f"{context.since.isoformat()}..{context.until.isoformat()}"}
+                  "modified": (f"{context.since.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}.."
+                               f"{context.until.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}")}
         return f"{LIST_URL}?{urlencode(params)}"
 
     def parse_sync_list(self, data: Any, *, page: int, context: Any, headers: dict[str, str]) -> ListPage:

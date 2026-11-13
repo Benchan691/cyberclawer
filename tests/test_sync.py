@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import io
+import json
 import zipfile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -328,6 +329,10 @@ def test_cve_history_gap_runs_a_baseline_without_claiming_early_completion(tmp_p
                         exhausted=task["page"] == 2)
 
     monkeypatch.setattr("vuln_scraper.sync_engine.baseline_page", archive)
+    async def asset(client):
+        return {"url": "https://example.test/baseline", "asset_id": "1",
+                "timestamp": NOW.replace(hour=0, minute=0).isoformat()}
+    monkeypatch.setattr("vuln_scraper.sync_engine.baseline_asset", asset)
     first = h.run(max_pages=2)
     assert first["sync"]["history_status"] == "recovering"
     assert first["sync"]["incremental_status"] == "partial"
@@ -361,7 +366,7 @@ def test_github_uses_modified_range_and_link_cursor():
     context = SyncContext(since=NOW - timedelta(days=1), until=NOW)
     request = parse_qs(urlparse(provider.sync_list_url(context, 1)).query)
     assert request["sort"] == ["updated"]
-    assert request["modified"] == [f"{context.since.isoformat()}..{NOW.isoformat()}"]
+    assert request["modified"] == [f"{context.since.strftime('%Y-%m-%dT%H:%M:%SZ')}..{NOW.strftime('%Y-%m-%dT%H:%M:%SZ')}"]
     link = "https://api.github.com/advisories?after=next&sort=updated"
     parsed = provider.parse_sync_list([], page=1, context=context, headers={"link": f'<{link}>; rel="next"'})
     assert parsed.next_cursor == link
@@ -385,6 +390,21 @@ def test_nvd_long_outage_is_split_and_windows_stay_fixed(tmp_path):
         assert query["lastModStartDate"] == [context.since.isoformat(timespec="milliseconds")]
 
 
+def test_legacy_failed_nvd_window_is_included_in_the_first_resumable_run(tmp_path):
+    h = Harness(tmp_path, NvdProvider())
+    h.news.documents["nvd:old"] = {"_id": "nvd:old", "source": {"provider": "nvd"},
+                                    "updated_at": NOW - timedelta(days=1)}
+    old = SyncContext(since=NOW - timedelta(days=50), until=NOW - timedelta(days=5))
+    (tmp_path / "checkpoint.json").write_text(json.dumps({"failed": [{
+        "identity": "nvd:LIST", "phase": "list", "url": h.provider.sync_list_url(old, 20),
+        "error": "Connection cancelled for deployment",
+    }]}))
+    h.pages = lambda context, page: ListPage(page, [], total_pages=0, exhausted=True)
+    h.run()
+    assert min(context.since for context, _ in h.calls) <= old.since
+    assert max(context.until for context, _ in h.calls) >= old.until
+
+
 def test_cve_uses_batch_arrival_time_for_backdated_records():
     provider = CVEProvider()
     payload = [{"fetchTime": NOW.isoformat(), "new": [{"cveId": "CVE-2026-1234",
@@ -395,16 +415,24 @@ def test_cve_uses_batch_arrival_time_for_backdated_records():
     assert parsed.entries[0].disclosure_date == "2020-01-01T00:00:00Z"
 
 
-def test_baseline_manifest_is_pinned_and_fetches_current_record_urls(tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_baseline_manifest_is_pinned_and_fetches_current_record_urls(tmp_path, nested):
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as zipped:
         zipped.writestr("cves/2026/1xxx/CVE-2026-1234.json", "{}")
         zipped.writestr("../CVE-2025-9999.json", "{}")
-    url = "https://github.com/CVEProject/cvelistV5/releases/download/test/2026-11-13_all_CVEs_at_midnight.zip"
+    name = "2026-11-13_all_CVEs_at_midnight.zip"
+    if nested:
+        outer = io.BytesIO()
+        with zipfile.ZipFile(outer, "w") as zipped:
+            zipped.writestr("cves.zip", data.getvalue())
+        data = outer
+        name += ".zip"
+    url = f"https://github.com/CVEProject/cvelistV5/releases/download/test/{name}"
 
     class Client:
         async def get_json(self, target):
-            return JSONFetchResult([{"assets": [{"name": "2026-11-13_all_CVEs_at_midnight.zip",
+            return JSONFetchResult([{"assets": [{"name": name,
                 "id": 123, "browser_download_url": url}]}], 200, target)
 
         async def download(self, target, path):

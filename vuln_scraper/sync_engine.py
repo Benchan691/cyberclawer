@@ -13,7 +13,7 @@ from uuid import uuid4
 from .client import FetchError
 from .models import ListPage
 from .mongo import MongoSyncResult, sync_records_to_collection
-from .sync_archive import baseline_page
+from .sync_archive import baseline_asset, baseline_page
 from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry, retry_entry_data, utc
 from .timestamps import parse_timestamp
 
@@ -207,6 +207,13 @@ class SyncEngine:
             parsed = ListPage(page=1, entries=[restore_entry(task["retry_entry"])], total_pages=1)
             url = "saved advisory request"
         elif task["kind"] == "baseline":
+            if not task.get("asset"):
+                self.pages += 1
+                task["asset"] = await baseline_asset(self.client)
+                task["until"] = task["asset"]["timestamp"]
+                self.store.save(self.state)
+                if self.pages >= self.options.max_pages:
+                    return None
             self.pages += 1
             parsed = await baseline_page(self.client, task, self.cache.directory, self.provider)
             url = task["asset"]["url"]

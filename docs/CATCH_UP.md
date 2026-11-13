@@ -66,6 +66,9 @@ CVE records rather than writing stale archived bodies. Baseline processing is
 resumable and shares the history allowance; hourly delta discovery continues.
 Large baselines can therefore take many runs. Archive bytes are not extracted
 as filesystem paths.
+Current official `.zip.zip` baselines wrap an inner ZIP; both that format and
+plain ZIP baselines are supported. Release SHA-256 digests are checked when
+provided, and the selected asset is saved before downloading it.
 
 RSS-only sources cannot recover advisories already dropped from the feed when
 no history endpoint is configured. If visible dates suggest this coverage gap,
