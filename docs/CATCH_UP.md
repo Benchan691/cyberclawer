@@ -42,7 +42,7 @@ windows, failed update requests, and existing news documents are preserved.
 | NVD | Modification-date windows, each at most 120 days; fixed offsets and window boundaries across resumes. |
 | GitHub Advisory | `modified` ranges, `sort=updated`, and validated `Link` pagination URLs. |
 | CVE | Delta batch `fetchTime` is the arrival cursor. An older advisory `dateUpdated` does not exclude a new arrival. |
-| FortiGuard, HPE | Reconcile the complete current RSS feed; full details are fetched even for old dates. FortiGuard remains RSS-only. |
+| FortiGuard, HPE, Wiz | Reconcile the complete current RSS feed; full details are fetched even for old dates. FortiGuard remains RSS-only. |
 | Splunk, Zimbra, MSRC | Read the full index and process recent or changed entries. Unchanged details are not revisited. MSRC child CVEs resume across limits. |
 | AVD, CNVD, GOVCERT, HKCERT, Huawei SA, Palo Alto, Qianxin | Refresh recent listings. Stop after a whole page older than the saved overlap, using listing modification dates where available. No rotating archive scan. |
 

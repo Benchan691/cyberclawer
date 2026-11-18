@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Cloud Threat Landscape</title>
+    <link>https://threats.wiz.io/</link>
+    <description>Cloud threat intelligence from Wiz Research.</description>
+    <lastBuildDate>Wed, 18 Nov 2026 03:02:04 GMT</lastBuildDate>
+    <item>
+      <title>Example Cloud Campaign (Campaign)</title>
+      <link>https://threats.wiz.io/all-incidents/example-cloud-campaign</link>
+      <guid isPermaLink="false">408d8c76-b6ae-80b2-8035-d638c24854dc</guid>
+      <pubDate>Wed, 21 Oct 2026 00:00:00 GMT</pubDate>
+      <description>A shortened campaign summary...</description>
+      <content:encoded><![CDATA[<p>Attackers exploited <b>CVE-2026-12345</b>...</p>]]></content:encoded>
+      <author>threat.hunters@wiz.io (Wiz Threat Research)</author>
+    </item>
+    <item>
+      <title>Historical Cloud Research (Research)</title>
+      <link>https://threats.wiz.io/all-incidents/historical-cloud-research</link>
+      <guid isPermaLink="false">0cd8f9b7-743f-43ad-af3f-a9c767a35f4f</guid>
+      <pubDate>Tue, 01 Sep 2020 00:00:00 GMT</pubDate>
+      <description>Research involving cloud credentials.</description>
+    </item>
+    <item>
+      <title>Duplicate campaign</title>
+      <link>https://threats.wiz.io/all-incidents/example-cloud-campaign</link>
+      <guid isPermaLink="false">408d8c76-b6ae-80b2-8035-d638c24854dc</guid>
+    </item>
+    <item>
+      <title>Invalid GUID</title>
+      <link>https://threats.wiz.io/all-incidents/invalid-guid</link>
+      <guid>not-a-guid</guid>
+    </item>
+    <item>
+      <title>Invalid article link</title>
+      <link>https://example.test/unrelated</link>
+      <guid>408d8c76-b6ae-8082-b699-f72d9e4f147b</guid>
+    </item>
+  </channel>
+</rss>

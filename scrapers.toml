@@ -12,21 +12,7 @@
 
 [scrapers.catch_up]
 providers = [
-  "avd",
-  "cnvd",
-  "cve",
-  "fortiguard",
-  "github_advisory",
-  "govcert",
-  "hkcert",
-  "hpe",
-  "huawei_sa",
-  "msrc",
-  "nvd",
-  "paloalto",
-  "qianxin",
-  "splunk",
-  "zimbra",
+  "all"
 ]
 
 [scrapers.defaults]

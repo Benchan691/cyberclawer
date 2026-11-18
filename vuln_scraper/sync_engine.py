@@ -16,7 +16,7 @@ from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry
 from .timestamps import document_updated_time, parse_timestamp
 
 logger = logging.getLogger(__name__)
-FEEDS = {"fortiguard", "hpe"}
+FEEDS = {"fortiguard", "hpe", "wiz"}
 INDEXES = {"splunk", "zimbra", "msrc"}
 WINDOWS = {"nvd", "github_advisory", "cve"}
 HISTORY_TASKS = {"archive", "baseline", "index_audit"}

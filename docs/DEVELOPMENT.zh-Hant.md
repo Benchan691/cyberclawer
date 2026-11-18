@@ -1076,6 +1076,7 @@ print(output["result_count"], output["stop_reason"])
 | `paloalto` | HTML | 1.0 | 3 | True | 安全公告列表與詳情 |
 | `qianxin` | JSON | 1.0 | 3 | True | POST 列表、GET 詳情 API |
 | `splunk` | HTML | 1.0 | 3 | True | 單一 archive 索引、逐篇 SVD 文章 |
+| `wiz` | RSS／HTML | 1.0 | 3 | False | Cloud Threat Landscape RSS、永久 GUID、完整事件頁 |
 | `zimbra` | HTML | 1.0 | 3 | True | Release Patch 索引及 Wiki 詳情 |
 
 ### 14.2 AVD：`avd`
@@ -1257,6 +1258,16 @@ print(output["result_count"], output["stop_reason"])
 - 公告以 Patch Release 為單位；它不等同逐個漏洞的完整 CVE 目錄。
 
 主要測試：`tests/scrapers/zimbra/`。
+
+### 14.17 Wiz：`wiz`
+
+- RSS：`https://www.wiz.io/api/feed/cloud-threat-landscape/rss.xml`，沒有分頁，包含 Campaign、Incident 及 Research。
+- 來源 code 使用 RSS 的永久 GUID；詳情以 `https://threats.wiz.io/<GUID（移除連字號）>` 重新導向至目前事件頁，避免 RSS 舊 slug 造成 404。
+- 保存事件全文、行為者、初始存取方式、影響、技術、目標產品、參考連結、CVE 及發布／編輯時間；沒有正文的舊事件保留頁面結構化欄位。
+- `catch-up` 每次重新檢查目前整份 Feed（受 `--limit` 限制），不以公告日期排除舊事件；摘要未變但正文有修改也能更新。
+- 已使用 `providers = ["all"]` 的設定會自動包含此來源，資料寫入共用 `news`，以 `source.provider = "wiz"` 識別。
+
+主要測試：`tests/scrapers/wiz/`。
 
 <a id="extension"></a>
 ## 15. 新增、修改與移除 Provider

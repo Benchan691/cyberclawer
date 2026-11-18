@@ -45,6 +45,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `paloalto` | `paloalto` | HTML |
 | `qianxin` | `qianxin` | JSON API |
 | `splunk` | `splunk` | HTTP archive + full advisory pages; supports grouped CVEs |
+| `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
 The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.com/hpesc/public/api/document/sec_bull_rss_feed) for the latest 50 Critical alerts, then fetches each bulletin from the [HPE document API](https://support.hpe.com/hpesc/public/api/document). It uses ordinary HTTP requests only; the original `docDisplay` URL is retained in each bulletin detail.
@@ -79,6 +80,20 @@ affected systems, impact, recommendations, CVE IDs, tags, references, and tables
 Both standard and high-threat alerts are included in `run` and `catch-up`.
 Severity is `Critical` when the title contains "High Threat" (case-insensitive),
 and `Medium` otherwise.
+
+The Wiz scraper reads the [Cloud Threat Landscape RSS feed](https://www.wiz.io/api/feed/cloud-threat-landscape/rss.xml)
+and fetches each linked incident page for its full text, actors, techniques,
+targeted technologies, references, CVEs, and publication/edit dates. Campaigns,
+incidents, and research entries are included. Records use the feed's permanent
+GUID as their identity and `source.provider = "wiz"` in the shared `news`
+collection. Permanent ID links resolve renamed pages even when a feed slug is
+outdated. Historical entries with no prose retain their structured metadata.
+Catch-up reconciles the complete current feed, up to `--limit`,
+including backdated entries and revisions whose RSS summaries have not changed.
+The feed has no pagination; records that leave it are retained. The existing
+`providers = ["all"]` setting includes Wiz automatically.
+
+Schema and implementation handoff for other applications: [Wiz schema](docs/WIZ_SCHEMA.md).
 
 ## MongoDB layout
 
@@ -131,6 +146,7 @@ vuln-scrape run cnvd --limit 100
 vuln-scrape run splunk --limit 1000
 vuln-scrape run govcert --limit 10
 vuln-scrape run fortiguard --limit 20
+vuln-scrape run wiz --limit 20
 ```
 
 Resume all (or configured) scrapers from their saved sync progress:
