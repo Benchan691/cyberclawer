@@ -42,6 +42,15 @@ def test_cli_parses_run_subcommand() -> None:
     assert args.command == "run"
     assert args.provider == "cnvd"
     assert args.limit == 25
+    assert args.days == 1
+
+
+@pytest.mark.parametrize("command", [["run", "wiz"], ["catch-up"]])
+def test_cli_date_window_is_positive_and_shared_by_both_commands(command):
+    parser = build_parser()
+    assert parser.parse_args(command + ["--days", "2"]).days == 2
+    with pytest.raises(SystemExit):
+        parser.parse_args(command + ["--days", "0"])
 
 
 def test_cli_rejects_removed_flags() -> None:
@@ -68,13 +77,15 @@ def test_main_without_subcommand_exits() -> None:
     assert exc.value.code == 2
 
 
-def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:
+def test_main_run_dispatches_single_provider(monkeypatch, capsys, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
     captured: dict[str, object] = {}
 
     class FakeScraper:
-        def __init__(self, settings, *, provider=None) -> None:
+        def __init__(self, settings, *, provider=None, sync_context=None) -> None:
             captured["settings"] = settings
             captured["provider"] = provider
+            captured["sync_context"] = sync_context
 
         async def run(self):
             return {
@@ -93,7 +104,20 @@ def test_main_run_dispatches_single_provider(monkeypatch, capsys) -> None:
 
     assert captured["provider"].key == "cnvd"
     assert captured["settings"].limit == 1
+    assert captured["sync_context"].overlap_days == 1
     assert "cnvd: fetched 1 records" in capsys.readouterr().out
+
+
+def test_manual_run_respects_the_scheduled_crawler_lock(monkeypatch, tmp_path, caplog):
+    from pathlib import Path
+    from vuln_scraper.sync_state import catch_up_lock
+
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("INFO")
+    with catch_up_lock(Path("data")) as acquired:
+        assert acquired
+        main(["run", "wiz"])
+    assert "another invocation holds the progress lock" in caplog.text
 
 
 def test_cli_rejects_removed_review_subcommand() -> None:

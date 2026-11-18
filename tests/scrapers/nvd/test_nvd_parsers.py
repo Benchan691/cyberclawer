@@ -66,6 +66,15 @@ def test_parse_list_deduplicates_entries() -> None:
     assert len(page.entries) == 1
 
 
+def test_full_nvd_timestamps_preserve_utc_time_for_calendar_filters():
+    record = parse_cve_record({"id":"CVE-2026-12345",
+        "published":"2026-11-12T16:00:00.123",
+        "lastModified":"2026-11-13T00:30:00+08:00"}).to_dict()
+    assert record["published_at"] == "2026-11-12T16:00:00.123000+00:00"
+    assert record["updated_at"] == "2026-11-12T16:30:00+00:00"
+    assert record["published_date"] == "2026-11-12"
+
+
 def test_short_page_does_not_inflate_total_pages() -> None:
     payload = json.loads((FIXTURES / "cve_response.json").read_text(encoding="utf-8"))
     payload.update(resultsPerPage=123, startIndex=25000, totalResults=25123)

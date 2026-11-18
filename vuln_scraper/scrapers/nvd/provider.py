@@ -25,8 +25,8 @@ PROVIDER_SCHEMA = {
     "title_fields": ("title",),
     "cve_fields": ("cve_id",),
     "severity_fields": ("severity",),
-    "published_fields": ("published_date",),
-    "updated_fields": ("last_modified",),
+    "published_fields": ("published_at", "published_date"),
+    "updated_fields": ("updated_at", "last_modified"),
     "volatile_fields": ("vuln_status",),
     "source_fields": ("detail_url",),
 }

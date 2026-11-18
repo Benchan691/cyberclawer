@@ -72,6 +72,13 @@ def settings(tmp_path, *, mongo_enabled=False, limit=10):
     )
 
 
+def recent_articles(client):
+    client.feed = client.feed.replace("Wed, 21 Oct 2026", "Wed, 18 Nov 2026")
+    client.feed = client.feed.replace("Tue, 01 Sep 2020", "Wed, 18 Nov 2026")
+    client.detail = client.detail.replace("October 21, 2026", "November 18, 2026")
+    return client
+
+
 def test_runner_uses_permanent_links_for_outdated_feed_slugs_and_respects_limit(tmp_path):
     client = FakeWizClient()
     client.feed = client.feed.replace("example-cloud-campaign", "retired-cloud-campaign-")
@@ -94,9 +101,28 @@ def run_sync(tmp_path, collection, client, *, limit=10, hour=0):
     return asyncio.run(runner._run_with_client(client))
 
 
-def test_catch_up_reconciles_backdated_entries_and_full_article_revisions(tmp_path):
+def test_catch_up_does_not_store_backdated_articles_without_a_recent_edit(tmp_path):
     collection = FakeMongoCollection()
     client = FakeWizClient()
+    first = run_sync(tmp_path, collection, client)
+    assert first["mongo_sync"]["inserted"] == 0
+    assert first["sync"]["outside_window"] == 2
+    assert first["sync"]["incremental_status"] == "up_to_date"
+    assert len(client.urls) == 3  # RSS has no edit date; confirm it from the article.
+
+
+def test_old_feed_article_with_an_edit_today_is_collected(tmp_path):
+    collection = FakeMongoCollection()
+    client = FakeWizClient()
+    client.detail = client.detail.replace("Oct 29, 2026", "Nov 18, 2026")
+    first = run_sync(tmp_path, collection, client)
+    assert first["mongo_sync"]["inserted"] == 2
+    assert first["sync"]["outside_window"] == 0
+
+
+def test_catch_up_reconciles_todays_articles_and_revisions(tmp_path):
+    collection = FakeMongoCollection()
+    client = recent_articles(FakeWizClient())
     first = run_sync(tmp_path, collection, client)
     assert first["mongo_sync"]["inserted"] == 2
     assert first["sync"]["outside_window"] == 0
@@ -112,7 +138,7 @@ def test_catch_up_reconciles_backdated_entries_and_full_article_revisions(tmp_pa
 
 def test_feed_catch_up_resumes_across_limits(tmp_path):
     collection = FakeMongoCollection()
-    client = FakeWizClient()
+    client = recent_articles(FakeWizClient())
     first = run_sync(tmp_path, collection, client, limit=1)
     assert first["sync"]["incremental_status"] == "partial"
     second = run_sync(tmp_path, collection, client, limit=1, hour=1)
@@ -122,7 +148,7 @@ def test_feed_catch_up_resumes_across_limits(tmp_path):
 
 def test_failed_detail_preserves_full_documents_and_is_retried(tmp_path):
     collection = FakeMongoCollection()
-    client = FakeWizClient()
+    client = recent_articles(FakeWizClient())
     run_sync(tmp_path, collection, client)
     client.fail_details = True
     failed = run_sync(tmp_path, collection, client, hour=1)

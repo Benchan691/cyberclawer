@@ -452,6 +452,7 @@ vuln-scrape run <provider> --limit 100
 | --- | --- | --- |
 | `provider` | 必填 | 例如 `cve`、`govcert`、`fortiguard` |
 | `--limit` | `1000` | 1–1000；選取的結果上限 |
+| `--days` | `1` | 香港日曆日視窗；預設只接受今日發布或更新的公告 |
 
 此指令預設啟用 MongoDB。它不是固定「只插入新身份」的模式：在目前 TOML 的 `overwrite` 設定下，也會抓取和比對已存在的公告，以更新內容。
 
@@ -467,7 +468,7 @@ vuln-scrape catch-up --days 7 --limit 200
 | 參數 | 預設 | 現行效果 |
 | --- | --- | --- |
 | `--limit` | `1000` | 每來源每輪檢查的公告上限，包含相同資料；未完成工作留待下輪 |
-| `--days` | `1` | 已儲存進度之前的滾動重疊日數，不是香港今日零時下界 |
+| `--days` | `1` | 香港今日零時起的發布／更新日期視窗；所有來源及 `run` 都適用 |
 | `--batch-size` | `5` | 每批已確認寫入及儲存進度的公告數量上限 |
 | `--max-runs-per-provider` | `100` | 每來源每輪列表工作的上限 |
 
@@ -903,17 +904,17 @@ Provider 可定義 `detail_failure_fallback()`，但那是一種明確宣告的�
 
 現行 Catch-up 使用 MongoDB `news_sync_state` 保存每來源的完成進度、發現進度、未完成更新視窗／頁面及失敗公告。原有公告 Schema 及集合不變。
 
-- 首次從該來源已儲存的最新 `updated_at` 開始，沒有時用 `published_at`；空來源讀目前 Feed 或最近七日的更新。
-- `--days 1` 代表已儲存進度之前重查 24 小時，不再只查今日。日期視窗固定為 UTC，未確認寫入成功不推進完成進度。
+- 首次、空來源及停機後都只查指定日曆視窗，沒有七日回補；舊進度不能擴大日期範圍。
+- `--days 1` 只接受香港今日發布或更新的公告；`--days 2` 明確包含昨日及今日。查詢邊界轉成固定 UTC 時間，未確認寫入成功不推進完成進度。
 - 最新列表會先檢查；更新失敗不阻擋新資料。全部公告檢查額度用於更新及重試，不保留歷史掃描額度。
 - NVD 使用固定、最多 120 日的修改日期視窗；GitHub Advisory 使用修改範圍及 Link 游標；CVE 使用 Delta batch 的 `fetchTime`。
-- FortiGuard／HPE 核對完整目前 RSS；FortiGuard 不改用目錄 fallback。其他索引只處理近期或列表有變更的公告；分頁來源遇到整頁超出更新視窗後停止，不輪查歷史頁面。
+- FortiGuard／HPE／Wiz 讀目前 RSS 並套用相同日期規則；Feed 沒有編輯日期時，需開啟文章確認，舊且未更新的內容不會寫入。其他來源及 MSRC 展開的子公告也會在寫入前檢查日期。
 - CVE 只讀可取得的 Delta；歷史不足時記錄並略過缺口，不下載 baseline。RSS 也不補抓已移出 Feed 的公告。
-- 已保存的歷史掃描／baseline 游標及其重試會自動停用；保留未完成更新及其重試，也保留資料庫既有歷史公告。略過的歷史缺口不會讓更新狀態永久顯示 partial。
+- 已保存的歷史掃描／baseline 游標及過期日期視窗、重試會自動停用；保留視窗內未完成工作，也保留資料庫既有歷史公告。略過的歷史缺口不會讓更新狀態永久顯示 partial。
 - `data/catch-up.lock` 防止排程重疊；`data/sync-cache/` 保存具 checksum 的頁面及 MSRC 子公告快照。快照遺失會重抓，不盲用舊 offset。
 - MongoDB UTC／毫秒時間比較、穩定身份及已確認寫入使重跑保持冪等；來源不再列出的既有公告不會被刪除。
 
-詳細實作契約、限制及部署／回復程序見 [Resumable catch-up](CATCH_UP.md)。`timestamps.window_start()` 與 Runner 舊 `updated_since` Python 介面仍可用，但不再控制 CLI Catch-up 的主流程。
+詳細實作契約、限制及部署／回復程序見 [Resumable catch-up](CATCH_UP.md)。CLI 的 `run` 及 `catch-up` 共用 `SyncEngine`、香港日曆視窗及程序鎖。未取得有效來源日期的內容不會當成今日新聞寫入。
 
 <a id="http"></a>
 ## 12. HTTP、速率限制與恢復策略
@@ -1125,7 +1126,7 @@ print(output["result_count"], output["stop_reason"])
 
 - 唯一列表來源：`https://filestore.fortinet.com/fortiguard/rss/ir.xml`，涵蓋最新 50 筆公告，沒有歷史分頁；提高 `--limit` 不會擴大 Feed 的範圍。
 - Feed 重試後仍失敗會記錄為抓取失敗，不會切換至 PSIRT 網頁目錄。
-- `catch-up` 每輪核對完整的目前 Feed（仍受 `--limit` 限制），不按 `--days` 篩選，也不因已知公告而提前停止；完整掃描後回報 `exhausted`。Feed 的重建時間不代表各公告的公開或更新日期。
+- `run`／`catch-up` 都套用 `--days` 發布／更新日期視窗；預設只接受香港今日的新聞。RSS 未提供編輯日期時會檢查詳情，舊且未更新的內容不寫入；日期檢查也計入 `--limit`。Feed 重建時間不代表公告日期。
 - 詳情：`/psirt/FG-IR-*`，會驗證詳情 ID 與列表身份一致。
 - 保存全文 `content`、描述、解決方案、workaround、受影響產品／解決版本、時間線、參考連結及表格。
 - 提取嚴重程度、CVSS、CVE、公開及更新日期。
@@ -1264,7 +1265,7 @@ print(output["result_count"], output["stop_reason"])
 - RSS：`https://www.wiz.io/api/feed/cloud-threat-landscape/rss.xml`，沒有分頁，包含 Campaign、Incident 及 Research。
 - 來源 code 使用 RSS 的永久 GUID；詳情以 `https://threats.wiz.io/<GUID（移除連字號）>` 重新導向至目前事件頁，避免 RSS 舊 slug 造成 404。
 - 保存事件全文、行為者、初始存取方式、影響、技術、目標產品、參考連結、CVE 及發布／編輯時間；沒有正文的舊事件保留頁面結構化欄位。
-- `catch-up` 每次重新檢查目前整份 Feed（受 `--limit` 限制），不以公告日期排除舊事件；摘要未變但正文有修改也能更新。
+- `run`／`catch-up` 都只接受 `--days` 視窗內發布或編輯的事件，預設為香港今日。RSS 沒有編輯日期，必要時會開啟文章確認；舊且未更新的事件不寫入，摘要未變但今日有編輯的事件仍可更新。
 - 已使用 `providers = ["all"]` 的設定會自動包含此來源，資料寫入共用 `news`，以 `source.provider = "wiz"` 識別。
 
 主要測試：`tests/scrapers/wiz/`。

@@ -13,7 +13,7 @@ from .client import FetchError
 from .models import ListPage
 from .mongo import MongoSyncResult, sync_records_to_collection
 from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry, retry_entry_data, utc
-from .timestamps import document_updated_time, parse_timestamp
+from .timestamps import modification_time, parse_timestamp, source_news_time, window_start
 
 logger = logging.getLogger(__name__)
 FEEDS = {"fortiguard", "hpe", "wiz"}
@@ -29,6 +29,8 @@ class SyncEngine:
         self.provider = runner.provider
         self.options = runner.sync_context
         self.now = utc(self.options.until) or datetime.now(UTC)
+        self.cutoff = window_start(self.options.overlap_days, now=self.now).astimezone(UTC)
+        self.window_end = (window_start(now=self.now) + timedelta(days=1)).astimezone(UTC)
         self.store = SyncStateStore(state_collection, self.provider.key)
         self.state = self.store.load(news, self.now)
         self.cache = SnapshotCache(runner.settings.data_dir / "sync-cache" / self.provider.key)
@@ -56,25 +58,70 @@ class SyncEngine:
         if not self.state.get("legacy_failures_imported"):
             self.import_failures()
             self.state["legacy_failures_imported"] = True
-        anchor = min(utc(self.state["scheduled_until"]), self.now)
-        since = anchor - timedelta(days=self.options.overlap_days)
-        if self.state.get("bootstrap_empty") and not self.state.get("discovery_started"):
-            since = anchor
+        self.retire_outdated_work()
+        since = self.cutoff
         self.state["discovery_started"] = True
         if self.provider.key in WINDOWS:
-            if self.now > anchor:
-                while since < self.now:
-                    end = min(since + timedelta(days=120), self.now) if self.provider.key == "nvd" else self.now
-                    task = self.task("window", since, end)
-                    self.state["tasks"].append(task)
-                    self.new_tasks.add(task["id"])
-                    since = end
+            while since < self.now:
+                end = min(since + timedelta(days=120), self.now) if self.provider.key == "nvd" else self.now
+                task = self.task("window", since, end)
+                self.state["tasks"].append(task)
+                self.new_tasks.add(task["id"])
+                since = end
         else:
             task = self.task("head", since, self.now)
             self.state["tasks"].append(task)
             self.new_tasks.add(task["id"])
         self.state["scheduled_until"] = self.now.isoformat()
         self.store.save(self.state)
+
+    def in_window(self, source_date: datetime | None) -> bool:
+        return source_date is not None and self.cutoff <= source_date < self.window_end
+
+    def listing_proves_outdated(self, entry: Any) -> bool:
+        record = entry.to_record()
+        source_date = source_news_time(record)
+        if source_date is None or self.in_window(source_date):
+            return False
+        # A summary with only a publication date cannot rule out an edit today.
+        if (entry.embedded_detail or {}).get("_list_summary") and modification_time(record) is None:
+            return False
+        return True
+
+    def retire_outdated_work(self) -> None:
+        """A saved cursor, snapshot or retry must not widen the current date window."""
+        active = []
+        for task in self.state["tasks"]:
+            if utc(task.get("since")) is None or utc(task["since"]) < self.cutoff:
+                self.runner.checkpoint.failed.pop(f"{self.provider.key}:LIST-{task['id']}", None)
+                continue
+            active.append(task)
+        self.state["tasks"] = active
+        for field in ("scheduled_until", "discovered_until", "last_successful_until"):
+            self.state[field] = max(self.cutoff, min(utc(self.state[field]), self.now)).isoformat()
+        for field in ("completed_intervals", "discovered_intervals"):
+            self.state[field] = [[max(utc(start), self.cutoff).isoformat(), end]
+                                 for start, end in self.state[field] if utc(end) >= self.cutoff]
+        for reference in self.store.failures():
+            cached = self.cache.read(reference.get("cache"))
+            records = (cached or {}).get("records", [])
+            index = reference.get("record_index", 0)
+            if index < len(records):
+                expired = not self.in_window(source_news_time(records[index]))
+            elif reference.get("news_at"):
+                expired = not self.in_window(parse_timestamp(reference["news_at"]))
+            else:
+                entry = restore_entry(reference["entry"])
+                expired = self.listing_proves_outdated(entry)
+                failed_at = utc(reference.get("failed_at"))
+                if not expired and failed_at is not None and failed_at < self.cutoff:
+                    expired = not self.in_window(self.listing_time(entry))
+            if expired:
+                self.store.clear(reference["identity"])
+                self.runner.checkpoint.failed.pop(reference["identity"], None)
+        self.initial_failures = self.store.failures()
+        self.state["news_window_start"] = self.cutoff.isoformat()
+        self.state["news_date_policy"] = "published_or_updated"
 
     def discard_history_work(self) -> None:
         """Retire old recovery cursors without discarding incremental work or news."""
@@ -116,9 +163,7 @@ class SyncEngine:
 
     @staticmethod
     def listing_time(entry: Any) -> datetime | None:
-        dates = [parse_timestamp(document_updated_time(entry.to_record())),
-                 parse_timestamp(entry.disclosure_date)]
-        return max((value for value in dates if value is not None), default=None)
+        return source_news_time(entry.to_record())
 
     def import_failures(self) -> None:
         from .models import ListEntry, VulnerabilityId
@@ -299,7 +344,8 @@ class SyncEngine:
             version = self.signature_payload(payload["entries"])
             task["version"] = version
             for previous in self.state["tasks"]:
-                if previous is not task and not previous.get("enumerated") and previous.get("version") == version:
+                if (previous is not task and not previous.get("enumerated")
+                        and previous.get("version") == version and previous["since"] == task["since"]):
                     previous_page = self.cache.read(previous.get("cache"))
                     if self.provider.key in INDEXES and previous.get("ordered") and previous_page is not None:
                         payload = previous_page
@@ -347,11 +393,8 @@ class SyncEngine:
                     task["index"] += 1
                     continue
                 ledger = self.ledger(entry.key)
-                if (task["kind"] == "head" and self.provider.key not in FEEDS | WINDOWS
-                        and not task.get("child_cache")):
-                    listed_at = self.listing_time(entry)
-                    changed = ledger and ledger.get("signature") != self.signature(entry)
-                    if listed_at is not None and listed_at < utc(task["since"]) and not changed:
+                if not task.get("child_cache"):
+                    if self.listing_proves_outdated(entry):
                         self.outside_window += 1
                         task["index"] += 1
                         self.store.save(self.state)
@@ -456,8 +499,15 @@ class SyncEngine:
     async def write_batch(self, task: dict[str, Any], entry: Any, child: dict[str, Any],
                           batch: list[dict[str, Any]], offset: int) -> None:
         current = []
+        eligible = []
         for record in batch:
             identity = f"{record['type']}:{record['code']}"
+            if not self.in_window(source_news_time(record)):
+                self.outside_window += 1
+                self.store.clear(identity)
+                self.runner.checkpoint.failed.pop(identity, None)
+                continue
+            eligible.append(record)
             stored = self.news.find_one({"_id": identity})
             # A pinned older page must not overwrite a subsequently observed version.
             if stored and utc(stored.get("observed_at")) and utc(stored["observed_at"]) > utc(child["observed_at"]):
@@ -472,9 +522,12 @@ class SyncEngine:
         errors = {item["identity"]: item for item in result.errors}
         for index, record in enumerate(batch, offset):
             identity = f"{record['type']}:{record['code']}"
+            if record not in eligible:
+                continue
             if identity in errors:
                 self.store.defer(identity, {"task_id": task["id"], "entry": retry_entry_data(entry),
                     "cache": task["child_cache"], "record_index": index,
+                    "news_at": source_news_time(record).isoformat(),
                     "error": str(errors[identity]["error"])[:2000]})
             else:
                 self.store.clear(identity)

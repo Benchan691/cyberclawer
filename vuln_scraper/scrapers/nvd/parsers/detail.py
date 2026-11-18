@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from vuln_scraper.scrapers.nvd.config import DETAIL_URL
@@ -23,6 +24,8 @@ class NvdDetailRecord:
     cvss: dict[str, Any] = field(default_factory=dict)
     published_date: str | None = None
     last_modified: str | None = None
+    published_at: str | None = None
+    updated_at: str | None = None
     cwe_ids: list[str] = field(default_factory=list)
     reference_links: list[str] = field(default_factory=list)
     affected_products: list[str] = field(default_factory=list)
@@ -77,6 +80,8 @@ def parse_cve_record(cve: dict[str, Any]) -> NvdDetailRecord:
         },
         published_date=_date_part(cve.get("published")),
         last_modified=_date_part(cve.get("lastModified")),
+        published_at=_utc_timestamp(cve.get("published")),
+        updated_at=_utc_timestamp(cve.get("lastModified")),
         cwe_ids=cwe_ids,
         reference_links=references,
         affected_products=affected,
@@ -123,6 +128,20 @@ def _affected_products(cve: dict[str, Any]) -> list[str]:
 def _date_part(value: Any) -> str | None:
     text = str(value or "").strip()
     return text.split("T", 1)[0] or None if text else None
+
+
+def _utc_timestamp(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if "T" not in text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    # NVD timestamps without an explicit offset are UTC.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
 
 
 def _as_float(value: Any) -> float | None:

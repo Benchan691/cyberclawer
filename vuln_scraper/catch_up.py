@@ -99,7 +99,7 @@ def _run_catch_up_cycle(settings: ScraperSettings, context: SyncContext) -> None
             default_request_delay=provider.default_request_delay,
             default_concurrency=getattr(provider, "default_concurrency", None),
         ), mongo_conflict="overwrite").normalized()
-        logger.info("Resumable catch-up for provider %s collection %s (overlap_days=%s, limit=%s)",
+        logger.info("Resumable catch-up for provider %s collection %s (news_days=%s, limit=%s)",
                     provider.key, run_settings.mongo_collection, context.overlap_days, run_settings.limit)
         try:
             output = asyncio.run(ScraperRunner(run_settings, provider=provider, sync_context=context).run())

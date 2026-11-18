@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class SyncContext:
+    # Retain the Python field name for compatibility; this is a calendar-day window.
     overlap_days: int = 1
     batch_size: int = 5
     max_pages: int = 100
@@ -27,7 +28,7 @@ class SyncContext:
 
     def __post_init__(self) -> None:
         if min(self.overlap_days, self.batch_size, self.max_pages) < 1:
-            raise ValueError("overlap, batch size and listing request limit must be positive")
+            raise ValueError("news window, batch size and listing request limit must be positive")
 
 
 def utc(value: Any) -> datetime | None:
@@ -60,6 +61,8 @@ def restore_entry(data: dict[str, Any]) -> ListEntry:
 
 def retry_entry_data(entry: ListEntry) -> dict[str, Any]:
     """Keep request provenance, not full inline advisories or credentials, in MongoDB."""
+    from .timestamps import modification_time, publication_time
+
     payload = entry_data(entry)
     detail = entry.embedded_detail or {}
     payload["embedded_detail"] = {
@@ -68,6 +71,12 @@ def retry_entry_data(entry: ListEntry) -> dict[str, Any]:
         ) if key in detail
     }
     payload["embedded_detail"]["_list_summary"] = True
+    published = publication_time(entry.to_record())
+    if published is not None:
+        payload["embedded_detail"]["published_at"] = published.isoformat()
+    updated = modification_time(entry.to_record())
+    if updated is not None:
+        payload["embedded_detail"]["updated_at"] = updated.isoformat()
     return payload
 
 

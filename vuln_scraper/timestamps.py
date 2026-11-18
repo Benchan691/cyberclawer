@@ -33,11 +33,62 @@ def today_start(tz: ZoneInfo = LOCAL_TIMEZONE) -> datetime:
     return datetime.combine(datetime.now(tz).date(), time.min, tzinfo=tz)
 
 
-def window_start(days: int = 1, tz: ZoneInfo = LOCAL_TIMEZONE) -> datetime:
+def window_start(
+    days: int = 1, tz: ZoneInfo = LOCAL_TIMEZONE, *, now: datetime | None = None,
+) -> datetime:
     """Inclusive calendar-day window ending today in ``tz`` (``days=1`` is today only)."""
     if days < 1:
         raise ValueError("days must be at least 1")
-    return today_start(tz) - timedelta(days=days - 1)
+    start = today_start(tz) if now is None else datetime.combine(now.astimezone(tz).date(), time.min, tzinfo=tz)
+    return start - timedelta(days=days - 1)
+
+
+def publication_time(record: dict[str, Any]) -> datetime | None:
+    """Resolve source publication evidence without treating an edit as publication."""
+    published = parse_timestamp(record.get("published_at"))
+    if published is not None:
+        return published
+    provider = str(record.get("type") or record.get("provider") or "").strip().lower()
+    details = record.get("details")
+    details = details if isinstance(details, dict) else {}
+    if isinstance(details.get(provider), dict):
+        details = details[provider]
+    if isinstance(details, dict):
+        precise = parse_timestamp(details.get("published_at"))
+        if precise is not None:
+            return precise
+    # These providers put a modification date in the legacy disclosure slot.
+    if provider in {"cve", "msrc", "qianxin"}:
+        record = {**record, "disclosure_date": None}
+    return parse_timestamp(document_published_time(record))
+
+
+def source_news_time(record: dict[str, Any]) -> datetime | None:
+    """Latest source publication/edit date; observation time is never news evidence."""
+    dates = [publication_time(record), modification_time(record)]
+    return max((value for value in dates if value is not None), default=None)
+
+
+def modification_time(record: dict[str, Any]) -> datetime | None:
+    """Resolve an edit date without mistaking an RSS publication fallback for one."""
+    from .schema_v2 import PROVIDER_SCHEMAS
+
+    provider = str(record.get("type") or record.get("provider") or "").strip().lower()
+    details = record.get("details")
+    details = details if isinstance(details, dict) else {}
+    if isinstance(details.get(provider), dict):
+        details = details[provider]
+    dates = [parse_timestamp(record.get("updated_at")), parse_timestamp(details.get("updated_at"))]
+    schema = PROVIDER_SCHEMAS.get(provider)
+    for field in (schema.updated_fields if schema else ()):
+        value = parse_timestamp(_path_value(details, field))
+        if (details.get("_list_summary") and provider in {"fortiguard", "hpe", "wiz"}
+                and field != "updated_at" and value == publication_time(record)):
+            continue
+        dates.append(value)
+    if provider in {"cve", "msrc", "qianxin"} and not any(value is not None for value in dates):
+        dates.append(parse_timestamp(record.get("disclosure_date")))
+    return max((value for value in dates if value is not None), default=None)
 
 
 def document_published_time(record: dict[str, Any]) -> str | None:

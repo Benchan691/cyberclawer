@@ -190,17 +190,21 @@ Dates are shown as JSON strings for readability; MongoDB stores them as dates.
 
 ### Catch-up and updates
 
-Wiz is registered as a full-feed source in the sync engine:
+Wiz reads the full current feed and follows the shared date policy:
 
 1. Poll the current feed and select entries up to the invocation's `--limit`.
-2. Fetch full details even for old publication dates or unchanged RSS summaries.
+2. Verify article publication/edit dates where RSS does not expose enough date
+   information. Accept only articles published or updated within `--days`.
 3. Insert missing records, replace changed records, and skip unchanged records.
-4. Preserve unfinished feed work and retries across invocations; identical
-   snapshots resume their saved position instead of restarting at the first item.
+4. Preserve eligible unfinished feed work and retries across invocations;
+   identical snapshots resume within the current window. Expired work is retired.
 5. Retain stored news records when they disappear from the feed.
 
-`--limit` counts advisory checks, including unchanged records. `--days` does not
-exclude old entries still present in this full-feed source. Changing only the
+`--limit` counts advisory/date checks, including unchanged or excluded records.
+Both `run` and `catch-up` default to `--days 1`: published or edited today in
+Hong Kong time. Old unchanged articles are not saved, even if still in RSS.
+The feed has no article edit dates, so pages can require a date check before
+they are excluded. Changing only the
 scrape observation time does not cause an otherwise unchanged document to be
 rewritten. BSON UTC representation and millisecond precision are accounted for
 during content comparison.

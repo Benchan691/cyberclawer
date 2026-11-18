@@ -65,12 +65,13 @@ identifies these documents with `source.provider = "fortiguard"`.
 Feed failures after retries and advisory page failures are reported normally;
 there is no fallback to the PSIRT directory.
 
-During `catch-up`, FortiGuard reconciles every advisory currently in the feed,
-up to `--limit`, regardless of `--days` or whether an earlier advisory is already
-in MongoDB. Missing records are inserted, changed records are overwritten, and
-unchanged records are skipped. This catches late or backdated feed entries and
-repairs gaps on the next scheduled run. A feed rebuild time is not an advisory's
-publication or revision date. Records no longer present in the feed are retained.
+During `run` and `catch-up`, FortiGuard reads the current feed and applies the
+same publication/update window as every other source. The default `--days 1`
+accepts only articles published or updated today in Hong Kong time. Article
+pages may be needed to verify edit dates missing from RSS. Missing eligible
+records are inserted, changed records are overwritten, and unchanged records
+are skipped. A feed rebuild time is not an advisory's publication or revision
+date. Records no longer present in the feed are retained.
 Content comparison accounts for MongoDB's UTC timestamp representation and
 millisecond precision so unchanged records are not rewritten on each run.
 
@@ -88,8 +89,9 @@ incidents, and research entries are included. Records use the feed's permanent
 GUID as their identity and `source.provider = "wiz"` in the shared `news`
 collection. Permanent ID links resolve renamed pages even when a feed slug is
 outdated. Historical entries with no prose retain their structured metadata.
-Catch-up reconciles the complete current feed, up to `--limit`,
-including backdated entries and revisions whose RSS summaries have not changed.
+Both commands accept only records published or edited within `--days`, up to
+`--limit`. Wiz exposes edit dates on article pages rather than in RSS, so old
+feed entries may require a detail-date check; old unchanged articles are not saved.
 The feed has no pagination; records that leave it are retained. The existing
 `providers = ["all"]` setting includes Wiz automatically.
 
@@ -137,7 +139,7 @@ Document shape, indexes, and migration: see [`database.md`](database.md).
 
 ## Usage
 
-Run one scraper:
+Run one scraper (today's publications and updates by default):
 
 ```bash
 vuln-scrape run hkcert --limit 100
@@ -153,17 +155,20 @@ Resume all (or configured) scrapers from their saved sync progress:
 
 ```bash
 vuln-scrape catch-up
-vuln-scrape catch-up --limit 200 --days 7
+vuln-scrape catch-up --limit 200 --days 1
 ```
 
-`--days 1` rechecks a rolling 24-hour overlap before each source's saved position,
-rather than starting at midnight. New and changed advisories are inserted or
-updated; matching records are skipped. Historical recovery and rotating archive
-scans are disabled. Unfinished update pages, monthly CVEs, and failed writes
-resume on later runs. Existing historical news records are retained.
+`--days 1` includes source publication or update dates from midnight today in
+Hong Kong time. This applies to every provider in both `run` and `catch-up`.
+`--days 2` explicitly includes yesterday and today. Old saved positions cannot
+widen the requested window; expired queued pages and retries are retired.
+New and changed eligible advisories are inserted or updated; matching records
+are skipped. Details without a verifiable publication or edit date are not saved.
+Unfinished eligible work resumes on later runs. Existing historical news records
+are retained; there is no historical recovery or rotating archive scan.
 `--limit` counts advisories checked, `--batch-size` controls write/checkpoint
 batches, and `--max-runs-per-provider` caps listing work. Overlapping scheduled
-runs are skipped using a process lock. See [resumable catch-up](docs/CATCH_UP.md)
+runs, including manual `run` invocations, are skipped using a process lock. See [resumable catch-up](docs/CATCH_UP.md)
 for source strategies, state storage and rollout.
 
 Transient HTTP errors honor `Retry-After` and use the retry/backoff settings in
@@ -173,10 +178,10 @@ Retries remain bounded; an unavailable source is reported as a failure.
 Keep `data/checkpoint.json` and `data/sync-cache/` between runs. Saved catch-up
 positions and retry references live in MongoDB's `news_sync_state` collection;
 legacy failed requests are imported automatically. Failed detail requests from
-every source are retried, including advisories outside the overlap window.
+every source are retried while their source dates remain in the requested window.
 Failed fetches do not overwrite existing records with list summaries. NVD
-preserves the failed request's date window and keeps it fixed across pagination
-while recovering, so later runs do not silently move past that window.
+keeps eligible request windows fixed across pagination; expired windows are
+discarded when the Hong Kong calendar boundary advances.
 NVD pagination uses the requested page size, including when the final response
 contains fewer records. Empty results are accepted only when the response's
 pagination metadata confirms that the result set is exhausted; unexpected empty

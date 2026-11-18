@@ -28,7 +28,7 @@ from vuln_scraper.sync_state import SyncContext, SyncStateStore, catch_up_lock
 NOW = datetime(2026, 11, 13, 9, 30, tzinfo=UTC)
 
 
-def entry(number, provider="fortiguard", *, old=True):
+def entry(number, provider="fortiguard", *, old=False):
     code = f"FG-IR-26-{number:03}" if provider == "fortiguard" else str(number)
     if provider == "splunk":
         code = f"SVD-2611-{number:03}"
@@ -36,6 +36,7 @@ def entry(number, provider="fortiguard", *, old=True):
         "2026-01-01" if old else "2026-11-13", None, provider, "https://example.test",
         {"title": f"Advisory {number}", "advisory_id": code,
          "published_date": "2026-01-01" if old else "2026-11-13",
+         "published_at": "2026-01-01" if old else "2026-11-13",
          "updated_date": "2026-01-01" if old else "2026-11-13", "content": f"Full advisory {number}"})
 
 
@@ -51,13 +52,13 @@ class Harness:
     def states(self):
         return self.news.sync_collections["news_sync_state"]
 
-    def run(self, *, limit=1000, max_pages=100, batch_size=5, now=NOW, configure=None):
+    def run(self, *, limit=1000, max_pages=100, batch_size=5, now=NOW, days=1, configure=None):
         settings = ScraperSettings(data_dir=self.directory, request_delay=0, retries=0,
             scrapers_config_file=None, mongo_config_file=None, mongo_enabled=True,
             mongo_conflict="overwrite", limit=limit, mongo_collection="news")
         runner = ScraperRunner(settings, provider=self.provider,
             mongo_client_factory=fake_mongo_factory(self.news),
-            sync_context=SyncContext(until=now, max_pages=max_pages, batch_size=batch_size))
+            sync_context=SyncContext(until=now, overlap_days=days, max_pages=max_pages, batch_size=batch_size))
 
         async def fetch(client, url, page):
             self.calls.append((runner._active_sync_context, page))
@@ -92,30 +93,30 @@ def test_completed_position_does_not_jump_over_an_unfinished_window():
     assert state["last_successful_until"] == (start + timedelta(days=2)).isoformat()
 
 
-def test_fixed_windows_resume_from_saved_progress_instead_of_midnight(tmp_path):
+def test_fixed_windows_are_bounded_by_today_even_with_stale_saved_progress(tmp_path):
     h = Harness(tmp_path, NvdProvider())
     h.news.documents["nvd:old"] = {"_id": "nvd:old", "source": {"provider": "nvd"},
                                     "updated_at": NOW - timedelta(days=3)}
     h.pages = lambda context, page: ListPage(page, [entry(1, "nvd")], total_pages=1)
     first = h.run()
-    assert h.calls[0][0].since == NOW - timedelta(days=4)
+    assert h.calls[0][0].since == datetime(2026, 11, 12, 16, tzinfo=UTC)
     assert h.calls[0][0].until == NOW
     assert first["mongo_sync"]["inserted"] == 1
     assert first["sync"]["last_successful_until"] == NOW.isoformat()
     h.calls.clear()
     h.run(now=NOW + timedelta(hours=18))
-    assert h.calls[0][0].since == NOW - timedelta(days=1)
+    assert h.calls[0][0].since == datetime(2026, 11, 13, 16, tzinfo=UTC)
     assert h.calls[0][0].until == NOW + timedelta(hours=18)
 
 
-def test_empty_provider_bootstraps_exactly_seven_days_then_uses_overlap(tmp_path):
+def test_empty_provider_starts_today_without_a_seven_day_bootstrap(tmp_path):
     h = Harness(tmp_path, NvdProvider())
     h.pages = lambda context, page: ListPage(page, [], total_pages=0, exhausted=True)
     h.run()
-    assert h.calls[0][0].since == NOW - timedelta(days=7)
+    assert h.calls[0][0].since == datetime(2026, 11, 12, 16, tzinfo=UTC)
     h.calls.clear()
     h.run(now=NOW + timedelta(hours=1))
-    assert h.calls[0][0].since == NOW - timedelta(days=1)
+    assert h.calls[0][0].since == datetime(2026, 11, 12, 16, tzinfo=UTC)
 
 
 def test_identical_snapshot_resumes_past_limit_without_starving_tail(tmp_path):
@@ -186,7 +187,7 @@ def test_recent_listing_stops_before_missing_history_without_fetching_old_detail
     assert set(h.news.documents) == {"govcert:1"}
 
 
-def test_listing_revision_to_a_known_old_record_is_still_synced(tmp_path):
+def test_listing_revision_cannot_bypass_the_news_date_cutoff(tmp_path):
     h = Harness(tmp_path, GovCERTProvider())
     advisory = entry(1, "govcert", old=False)
     h.pages = lambda context, page: ListPage(page, [advisory], total_pages=1)
@@ -194,19 +195,20 @@ def test_listing_revision_to_a_known_old_record_is_still_synced(tmp_path):
     advisory.disclosure_date = "2026-01-01"
     advisory.embedded_detail["updated_date"] = "2026-01-01"
     advisory.embedded_detail["published_date"] = "2026-01-01"
+    advisory.embedded_detail["published_at"] = "2026-01-01"
     advisory.embedded_detail["content"] = "Revised advisory"
     output = h.run(now=NOW + timedelta(hours=1))
-    assert output["mongo_sync"]["overwritten"] == 1
-    assert h.news.documents["govcert:1"]["details"]["content"] == "Revised advisory"
+    assert output["mongo_sync"]["overwritten"] == 0
+    assert h.news.documents["govcert:1"]["details"]["content"] == "Full advisory 1"
 
 
 def test_listing_modification_time_keeps_an_old_publication_in_the_recent_pass(tmp_path):
     from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
     h = Harness(tmp_path, PaloAltoProvider())
-    revised = entry(1, "paloalto")
+    revised = entry(1, "paloalto", old=True)
     revised.embedded_detail["updated_date"] = NOW.isoformat()
     h.pages = lambda context, page: ListPage(page,
-        [revised] if page == 1 else [entry(2, "paloalto")], total_pages=3)
+        [revised] if page == 1 else [entry(2, "paloalto", old=True)], total_pages=3)
     output = h.run()
     assert [page for _, page in h.calls] == [1, 2]
     assert set(h.news.documents) == {"paloalto:1"}
@@ -236,12 +238,12 @@ def test_saved_history_and_its_retries_are_retired_but_recent_failures_resume(tm
 
 def test_complete_index_only_fetches_recent_or_changed_entries(tmp_path):
     h = Harness(tmp_path, SplunkProvider())
-    modified = entry(2, "splunk")
+    modified = entry(2, "splunk", old=True)
     modified.embedded_detail["last_modified"] = NOW.isoformat()
     h.pages = lambda context, page: ListPage(page, [entry(1, "splunk"), modified], total_pages=1)
     first = h.run()
-    assert set(h.news.documents) == {modified.key}
-    assert first["sync"]["outside_window"] == 1
+    assert set(h.news.documents) == {entry(1, "splunk").key, modified.key}
+    assert first["sync"]["outside_window"] == 0
     second = h.run(now=NOW + timedelta(hours=1))
     assert second["mongo_sync"]["inserted"] == 0
     assert second["mongo_sync"]["overwritten"] == 0
@@ -408,7 +410,7 @@ def test_cve_history_gap_is_reported_without_requesting_a_baseline(tmp_path, mon
     assert first["sync"]["history_status"] == "disabled"
     assert first["sync"]["incremental_status"] == "up_to_date"
     assert first["sync"]["last_successful_until"] == NOW.isoformat()
-    assert first["sync"]["history_gap"]["until"] == (NOW - timedelta(days=30)).isoformat()
+    assert first["sync"]["history_gap"] is None
     second = h.run(max_pages=1, now=NOW + timedelta(hours=1))
     assert second["sync"]["history_status"] == "disabled"
     assert second["sync"]["last_successful_until"] == (NOW + timedelta(hours=1)).isoformat()
@@ -470,20 +472,21 @@ def test_github_uses_modified_range_and_link_cursor():
         provider.parse_sync_list([{"message": "not an advisory"}], page=1, context=context, headers={})
 
 
-def test_nvd_long_outage_is_split_and_windows_stay_fixed(tmp_path):
+def test_nvd_long_outage_does_not_fetch_older_windows(tmp_path):
     h = Harness(tmp_path, NvdProvider())
     h.news.documents["nvd:old"] = {"_id": "nvd:old", "source": {"provider": "nvd"},
                                     "updated_at": NOW - timedelta(days=300)}
     h.pages = lambda context, page: ListPage(page, [], total_pages=0, exhausted=True)
     h.run()
-    assert len(h.calls) == 3
+    assert len(h.calls) == 1
     for context, page in h.calls:
         assert context.until - context.since <= timedelta(days=120)
         query = parse_qs(urlparse(h.provider.sync_list_url(context, page)).query)
         assert query["lastModStartDate"] == [context.since.isoformat(timespec="milliseconds")]
+        assert context.since == datetime(2026, 11, 12, 16, tzinfo=UTC)
 
 
-def test_legacy_failed_nvd_window_is_included_in_the_first_resumable_run(tmp_path):
+def test_legacy_failed_nvd_window_cannot_expand_the_recent_window(tmp_path):
     h = Harness(tmp_path, NvdProvider())
     h.news.documents["nvd:old"] = {"_id": "nvd:old", "source": {"provider": "nvd"},
                                     "updated_at": NOW - timedelta(days=1)}
@@ -494,8 +497,8 @@ def test_legacy_failed_nvd_window_is_included_in_the_first_resumable_run(tmp_pat
     }]}))
     h.pages = lambda context, page: ListPage(page, [], total_pages=0, exhausted=True)
     h.run()
-    assert min(context.since for context, _ in h.calls) <= old.since
-    assert max(context.until for context, _ in h.calls) >= old.until
+    assert min(context.since for context, _ in h.calls) == datetime(2026, 11, 12, 16, tzinfo=UTC)
+    assert max(context.until for context, _ in h.calls) == NOW
 
 
 def test_cve_uses_batch_arrival_time_for_backdated_records():

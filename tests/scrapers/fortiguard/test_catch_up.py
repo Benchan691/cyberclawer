@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -11,7 +11,7 @@ from vuln_scraper.client import ScraperClient
 from vuln_scraper.config import ScraperSettings
 from vuln_scraper.scrapers.fortiguard.config import RSS_URL
 from vuln_scraper.scrapers.fortiguard.provider import FortiguardProvider
-from vuln_scraper.timestamps import LOCAL_TIMEZONE
+from vuln_scraper.sync_state import SyncContext
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -28,6 +28,13 @@ def feed_catch_up(tmp_path, monkeypatch, caplog):
         "feed": (FIXTURES / "list.xml").read_text(encoding="utf-8"),
     }
     detail = (FIXTURES / "detail.html").read_text(encoding="utf-8")
+    state["feed"] = state["feed"].replace("Thu, 13 Aug 2026", "Fri, 13 Nov 2026")
+    state["feed"] = state["feed"].replace("Wed, 12 Aug 2026 00:00:00 -0700", "Fri, 13 Nov 2026 00:00:00 -0600")
+    state["feed"] = state["feed"].replace("Revised on 2026-11-08", "Revised on 2026-11-13")
+    detail = detail.replace("Aug 12, 2026", "Nov 13, 2026")
+
+    monkeypatch.setattr("vuln_scraper.catch_up.SyncContext",
+        lambda **kwargs: SyncContext(until=datetime(2026, 11, 13, 12, tzinfo=UTC), **kwargs))
 
     def respond(request):
         requests.append(str(request.url))
@@ -81,7 +88,7 @@ def feed_catch_up(tmp_path, monkeypatch, caplog):
     return collection, requests, state, run
 
 
-def test_catch_up_inserts_backdated_feed_and_repairs_missing_or_changed_records(feed_catch_up):
+def test_catch_up_inserts_recent_feed_and_repairs_missing_or_changed_records(feed_catch_up):
     collection, requests, _, run = feed_catch_up
 
     summary = run()
@@ -151,12 +158,12 @@ def test_catch_up_empty_feed_preserves_existing_records(feed_catch_up):
     assert "deleted=0" in summary
 
 
-def test_catch_up_full_feed_respects_explicit_record_limit(feed_catch_up):
+def test_catch_up_feed_checks_respect_explicit_record_limit(feed_catch_up):
     collection, requests, _, run = feed_catch_up
 
     summary = run(limit=1)
 
-    assert set(collection.documents) == {FIRST_ID}
+    assert set(collection.documents) == {SECOND_ID}
     assert "stop_reason=limit" in summary
     assert requests.count(RSS_URL) == 1
-    assert not any(url.endswith("/psirt/FG-IR-26-158") for url in requests)
+    assert not any(url.endswith("/psirt/FG-IR-26-160") for url in requests)

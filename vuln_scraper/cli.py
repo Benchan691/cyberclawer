@@ -38,7 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=MAX_RESULT_LIMIT,
-        help=f"Maximum records to scrape (1-{MAX_RESULT_LIMIT}).",
+        help=f"Maximum advisory/date checks (1-{MAX_RESULT_LIMIT}).",
+    )
+    run_parser.add_argument(
+        "--days", type=_positive_int_arg, default=1,
+        help="Publication/update window in Hong Kong calendar days (default 1: today only).",
     )
     catch_up_parser = subparsers.add_parser(
         "catch-up",
@@ -64,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int_arg,
         default=1,
         help=(
-            "Rolling overlap before each provider's saved sync position (default 1 day). "
-            "This is not a today-only filter; RSS feeds are fully reconciled."
+            "Publication/update window in Hong Kong calendar days (default 1: today only). "
+            "Applies to every provider, including RSS feeds and saved retries."
         ),
     )
     catch_up_parser.add_argument(
@@ -212,12 +216,19 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "run":
         from .scrapers import get_provider
         from .runner import ScraperRunner
+        from .sync_state import SyncContext, catch_up_lock
 
         try:
             limit = validate_limit(args.limit)
             provider = get_provider(args.provider)
-            settings = default_scrape_settings(limit=limit)
-            output = asyncio.run(ScraperRunner(settings, provider=provider).run())
+            settings = default_scrape_settings(limit=limit).normalized()
+            with catch_up_lock(settings.data_dir) as acquired:
+                if not acquired:
+                    logging.getLogger(__name__).info("Run %s skipped: another invocation holds the progress lock", provider.key)
+                    return
+                output = asyncio.run(ScraperRunner(
+                    settings, provider=provider, sync_context=SyncContext(overlap_days=args.days),
+                ).run())
         except (KeyError, ValueError) as exc:
             parser.error(str(exc))
         vulnerabilities = output.get("vulnerabilities", [])
