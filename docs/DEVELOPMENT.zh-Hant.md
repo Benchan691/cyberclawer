@@ -1231,6 +1231,7 @@ print(output["result_count"], output["stop_reason"])
 
 - 列表：POST `/alpha-api/v2/vuln/article-notice`，每頁 10 筆、category 為「风险通告」。
 - 詳情：GET `/alpha-api/v2/vuln/article-detail?id=<article_id>`。
+- `ti.qianxin.com` DNS 解析失敗時，使用 Google Public DNS 查詢奇安信的中國內地路由。列表及詳情請求繼續驗證原主機的 TLS 憑證。
 - 顯示連結：`/vulnerability/notice-detail/<id>?type=risk`，與 API URL 分開。
 - 解析文章摘要、威脅狀態、等級、日期、作者、漏洞 ID、CVE、連結及章節內容。
 - 章節解析以標題路由，對章節缺漏及無標題情況另有測試。

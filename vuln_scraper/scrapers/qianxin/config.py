@@ -1,4 +1,5 @@
-BASE_URL = "https://ti.qianxin.com"
+HOSTNAME = "ti.qianxin.com"
+BASE_URL = f"https://{HOSTNAME}"
 SOURCE_URL = f"{BASE_URL}/vulnerability/notice-list"
 DETAIL_URL = f"{BASE_URL}/vulnerability/notice-detail"
 LIST_API_URL = f"{BASE_URL}/alpha-api/v2/vuln/article-notice"

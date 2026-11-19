@@ -185,6 +185,9 @@ class ScraperRunner:
             "timeout": self.settings.timeout,
             "headers": client_headers,
         }
+        dns_fallback = getattr(self.provider, "dns_fallback", None)
+        if dns_fallback is not None:
+            client_kwargs["dns_fallback"] = dns_fallback
         async with ScraperClient(**client_kwargs) as client:
             self._inject_cnvd_cookies(client)
             return await self._finalize_run_output(await self._run_with_client(client))

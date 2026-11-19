@@ -4,8 +4,9 @@ import asyncio
 import logging
 import math
 import random
+import socket
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ import httpx
 from .config import DEFAULT_HEADERS
 
 logger = logging.getLogger(__name__)
+DNSFallback = Callable[[str], Awaitable[tuple[str, int] | None]]
 
 
 class ScrapeError(Exception):
@@ -126,6 +128,7 @@ class ScraperClient:
         backoff_jitter: float = 0.4,
         timeout: float = 30.0,
         headers: Mapping[str, str] | None = None,
+        dns_fallback: DNSFallback | None = None,
     ) -> None:
         self.retries = max(0, retries)
         self.backoff_base = max(0.0, backoff_base)
@@ -134,6 +137,9 @@ class ScraperClient:
         self.rate_limiter = AsyncRateLimiter(delay)
         self._timeout = timeout
         self._default_headers = dict(headers or DEFAULT_HEADERS)
+        self._dns_fallback = dns_fallback
+        self._dns_cache: dict[str, tuple[str, float]] = {}
+        self._dns_lock = asyncio.Lock()
         self._client = self._build_http_client()
 
     def _build_http_client(self) -> httpx.AsyncClient:
@@ -244,10 +250,10 @@ class ScraperClient:
         for attempt in range(retry_count + 1):
             await self.rate_limiter.wait()
             try:
-                kwargs: dict[str, Any] = {"headers": dict(headers or {}), "json": json_body}
+                kwargs: dict[str, Any] = {"json": json_body}
                 if data is not None:
                     kwargs["data"] = data
-                response = await self._client.request(method.upper(), url, **kwargs)
+                response = await self._send_json_request(method.upper(), url, headers=dict(headers or {}), **kwargs)
                 if response.status_code == 429 or response.status_code >= 500:
                     raise _response_error(response, url)
                 response.raise_for_status()
@@ -276,6 +282,41 @@ class ScraperClient:
             status_code=_http_status(last_error),
             retry_after=getattr(last_error, "retry_after", None),
         ) from last_error
+
+    async def _send_json_request(
+        self, method: str, url: str, *, headers: dict[str, str], **kwargs: Any,
+    ) -> httpx.Response:
+        try:
+            return await self._client.request(method, url, headers=headers, **kwargs)
+        except httpx.ConnectError as exc:
+            if self._dns_fallback is None or not _is_dns_failure(exc):
+                raise
+            target = httpx.URL(url)
+            if target.scheme != "https" or target.port not in (None, 443) or exc.request.url != target:
+                raise
+
+            async with self._dns_lock:
+                cached = self._dns_cache.get(target.host)
+                if cached is not None and cached[1] > time.monotonic():
+                    address = cached[0]
+                else:
+                    resolved = await self._dns_fallback(target.host)
+                    if resolved is None:
+                        raise
+                    address, ttl = resolved
+                    self._dns_cache[target.host] = (address, time.monotonic() + ttl)
+                    logger.info("Using fallback DNS address for %s", target.host)
+
+            # Keep the original HTTP host and TLS certificate verification when
+            # the transport connects to a numeric address.
+            fallback_headers = httpx.Headers(headers)
+            fallback_headers["Host"] = target.host
+            response = await self._client.request(
+                method, target.copy_with(host=address), headers=fallback_headers,
+                extensions={"sni_hostname": target.host}, follow_redirects=False, **kwargs,
+            )
+            response.request.url = target
+            return response
 
     async def download(self, url: str, target: Path) -> None:
         """Stream a public source archive to an atomic local cache file."""
@@ -364,3 +405,21 @@ def _http_status(error: Exception | None) -> int | None:
     if isinstance(error, httpx.HTTPStatusError):
         return error.response.status_code
     return getattr(error, "status_code", None)
+
+
+def _is_dns_failure(error: httpx.ConnectError) -> bool:
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, socket.gaierror):
+            return True
+        cause = cause.__cause__
+
+    # Some HTTP transports preserve only the message from getaddrinfo.
+    message = str(error).lower()
+    return any(text in message for text in (
+        "name or service not known",
+        "nodename nor servname provided",
+        "temporary failure in name resolution",
+        "no address associated with hostname",
+        "getaddrinfo failed",
+    ))

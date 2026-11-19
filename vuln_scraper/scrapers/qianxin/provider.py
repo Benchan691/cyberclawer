@@ -14,6 +14,7 @@ from vuln_scraper.scrapers.qianxin.config import (
     LIST_API_URL,
     SOURCE_URL,
 )
+from vuln_scraper.scrapers.qianxin.dns import resolve_dns
 from vuln_scraper.scrapers.qianxin.parsers.detail import QianxinDetailRecord, parse_article_detail
 from vuln_scraper.scrapers.qianxin.parsers.list import parse_article_notice_list
 
@@ -26,6 +27,8 @@ class QianxinProvider:
     content_type: str = "json"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = True
+
+    dns_fallback = staticmethod(resolve_dns)
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_API_URL
