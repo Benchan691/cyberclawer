@@ -14,6 +14,7 @@ from vuln_scraper.scrapers.splunk.parsers.common import (
     soup,
     unique_links,
 )
+from vuln_scraper.severity import CANONICAL_SEVERITIES, normalize_severity
 
 
 SECTION_KEYS = {
@@ -90,7 +91,7 @@ def parse_detail_page(html: str) -> SplunkDetailRecord:
         published_date=fields.get("published"),
         last_modified=fields.get("last_updated") or fields.get("last_update"),
         title=_title(parsed),
-        severity=severity.strip() or None,
+        severity=severity.strip() or _highest_table_severity(tables),
         cvss_vector=fields.get("cvss_vector"),
         cvss_score=fields.get("cvss_score") or score.strip() or None,
         cwe=fields.get("cwe"),
@@ -119,6 +120,15 @@ def parse_detail_page(html: str) -> SplunkDetailRecord:
         raw_fields=fields,
         raw_sections=sections,
     )
+
+
+def _highest_table_severity(tables: list[dict[str, Any]]) -> str | None:
+    ratings = {
+        normalize_severity(row.get("severity"))
+        for table in tables if {"cve", "severity"} <= set(table["headers"])
+        for row in table["rows"]
+    }
+    return next((rating for rating in CANONICAL_SEVERITIES[:-1] if rating in ratings), None)
 
 
 def _title(parsed) -> str | None:

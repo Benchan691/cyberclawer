@@ -1076,7 +1076,7 @@ print(output["result_count"], output["stop_reason"])
 | `nvd` | JSON | 6.5 | 1 | False | 修改日期查詢、列表內嵌詳情 |
 | `paloalto` | HTML | 1.0 | 3 | True | 安全公告列表與詳情 |
 | `qianxin` | JSON | 1.0 | 3 | True | POST 列表、GET 詳情 API |
-| `splunk` | HTML | 1.0 | 3 | True | 單一 archive 索引、逐篇 SVD 文章 |
+| `splunk` | RSS／HTML | 1.0 | 3 | True | RSS 發現公告，逐篇讀取 SVD 文章 |
 | `wiz` | RSS／HTML | 1.0 | 3 | False | Cloud Threat Landscape RSS、永久 GUID、完整事件頁 |
 | `zimbra` | HTML | 1.0 | 3 | True | Release Patch 索引及 Wiki 詳情 |
 
@@ -1242,11 +1242,11 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.15 Splunk：`splunk`
 
-- 索引：`https://advisory.splunk.com/advisories`。
-- 詳情：逐篇 `/advisories/SVD-*`，索引並非最終內容。
+- RSS 列表：`https://advisory.splunk.com/feed.xml`。
+- 詳情：逐篇讀取 `/advisories/SVD-*`，並以詳情頁的編輯日期判斷公告更新。
 - 保存全文 `content`，以及描述、修補版本、受影響版本／元件、解決方案、mitigations、CWE、CVSS、changelog、references 及表格。
 - 支援一篇公告內多個 CVE 的 `cve_details`；不會因有多 CVE 就自動拆成多篇 SVD 公告。
-- 列表為單一 archive，`--limit` 以公告結果計數，不以 archive 頁面計數。
+- 列表涵蓋目前 RSS 提供的公告，`--limit` 以已檢查公告計數。
 
 主要測試：`tests/scrapers/splunk/`，包含群組 CVE 及 HTTP 到 MongoDB 的流程。
 

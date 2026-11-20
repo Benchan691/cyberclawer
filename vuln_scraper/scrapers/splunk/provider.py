@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
+from xml.etree import ElementTree
 
+from vuln_scraper.client import FetchError
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.splunk.config import DEFAULT_COLLECTION, DETAIL_URL, LIST_URL, SOURCE_URL
 from vuln_scraper.scrapers.splunk.parsers.detail import SplunkDetailRecord, parse_detail_page
@@ -18,6 +20,7 @@ class SplunkProvider:
     content_type: str = "html"
     default_request_delay: float = 1.0
     stop_on_first_known: bool = True
+    stop_on_timestamp_boundary: bool = False
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_URL
@@ -28,8 +31,11 @@ class SplunkProvider:
             raise ValueError(f"invalid Splunk advisory identifier: {identity_display!r}")
         return f"{DETAIL_URL}/{quote(code, safe='')}"
 
-    def parse_list(self, html: str, *, page: int) -> ListPage:
-        return parse_advisory_list(html, page=page, provider=self.key, source_url=self.source_url)
+    def parse_list(self, xml: str, *, page: int) -> ListPage:
+        try:
+            return parse_advisory_list(xml, page=page, provider=self.key, source_url=self.source_url)
+        except (ValueError, ElementTree.ParseError) as exc:
+            raise FetchError(f"Invalid Splunk advisory feed at {LIST_URL}: {exc}") from exc
 
     def parse_detail(self, html: str) -> SplunkDetailRecord:
         return parse_detail_page(html)
@@ -37,8 +43,11 @@ class SplunkProvider:
     def finalize_detail(self, detail: dict[str, Any], *, entry: ListEntry, detail_url: str) -> dict[str, Any]:
         merged = dict(detail)
         list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
+        # Saved snapshots from the previous archive listing may contain extra fields.
         for key in (
             "advisory_id",
+            "cve_id",
+            "cve_ids",
             "last_modified",
             "severity",
             "cvss_vector",

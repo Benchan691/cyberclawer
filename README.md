@@ -44,16 +44,20 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `nvd` | `nvd` | NVD CVE API 2.0 (`services.nvd.nist.gov`); optional `NVD_API_KEY`; details embedded in list response |
 | `paloalto` | `paloalto` | HTML |
 | `qianxin` | `qianxin` | JSON API |
-| `splunk` | `splunk` | HTTP archive + full advisory pages; supports grouped CVEs |
+| `splunk` | `splunk` | RSS feed + full advisory pages with grouped CVEs |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
 The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.com/hpesc/public/api/document/sec_bull_rss_feed) for the latest 50 Critical alerts, then fetches each bulletin from the [HPE document API](https://support.hpe.com/hpesc/public/api/document). It uses ordinary HTTP requests only; the original `docDisplay` URL is retained in each bulletin detail.
 
-The Splunk archive is only the link index. The scraper opens each selected
-`/advisories/SVD-*` page and stores its full article text in `details.content`,
-along with the extracted fields and tables. `--limit` counts individual
-advisories, not index pages.
+The Splunk scraper discovers advisories through the [Splunk Security Announcements RSS feed](https://advisory.splunk.com/feed.xml).
+It opens each selected `/advisories/SVD-*` page for the full text, tables,
+grouped CVEs, and edit date. The existing `--days` window applies to both
+new publications and revisions. Discovery is limited to advisories in the
+current feed, and `--limit` counts advisory checks. Fields published only in
+the archive can be absent from newly fetched records.
+
+See the [Splunk implementation and schema](docs/splunk.md).
 
 The FortiGuard scraper uses [Fortinet's PSIRT RSS feed](https://filestore.fortinet.com/fortiguard/rss/ir.xml)
 as its only advisory list source. The feed covers the latest 50 advisories and

@@ -1198,8 +1198,9 @@ class FakeSplunkClient:
 
     async def get_html(self, url: str) -> FetchResult:
         parsed = urlparse(url)
-        if parsed.netloc == "advisory.splunk.com" and parsed.path == "/advisories":
-            return FetchResult(html=splunk_list_html(), status_code=200, url=url)
+        if parsed.netloc == "advisory.splunk.com" and parsed.path == "/feed.xml":
+            fixture = Path(__file__).parent / "scrapers" / "splunk" / "fixtures" / "list.xml"
+            return FetchResult(html=fixture.read_text(encoding="utf-8"), status_code=200, url=url)
 
         code = parsed.path.rstrip("/").rsplit("/", 1)[-1]
         self.detail_ids_seen.append(code)
@@ -1394,54 +1395,6 @@ def paloalto_detail_html(code: str) -> str:
       <h3>Solution</h3>
       <p>Upgrade now.</p>
     </div>
-    """
-
-
-def splunk_list_html() -> str:
-    rows = [
-        ("SVD-2026-0516", "2026-05-20", "Tomcat package updates", "Medium", "Multiple", "Splunk Add-on for Tomcat"),
-        ("SVD-2026-0501", "2026-05-01", "Enterprise search injection", "High", "CVE-2026-12345", "Splunk Enterprise"),
-        ("SVD-2026-0500", "2026-04-30", "Known advisory", "Low", "NA", "Splunk Enterprise"),
-        ("SVD-2026-0401", "2026-04-01", "Older advisory", "Low", "NA", "Splunk Enterprise"),
-    ]
-    body = "\n".join(
-        f"""
-        <tr>
-          <td><a href="/advisories/{code}">{code}</a></td>
-          <td>{date}</td>
-          <td>{date}</td>
-          <td>{title}</td>
-          <td>{severity}</td>
-          <td>{cve}</td>
-          <td>NA</td>
-          <td>NA</td>
-          <td>NA</td>
-          <td>SPL-{code[-4:]}</td>
-          <td>{product}</td>
-          <td>9.4.2</td>
-          <td>9.4.0</td>
-          <td>9.4.0 and earlier</td>
-          <td>Search</td>
-          <td>{title} description.</td>
-          <td>Upgrade.</td>
-          <td>None.</td>
-          <td>{severity} summary.</td>
-          <td>No</td>
-          <td>Splunk</td>
-        </tr>
-        """
-        for code, date, title, severity, cve, product in rows
-    )
-    return f"""
-    <table>
-      <tr>
-        <th>SVD</th><th>Date</th><th>Last Modified</th><th>Title</th><th>Severity</th><th>CVE</th>
-        <th>CVSS Vector</th><th>CVSS Score</th><th>CWE</th><th>Bug</th><th>Affected Products</th>
-        <th>Fixed Versions</th><th>Affected Versions</th><th>All Affected Versions</th><th>Affected Components</th>
-        <th>Description</th><th>Solution</th><th>Mitigations</th><th>Severity Summary</th><th>OSS</th><th>Credit</th>
-      </tr>
-      {body}
-    </table>
     """
 
 

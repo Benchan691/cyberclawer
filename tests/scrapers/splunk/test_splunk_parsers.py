@@ -7,25 +7,26 @@ from vuln_scraper.scrapers.splunk.parsers.list import parse_advisory_list
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def test_parse_splunk_list_maps_rows_and_embedded_detail() -> None:
-    page = parse_advisory_list((FIXTURES / "list.html").read_text(encoding="utf-8"), page=1)
+def test_parse_splunk_feed_maps_items_and_publication_dates() -> None:
+    page = parse_advisory_list((FIXTURES / "list.xml").read_text(encoding="utf-8"), page=1)
 
     assert page.total_pages == 1
-    assert page.total_records == 3
+    assert page.total_records == 4
     first = page.entries[0]
     assert first.identity.type == "SPLUNK"
     assert first.identity.code == "SVD-2026-0516"
     assert first.title.startswith("Third-Party Package Updates")
-    assert first.vuln_type == "Splunk Add-on for Tomcat"
     assert first.disclosure_date == "2026-05-20"
-    assert first.status == "Medium"
+    assert first.embedded_detail["_list_summary"] is True
+    assert first.embedded_detail["description"] == "Several package updates include CVE-2025-68161."
+    assert "last_modified" not in first.embedded_detail
     assert first.embedded_detail["cve_ids"] == ["CVE-2025-68161"]
     assert page.entries[2].embedded_detail["cve_ids"] == []
     assert page.entries[2].to_record(page.entries[2].embedded_detail)["cve_code"] is None
 
 
 def test_splunk_list_entry_to_record_uses_primary_cve_code() -> None:
-    page = parse_advisory_list((FIXTURES / "list.html").read_text(encoding="utf-8"), page=1)
+    page = parse_advisory_list((FIXTURES / "list.xml").read_text(encoding="utf-8"), page=1)
     record = page.entries[1].to_record(page.entries[1].embedded_detail)
 
     assert record["type"] == "splunk"
@@ -34,12 +35,27 @@ def test_splunk_list_entry_to_record_uses_primary_cve_code() -> None:
     assert "cross_refs" not in record
 
 
+def test_splunk_feed_ignores_duplicate_ids_and_non_splunk_links() -> None:
+    page = parse_advisory_list(
+        """<rss xmlns="urn:test:rss"><channel>
+        <item><link>https://example.test/advisories/SVD-2026-0001</link></item>
+        <item><title>First</title><link>/advisories/svd-2026-0001</link></item>
+        <item><title>Duplicate</title><link>https://advisory.splunk.com/advisories/SVD-2026-0001?x=1</link></item>
+        </channel></rss>""",
+        page=1,
+    )
+
+    assert [(entry.key, entry.title) for entry in page.entries] == [("splunk:SVD-2026-0001", "First")]
+    assert page.entries[0].disclosure_date is None
+
+
 def test_parse_splunk_detail_extracts_sections_and_tables() -> None:
     detail = parse_detail_page((FIXTURES / "detail.html").read_text(encoding="utf-8")).to_dict()
 
     assert detail["advisory_id"] == "SVD-2026-0516"
     assert detail["published_date"] == "2026-05-20"
     assert detail["last_modified"] == "2026-05-20"
+    assert detail["severity"] == "Medium"
     assert detail["cve_ids"] == ["CVE-2025-68161", "CVE-2025-48924"]
     assert detail["cve_id"] == "CVE-2025-68161"
     assert "Several package updates" in detail["description"]

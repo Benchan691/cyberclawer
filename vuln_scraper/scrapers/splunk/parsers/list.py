@@ -1,97 +1,82 @@
 from __future__ import annotations
 
-from bs4 import Tag
+import re
+from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin, urlsplit
+from xml.etree import ElementTree
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
-from vuln_scraper.scrapers.splunk.config import SOURCE_URL
-from vuln_scraper.scrapers.splunk.parsers.common import clean_multiline, clean_text, cve_ids_from_text, normalize_key, soup
+from vuln_scraper.scrapers.splunk.config import BASE_URL, SOURCE_URL
+from vuln_scraper.scrapers.splunk.parsers.common import clean_text, cve_ids_from_text, soup
+
+
+ADVISORY_PATH = re.compile(r"/advisories/(SVD-\d{4}-\d{4,})/?", re.IGNORECASE)
 
 
 def parse_advisory_list(
-    html: str,
+    xml: str,
     *,
     page: int,
     provider: str = "splunk",
     source_url: str = SOURCE_URL,
 ) -> ListPage:
-    parsed = soup(html)
-    table = parsed.find("table")
-    if table is None:
-        return ListPage(page=page, entries=[], total_pages=1, total_records=0)
+    root = ElementTree.fromstring(xml)
+    channel = root.find("{*}channel") if root.tag.rsplit("}", 1)[-1] == "rss" else None
+    if channel is None:
+        raise ValueError("Splunk feed must contain an RSS channel")
 
-    headers = [_header_text(cell) for cell in table.find_all("th")]
     entries: list[ListEntry] = []
-    for row in table.find_all("tr"):
-        cells = row.find_all("td", recursive=False)
-        if not cells:
+    seen: set[str] = set()
+    items = channel.findall("{*}item")
+    for item in items:
+        code = _advisory_code(item.findtext("{*}link", "").strip())
+        if code is None or code in seen:
             continue
-        values = _row_values(headers, cells)
-        code = values.get("svd")
-        if not code or not code.upper().startswith("SVD-"):
-            continue
-        cve_ids = cve_ids_from_text("\n".join(str(value) for value in values.values() if value))
-        detail = {
-            "_list_summary": True,
-            "advisory_id": code,
-            "cve_id": cve_ids[0] if cve_ids else None,
-            "cve_ids": cve_ids,
-            "last_modified": values.get("last_modified"),
-            "severity": values.get("severity"),
-            "cvss_vector": _none_if_na(values.get("cvss_vector")),
-            "cvss_score": _none_if_na(values.get("cvss_score")),
-            "cwe": _none_if_na(values.get("cwe")),
-            "bug_ids": _split_values(values.get("bug")),
-            "affected_products": values.get("affected_products"),
-            "fixed_versions": values.get("fixed_versions"),
-            "affected_versions": values.get("affected_versions"),
-            "all_affected_versions": values.get("all_affected_versions"),
-            "affected_components": values.get("affected_components"),
-            "description": values.get("description"),
-            "solution": values.get("solution"),
-            "mitigations": values.get("mitigations"),
-            "severity_summary": values.get("severity_summary"),
-            "oss": values.get("oss"),
-            "credit": values.get("credit"),
-            "raw": values,
-        }
-        entries.append(
-            ListEntry(
-                identity=VulnerabilityId(type="SPLUNK", code=code),
-                title=values.get("title") or code,
-                vuln_type=values.get("affected_products"),
-                disclosure_date=values.get("date"),
-                status=values.get("severity"),
-                provider=provider,
-                source_url=source_url,
-                embedded_detail=detail,
-            )
-        )
+        seen.add(code)
 
-    return ListPage(page=page, entries=entries, total_pages=1, total_records=len(entries))
+        title = " ".join(item.findtext("{*}title", "").split())
+        prefix, sep, rest = title.partition(":")
+        if sep and prefix.strip().upper() == code:
+            title = rest.strip()
+        description = clean_text(soup(item.findtext("{*}description", ""))) or None
+        published_date = _publication_date(item.findtext("{*}pubDate", "").strip())
+        cve_ids = cve_ids_from_text(f"{title}\n{description or ''}")
+        entries.append(ListEntry(
+            identity=VulnerabilityId(type="SPLUNK", code=code),
+            title=title or code,
+            vuln_type=None,
+            disclosure_date=published_date,
+            status=None,
+            provider=provider,
+            source_url=source_url,
+            embedded_detail={
+                "_list_summary": True,
+                "advisory_id": code,
+                "description": description,
+                "cve_id": cve_ids[0] if cve_ids else None,
+                "cve_ids": cve_ids,
+            },
+        ))
+
+    if items and not entries:
+        raise ValueError("Splunk feed did not contain valid advisory links")
+    return ListPage(page=page, entries=entries, total_pages=1,
+                    total_records=len(entries), exhausted=not items)
 
 
-def _header_text(cell: Tag) -> str:
-    return normalize_key(clean_text(cell))
-
-
-def _row_values(headers: list[str], cells: list[Tag]) -> dict[str, str | None]:
-    values: dict[str, str | None] = {}
-    for index, cell in enumerate(cells):
-        key = headers[index] if index < len(headers) and headers[index] else f"column_{index + 1}"
-        text = clean_multiline(cell) or clean_text(cell)
-        values[key] = text or None
-    return values
-
-
-def _none_if_na(value: str | None) -> str | None:
-    if value is None:
+def _advisory_code(link: str) -> str | None:
+    try:
+        target = urlsplit(urljoin(BASE_URL, link))
+    except ValueError:
         return None
-    text = value.strip()
-    return None if text.casefold() in {"", "na", "n/a", "none"} else text
+    if target.scheme != "https" or target.netloc.lower() != urlsplit(BASE_URL).netloc:
+        return None
+    match = ADVISORY_PATH.fullmatch(target.path)
+    return match.group(1).upper() if match else None
 
 
-def _split_values(value: str | None) -> list[str]:
-    if not value:
-        return []
-    parts = [part.strip() for part in value.replace("\n", ",").split(",")]
-    return [part for part in parts if part and part.casefold() not in {"na", "n/a"}]
+def _publication_date(value: str) -> str | None:
+    try:
+        return parsedate_to_datetime(value).date().isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return None

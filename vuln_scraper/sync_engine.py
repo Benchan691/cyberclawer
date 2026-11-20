@@ -16,8 +16,8 @@ from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry
 from .timestamps import modification_time, parse_timestamp, source_news_time, window_start
 
 logger = logging.getLogger(__name__)
-FEEDS = {"fortiguard", "hpe", "wiz"}
-INDEXES = {"splunk", "zimbra", "msrc"}
+FEEDS = {"fortiguard", "hpe", "splunk", "wiz"}
+INDEXES = {"zimbra", "msrc"}
 WINDOWS = {"nvd", "github_advisory", "cve"}
 HISTORY_TASKS = {"archive", "baseline", "index_audit"}
 

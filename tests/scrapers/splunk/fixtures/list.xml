@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Splunk Security Announcements</title>
+    <link>https://advisory.splunk.com/feed.xml</link>
+    <description>Splunk security advisories</description>
+    <item>
+      <title>SVD-2026-0516: Third-Party Package Updates in Splunk Add-on for Tomcat App</title>
+      <description><![CDATA[<p>Several package updates include CVE-2025-68161.</p>]]></description>
+      <pubDate>Wed, 20 May 2026 00:00:00 +0000</pubDate>
+      <link>https://advisory.splunk.com/advisories/SVD-2026-0516</link>
+      <category>Security Advisory</category>
+    </item>
+    <item>
+      <title>SVD-2026-0501: Splunk Enterprise advisory</title>
+      <description>&lt;p&gt;This advisory includes CVE-2026-12345.&lt;/p&gt;</description>
+      <pubDate>Fri, 01 May 2026 00:00:00 +0000</pubDate>
+      <link>https://advisory.splunk.com/advisories/SVD-2026-0501</link>
+      <category>Security Advisory</category>
+    </item>
+    <item>
+      <title>SVD-2026-0500: Known advisory</title>
+      <description><![CDATA[<p>No CVE was assigned.</p>]]></description>
+      <pubDate>Thu, 30 Apr 2026 00:00:00 +0000</pubDate>
+      <link>https://advisory.splunk.com/advisories/SVD-2026-0500</link>
+      <category>Security Advisory</category>
+    </item>
+    <item>
+      <title>SVD-2026-0401: Older advisory</title>
+      <description><![CDATA[<p>An earlier advisory.</p>]]></description>
+      <pubDate>Wed, 01 Apr 2026 00:00:00 +0000</pubDate>
+      <link>https://advisory.splunk.com/advisories/SVD-2026-0401</link>
+      <category>Security Advisory</category>
+    </item>
+  </channel>
+</rss>

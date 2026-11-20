@@ -21,7 +21,7 @@ from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvide
 from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
 from vuln_scraper.scrapers.msrc.provider import MSRCProvider
 from vuln_scraper.scrapers.nvd.provider import NvdProvider
-from vuln_scraper.scrapers.splunk.provider import SplunkProvider
+from vuln_scraper.scrapers.zimbra.provider import ZimbraProvider
 from vuln_scraper.sync_archive import baseline_page
 from vuln_scraper.sync_state import SyncContext, SyncStateStore, catch_up_lock
 
@@ -237,18 +237,18 @@ def test_saved_history_and_its_retries_are_retired_but_recent_failures_resume(tm
 
 
 def test_complete_index_only_fetches_recent_or_changed_entries(tmp_path):
-    h = Harness(tmp_path, SplunkProvider())
-    modified = entry(2, "splunk", old=True)
-    modified.embedded_detail["last_modified"] = NOW.isoformat()
-    h.pages = lambda context, page: ListPage(page, [entry(1, "splunk"), modified], total_pages=1)
+    h = Harness(tmp_path, ZimbraProvider())
+    modified = entry(2, "zimbra", old=True)
+    modified.embedded_detail["updated_at"] = NOW.isoformat()
+    h.pages = lambda context, page: ListPage(page, [entry(1, "zimbra"), modified], total_pages=1)
     first = h.run()
-    assert set(h.news.documents) == {entry(1, "splunk").key, modified.key}
+    assert set(h.news.documents) == {entry(1, "zimbra").key, modified.key}
     assert first["sync"]["outside_window"] == 0
     second = h.run(now=NOW + timedelta(hours=1))
     assert second["mongo_sync"]["inserted"] == 0
     assert second["mongo_sync"]["overwritten"] == 0
     assert second["sync"]["history_status"] == "disabled"
-    assert h.states.documents["splunk"]["archive"] is None
+    assert h.states.documents["zimbra"]["archive"] is None
 
 
 def test_list_failure_keeps_window_pending_but_next_run_can_recover(tmp_path):
@@ -301,8 +301,8 @@ def test_cache_loss_replays_uncommitted_work_without_losing_advisories(tmp_path)
 
 
 def test_manifest_filtering_does_not_shift_saved_candidate_offsets(tmp_path):
-    h = Harness(tmp_path, SplunkProvider())
-    h.pages = lambda context, page: ListPage(page, [entry(i, "splunk", old=False) for i in range(1, 6)], total_pages=1)
+    h = Harness(tmp_path, ZimbraProvider())
+    h.pages = lambda context, page: ListPage(page, [entry(i, "zimbra", old=False) for i in range(1, 6)], total_pages=1)
     for i in range(3):
         h.run(limit=2, now=NOW + timedelta(hours=i))
     assert len(h.news.documents) == 5

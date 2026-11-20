@@ -49,8 +49,8 @@ stored; changing the scrape window does not delete historical data.
 | NVD | Modification-date queries bounded by the requested window; returned records must pass the shared source-date check. |
 | GitHub Advisory | Bounded `modified` ranges, `sort=updated`, and validated `Link` pagination URLs; the shared date guard also applies. |
 | CVE | Delta arrival discovers candidates; publication/update dates determine eligibility. Old arrivals are not saved just because they appear in a new batch. |
-| FortiGuard, HPE, Wiz | Read the current RSS feed and verify article publication/edit dates. RSS publication alone cannot rule out a new article edit. Old unchanged details are not saved. FortiGuard remains RSS-only. |
-| Splunk, Zimbra, MSRC | Read the index and check eligible candidates. MSRC's expanded child records and saved child snapshots pass the same date guard. |
+| FortiGuard, HPE, Splunk, Wiz | Read the current RSS feed and verify article publication and edit dates. Articles with a recent publication or edit are eligible, including edits that leave the feed entry unchanged. |
+| Zimbra, MSRC | Read the index and check eligible candidates. MSRC's expanded child records and saved child snapshots pass the same date guard. |
 | AVD, CNVD, GOVCERT, HKCERT, Huawei SA, Palo Alto, Qianxin | Refresh recent listings and stop after a whole page older than the window. Known old publication/edit dates skip detail requests. No rotating archive scan. |
 
 An older publication updated today is eligible. A changed title or summary with
