@@ -16,6 +16,8 @@ def advisory(number, provider, *, published="2026-11-13", updated=None, summary=
     code = value.identity.code
     if provider in {"cve", "msrc"}:
         code = f"2026-{10000 + number}"
+    elif provider == "bleepingcomputer":
+        code = f"security/advisory-{number}"
     elif provider == "the_hacker_news":
         code = f"2026-11-advisory-{number}"
     elif provider == "wiz":

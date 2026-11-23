@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>BleepingComputer</title>
+    <link>https://www.bleepingcomputer.com/</link>
+    <pubDate>Fri, 13 Nov 2026 09:15:00 GMT</pubDate>
+    <item>
+      <title>Example vendor patches CVE-2026-12345</title>
+      <link>https://www.bleepingcomputer.com/news/security/example-vendor-patches/?src=rss</link>
+      <guid>https://www.bleepingcomputer.com/news/security/example-vendor-patches/</guid>
+      <pubDate>Thu, 12 Nov 2026 20:15:00 -0500</pubDate>
+      <dc:creator>Test Reporter</dc:creator>
+      <category>Security</category>
+      <category>Software</category>
+      <category>Security</category>
+      <description><![CDATA[<p>The update addresses <strong>cve-2026-12345</strong> and CVE-2026-23456.</p>]]></description>
+    </item>
+    <item>
+      <title>Duplicate listing</title>
+      <link>https://www.bleepingcomputer.com/news/security/example-vendor-patches#main</link>
+      <pubDate>Thu, 12 Nov 2026 20:15:00 -0500</pubDate>
+    </item>
+    <item>
+      <title>Example software release</title>
+      <guid>https://www.bleepingcomputer.com/news/microsoft/example-release/</guid>
+      <pubDate>Thu, 12 Nov 2026 14:45:00 -0500</pubDate>
+      <category>Microsoft</category>
+      <description>What changed in today's software release.</description>
+    </item>
+    <item>
+      <title>Example article from yesterday</title>
+      <link>https://www.bleepingcomputer.com/news/hardware/example-older-post/</link>
+      <pubDate>Thu, 12 Nov 2026 10:59:59 -0500</pubDate>
+      <category>Hardware</category>
+    </item>
+    <item>
+      <title>Missing article date</title>
+      <link>https://www.bleepingcomputer.com/news/security/example-undated-post/</link>
+    </item>
+    <item>
+      <title>Invalid article link</title>
+      <link>https://www.bleepingcomputer.com.example.test/news/security/example-post/</link>
+      <pubDate>Thu, 12 Nov 2026 20:15:00 -0500</pubDate>
+    </item>
+  </channel>
+</rss>

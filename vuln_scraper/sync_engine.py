@@ -16,7 +16,7 @@ from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry
 from .timestamps import modification_time, parse_timestamp, source_news_time, window_start
 
 logger = logging.getLogger(__name__)
-FEEDS = {"fortiguard", "govcert", "hkcert", "hpe", "splunk", "the_hacker_news", "wiz"}
+FEEDS = {"bleepingcomputer", "fortiguard", "govcert", "hkcert", "hpe", "splunk", "the_hacker_news", "wiz"}
 INDEXES = {"zimbra", "msrc"}
 WINDOWS = {"nvd", "github_advisory", "cve"}
 HISTORY_TASKS = {"archive", "baseline", "index_audit"}
@@ -527,6 +527,7 @@ class SyncEngine:
             if identity in errors:
                 self.store.defer(identity, {"task_id": task["id"], "entry": retry_entry_data(entry),
                     "cache": task["child_cache"], "record_index": index,
+                    "observed_at": child["observed_at"],
                     "news_at": source_news_time(record).isoformat(),
                     "error": str(errors[identity]["error"])[:2000]})
             else:
@@ -543,7 +544,8 @@ class SyncEngine:
             entry = restore_entry(reference["entry"])
             identity = reference["identity"]
             cached = self.cache.read(reference.get("cache"))
-            required_observation = utc((cached or {}).get("observed_at") or reference.get("failed_at"))
+            observed_at = (cached or {}).get("observed_at") or reference.get("observed_at")
+            required_observation = utc(observed_at or reference.get("failed_at"))
             if entry.key in self.seen and required_observation and self.seen[entry.key] >= required_observation:
                 # Clear old parent failures if a fresh observation succeeded.
                 if entry.key not in self.runner.run_failed and identity not in {item["identity"] for item in self.result.errors} and self.news.find_one({"_id": identity}):
@@ -558,7 +560,7 @@ class SyncEngine:
                 self.checked += 1
             else:
                 # Missing caches are recoverable from the saved parent request.
-                done = await self.process_entry(task, entry, {"observed_at": self.now.isoformat()}, target)
+                done = await self.process_entry(task, entry, {"observed_at": observed_at or self.now.isoformat()}, target)
                 if not done:
                     task["kind"] = "retry_parent"
                     task["id"] = uuid4().hex
@@ -567,7 +569,9 @@ class SyncEngine:
                         "total_pages": 1, "total_records": 1, "next_cursor": None, "exhausted": False,
                         "observed_at": self.now.isoformat(), "coverage_start": None, "url": "saved retry"})
                     self.state["tasks"].append(task)
-                elif entry.key not in self.runner.run_failed:
+                elif entry.key not in self.runner.run_failed and not any(
+                    error["identity"] == identity for error in self.result.errors
+                ):
                     self.store.clear(identity)
             self.store.save(self.state)
 

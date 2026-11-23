@@ -1064,6 +1064,7 @@ print(output["result_count"], output["stop_reason"])
 | key | 內容型別 | 請求間隔 | 詳情併發預設 | `stop_on_first_known` | 列表／詳情特點 |
 | --- | --- | --- | --- | --- | --- |
 | `avd` | HTML | 1.0 | 3 | False | 高危目錄、需詳情、sigchl 處理 |
+| `bleepingcomputer` | RSS | 1.0 | 3 | False | 主新聞 RSS、直接儲存摘要、作者與分類 |
 | `cnvd` | HTML | 3.0 | 1 | True | JSL／OCR Session、20 筆 offset 分頁 |
 | `cve` | JSON | 0.2 | 3 | False | Delta 單頁列表、CVE v5 詳情 |
 | `fortiguard` | RSS／HTML | 1.0 | 3 | True | PSIRT RSS 最新 50 筆、全文、可選 CSAF |

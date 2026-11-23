@@ -1,0 +1,5 @@
+BASE_URL = "https://www.bleepingcomputer.com"
+SOURCE_URL = f"{BASE_URL}/"
+LIST_URL = f"{BASE_URL}/feed/"
+ARTICLE_BASE_URL = f"{BASE_URL}/news/"
+DEFAULT_COLLECTION = "bleepingcomputer"

@@ -32,6 +32,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | Key | `source.provider` | Notes |
 | --- | --- | --- |
 | `avd` | `avd` | Needs `.[avd]`; sigchl solved via quickjs |
+| `bleepingcomputer` | `bleepingcomputer` | Main news RSS with article summaries, bylines, and categories |
 | `cnvd` | `cnvd` | Needs `.[cnvd]` |
 | `cve` | `cve` | CVEProject cvelistV5 |
 | `fortiguard` | `fortiguard` | PSIRT RSS feed + full advisory pages; optional CSAF enrichment |
@@ -48,6 +49,14 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `the_hacker_news` | `the_hacker_news` | The Hacker News RSS + full articles; source publication/revision dates |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
+
+The BleepingComputer scraper imports all categories from the [main news RSS
+feed](https://www.bleepingcomputer.com/feed/). Each record stores the feed
+summary, byline, categories, and any CVEs named in the title or summary. The
+canonical article URL is stored in `source.detail_url`. The `--days` window
+uses article publication times and covers articles still present in the feed.
+The `providers = ["all"]` setting includes BleepingComputer automatically.
+See the [BleepingComputer implementation guide](docs/BLEEPINGCOMPUTER.md).
 
 The HPE scraper reads the [HPE security bulletin RSS feed](https://support.hpe.com/hpesc/public/api/document/sec_bull_rss_feed) for the latest 50 Critical alerts, then fetches each bulletin from the [HPE document API](https://support.hpe.com/hpesc/public/api/document). It uses ordinary HTTP requests only; the original `docDisplay` URL is retained in each bulletin detail.
 
@@ -173,6 +182,7 @@ vuln-scrape run splunk --limit 1000
 vuln-scrape run govcert --limit 10
 vuln-scrape run fortiguard --limit 20
 vuln-scrape run wiz --limit 20
+vuln-scrape run bleepingcomputer --days 2
 ```
 
 Resume all (or configured) scrapers from their saved sync progress:

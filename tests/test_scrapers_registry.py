@@ -11,6 +11,7 @@ from vuln_scraper.scrapers import (
 
 EXPECTED_KEYS = (
     "avd",
+    "bleepingcomputer",
     "cnvd",
     "cve",
     "fortiguard",
