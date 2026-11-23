@@ -24,6 +24,7 @@ EXPECTED_KEYS = (
     "paloalto",
     "qianxin",
     "splunk",
+    "the_hacker_news",
     "wiz",
     "zimbra",
 )

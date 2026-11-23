@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:feedburner="http://rssnamespace.org/feedburner/ext/1.0">
+<channel><title>The Hacker News</title>
+<item><title>New parser research</title>
+<link>https://thehackernews.com/2026/11/new-parser-research.html?utm_source=rss</link>
+<guid isPermaLink="false">https://thehackernews.com/2026/11/new-parser-research.html</guid>
+<pubDate>Mon, 23 Nov 2026 18:52:20 +0530</pubDate>
+<description><![CDATA[<p>A truncated CVE-2026-12345 summary...</p>]]></description>
+<author>info@thehackernews.com (The Hacker News)</author>
+<category>Security</category><category>Research</category></item>
+<item><title>Security research without CVEs</title>
+<link>https://thehackernews.com/2026/11/security-research-without-cves.html</link>
+<guid isPermaLink="false">https://thehackernews.com/2026/11/security-research-without-cves.html</guid>
+<pubDate>Tue, 10 Nov 2026 18:52:20 +0530</pubDate>
+<description>Older security research</description></item>
+</channel></rss>

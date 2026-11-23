@@ -16,11 +16,13 @@ def advisory(number, provider, *, published="2026-11-13", updated=None, summary=
     code = value.identity.code
     if provider in {"cve", "msrc"}:
         code = f"2026-{10000 + number}"
+    elif provider == "the_hacker_news":
+        code = f"2026-11-advisory-{number}"
     elif provider == "wiz":
         code = f"11111111-2222-4333-8444-{number:012d}"
     elif provider == "github_advisory":
         code = f"GHSA-aaaa-bbbb-{number:04d}"
-    value.identity = VulnerabilityId(provider.upper(), code)
+    value.identity = VulnerabilityId("THN" if provider == "the_hacker_news" else provider.upper(), code)
     updated = published if updated is None else updated
     value.disclosure_date = published
     value.embedded_detail.update({"advisory_id": code, "published_at": published,

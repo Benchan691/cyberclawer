@@ -45,6 +45,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `paloalto` | `paloalto` | HTML |
 | `qianxin` | `qianxin` | JSON API |
 | `splunk` | `splunk` | RSS feed + full advisory pages with grouped CVEs |
+| `the_hacker_news` | `the_hacker_news` | The Hacker News RSS + full articles; source publication/revision dates |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
@@ -108,6 +109,17 @@ The feed has no pagination; records that leave it are retained. The existing
 `providers = ["all"]` setting includes Wiz automatically.
 
 Schema and implementation handoff for other applications: [Wiz schema](docs/WIZ_SCHEMA.md).
+
+The Hacker News scraper uses [its RSS feed](https://feeds.feedburner.com/TheHackersNews)
+for discovery, then opens the linked articles for full text, author, categories,
+references, CVEs when present, and publication/revision dates. It does not use a
+website index or historical fallback. `providers = ["all"]` includes
+`the_hacker_news` automatically; explicitly selected providers must include that key.
+The current `--days` news-date window applies, so `--days 1` collects only articles
+published or revised today in Hong Kong time. General news does not receive an
+invented severity or CVE. Stable IDs use the article's year, month, and permalink
+slug, ignoring tracking parameters. Records remain in `news` after leaving the feed.
+See [The Hacker News schema and operations](docs/THE_HACKER_NEWS.md).
 
 ## MongoDB layout
 
