@@ -37,7 +37,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `fortiguard` | `fortiguard` | PSIRT RSS feed + full advisory pages; optional CSAF enrichment |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
 | `govcert` | `govcert` | GOVCERT.HK English RSS + full alert pages |
-| `hkcert` | `hkcert` | HTML |
+| `hkcert` | `hkcert` | Security bulletin RSS + full bulletin pages |
 | `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
 | `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
 | `msrc` | `msrc` | Microsoft CVRF API |
@@ -86,6 +86,13 @@ recommendations, CVE IDs, tags, references, and tables. The page's
 the `--days` window even when the RSS publication date is older. Discovery
 covers the current feed. High-threat alerts are `Critical` and standard
 alerts are `Medium`.
+
+The HKCERT scraper discovers English bulletins through the [HKCERT security bulletin RSS feed](https://www.hkcert.org/getrss/security-bulletin).
+It opens each selected bulletin to collect CVEs, impact, affected systems,
+solutions, and product tables. A page's `Last Update Date` can qualify an
+older bulletin for the `--days` window while it remains in the feed.
+Discovery covers the current feed. Listing badges from the HTML archive are
+unavailable in RSS, so newly fetched records can omit `change_type`.
 
 The Wiz scraper reads the [Cloud Threat Landscape RSS feed](https://www.wiz.io/api/feed/cloud-threat-landscape/rss.xml)
 and fetches each linked incident page for its full text, actors, techniques,

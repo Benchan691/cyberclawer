@@ -1,102 +1,82 @@
 from __future__ import annotations
 
-import re
-from urllib.parse import parse_qs, urljoin, urlparse
-
-from bs4 import BeautifulSoup, Tag
+from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin, urlsplit
+from xml.etree import ElementTree
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
-from vuln_scraper.scrapers.hkcert.config import BASE_URL
+from vuln_scraper.scrapers.hkcert.config import BASE_URL, SOURCE_URL
 
 
-TOTAL_PAGES_RE = re.compile(r"page=(\d+)")
+BULLETIN_PATH = "/security-bulletin/"
 
 
 def parse_security_bulletin_list(
-    html: str,
+    xml: str,
     *,
     page: int,
     provider: str = "hkcert",
-    source_url: str | None = None,
+    source_url: str | None = SOURCE_URL,
 ) -> ListPage:
-    soup = BeautifulSoup(html, "lxml")
+    root = ElementTree.fromstring(xml)
+    channel = root.find("{*}channel") if root.tag.rsplit("}", 1)[-1] == "rss" else None
+    if channel is None:
+        raise ValueError("HKCERT feed must contain an RSS channel")
+
     entries: list[ListEntry] = []
-
-    for card in soup.select('a.listingcard__item[href*="/security-bulletin/"]'):
-        slug = _slug_from_card(card)
-        if not slug:
+    seen: set[str] = set()
+    items = channel.findall("{*}item")
+    for item in items:
+        slug = _bulletin_slug(item.findtext("{*}link", "")) or _bulletin_slug(item.findtext("{*}guid", ""))
+        title = " ".join(item.findtext("{*}title", "").split())
+        if slug is None or slug in seen or not title:
             continue
+        seen.add(slug)
 
-        title, status = _title_and_status(card)
-        if not title:
-            continue
-
+        release_date = _publication_date(item.findtext("{*}pubDate", "").strip())
         entries.append(
             ListEntry(
                 identity=VulnerabilityId(type="HKCERT", code=slug),
                 title=title,
                 vuln_type=None,
-                disclosure_date=_metadata_value(card, "Release Date"),
-                status=status,
+                disclosure_date=release_date,
+                status=None,
                 provider=provider,
                 source_url=source_url,
+                embedded_detail={"_list_summary": True},
             )
         )
 
+    if items and not entries:
+        raise ValueError("HKCERT feed did not contain valid English bulletin entries")
     return ListPage(
         page=page,
         entries=entries,
-        total_pages=_parse_total_pages(soup),
-        total_records=None,
+        total_pages=1,
+        total_records=len(entries),
+        exhausted=not items,
     )
 
 
-def _slug_from_card(card: Tag) -> str | None:
-    href = card.get("href")
-    if not href:
+def _bulletin_slug(link: str) -> str | None:
+    try:
+        target = urlsplit(urljoin(f"{BASE_URL}/", link.strip()))
+    except ValueError:
         return None
-    path = urlparse(urljoin(BASE_URL, href)).path.rstrip("/")
-    if "/security-bulletin/" not in path:
+    if (
+        target.scheme != "https"
+        or target.netloc.lower() != urlsplit(BASE_URL).netloc
+        or not target.path.startswith(BULLETIN_PATH)
+    ):
         return None
-    slug = path.rsplit("/", 1)[-1].strip()
-    return slug or None
-
-
-def _title_and_status(card: Tag) -> tuple[str | None, str | None]:
-    title_node = card.select_one(".listingcard__title")
-    if title_node is None:
-        return None, None
-
-    status_node = title_node.select_one(".cat-tag")
-    status = _clean_text(status_node) if status_node else None
-    if status_node:
-        status_node.extract()
-    title = _clean_text(title_node)
-    return title or None, status or None
-
-
-def _metadata_value(card: Tag, label: str) -> str | None:
-    info = card.select_one(".listingcard__info")
-    text = _clean_text(info)
-    if not text:
-        return None
-    match = re.search(rf"{re.escape(label)}:\s*(.+?)(?:\s+\d+\s+Views|\s+Last Update Date:|\s+Release Date:|$)", text)
-    if match:
-        return match.group(1).strip()
+    slug = target.path.removeprefix(BULLETIN_PATH).rstrip("/")
+    if slug and "/" not in slug and slug not in {".", ".."}:
+        return slug
     return None
 
 
-def _parse_total_pages(soup: BeautifulSoup) -> int | None:
-    pages: list[int] = []
-    for link in soup.find_all("a", href=True):
-        parsed = urlparse(urljoin(BASE_URL, link["href"]))
-        for value in parse_qs(parsed.query).get("page", []):
-            if value.isdigit():
-                pages.append(int(value))
-    return max(pages) if pages else None
-
-
-def _clean_text(node) -> str:
-    if node is None:
-        return ""
-    return " ".join(node.get_text(" ", strip=True).split())
+def _publication_date(value: str) -> str | None:
+    try:
+        return parsedate_to_datetime(value).date().isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return None

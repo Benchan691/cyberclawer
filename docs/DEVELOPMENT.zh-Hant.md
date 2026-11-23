@@ -1069,7 +1069,7 @@ print(output["result_count"], output["stop_reason"])
 | `fortiguard` | RSS／HTML | 1.0 | 3 | True | PSIRT RSS 最新 50 筆、全文、可選 CSAF |
 | `github_advisory` | JSON | 1.0 | 3 | True | Reviewed 公告，列表內嵌詳情 |
 | `govcert` | RSS／HTML | 1.0 | 3 | True | 香港保安警報 RSS 與全文 |
-| `hkcert` | HTML | 1.0 | 3 | False | Security Bulletin、每頁 10 筆 |
+| `hkcert` | RSS／HTML | 1.0 | 3 | False | Security Bulletin RSS、逐篇讀取公告 |
 | `hpe` | RSS／HTML | 1.0 | 3 | True | 最多讀取前 50 個 RSS item，再取文件 API |
 | `huawei_sa` | JSON | 1.2 | 3 | True | POST 列表 API，列表內嵌資料 |
 | `msrc` | JSON | 0.5 | 3 | False | CVRF 月報展開成多筆 CVE |
@@ -1162,7 +1162,7 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.8 HKCERT：`hkcert`
 
-- 列表：`https://www.hkcert.org/security-bulletin?item_per_page=10&page=N`。
+- 列表：`https://www.hkcert.org/getrss/security-bulletin`，涵蓋目前 RSS 提供的英文公告。
 - 身份以 bulletin URL 的 slug 為基礎；詳情組成 `/security-bulletin/<slug>`。
 - 提取 intro、風險等級、公開／更新日期、影響、受影響系統、解決方案、漏洞識別碼與連結。
 - 部分 intro／產品表格有結構化處理及舊格式正規化相容功能。

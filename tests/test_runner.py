@@ -480,9 +480,9 @@ def test_timestamp_resolver_uses_fallback_publish_fields() -> None:
     ) == "2026-06-18T04:30:00+00:00"
 
 
-def test_hkcert_mongo_sync_pages_past_leading_known_records(tmp_path) -> None:
+def test_hkcert_mongo_sync_reads_past_known_records_in_rss(tmp_path) -> None:
     client = FakeHKCERTClient()
-    known_codes = ["p1-a", "p1-b", "p2-a", "p2-b"]
+    known_codes = ["known-a", "known-b"]
     collection = FakeMongoCollection(
         {f"hkcert:{code}": {"_id": f"hkcert:{code}", "type": "hkcert", "code": code} for code in known_codes}
     )
@@ -506,9 +506,9 @@ def test_hkcert_mongo_sync_pages_past_leading_known_records(tmp_path) -> None:
         )._run_with_client(client)
     )
 
-    assert identities(output["vulnerabilities"]) == ["hkcert:p3-a", "hkcert:p3-b"]
+    assert identities(output["vulnerabilities"]) == ["hkcert:new-a", "hkcert:new-b"]
     assert output["mongo_sync"]["inserted"] == 2
-    assert client.list_pages_seen == [1, 2, 3]
+    assert client.list_urls_seen == ["https://www.hkcert.org/getrss/security-bulletin"]
 
 
 def test_non_mongo_scrape_still_writes_json(tmp_path) -> None:
@@ -1088,15 +1088,19 @@ class FakeHuaweiSAClient:
         return FakeJSONResult({}, url)
 class FakeHKCERTClient:
     def __init__(self) -> None:
-        self.list_pages_seen: list[int] = []
+        self.list_urls_seen: list[str] = []
 
     async def get_html(self, url: str) -> FetchResult:
         parsed = urlparse(url)
-        if parsed.path.endswith("/security-bulletin") and "page" in parse_qs(parsed.query):
-            page = int(parse_qs(parsed.query)["page"][0])
-            self.list_pages_seen.append(page)
-            return FetchResult(html=hkcert_list_html(page), status_code=200, url=url)
+        if parsed.path == "/getrss/security-bulletin":
+            self.list_urls_seen.append(url)
+            items = "".join(
+                f"<item><title>{code}</title><link>/security-bulletin/{code}</link></item>"
+                for code in ("known-a", "known-b", "new-a", "new-b")
+            )
+            return FetchResult(html=f"<rss><channel>{items}</channel></rss>", status_code=200, url=url)
 
+        assert parsed.path.startswith("/security-bulletin/")
         slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
         return FetchResult(html=hkcert_detail_html(slug), status_code=200, url=url)
 
@@ -1450,24 +1454,6 @@ def cnvd_list_html() -> str:
     </table>
     <div>共 3 条</div>
     """
-
-
-def hkcert_list_html(page: int) -> str:
-    page_codes = {
-        1: ["p1-a", "p1-b"],
-        2: ["p2-a", "p2-b"],
-        3: ["p3-a", "p3-b"],
-    }
-    cards = "".join(
-        f'<a class="listingcard__item" href="/security-bulletin/{code}">'
-        f'<p class="listingcard__title">{code}</p></a>'
-        for code in page_codes[page]
-    )
-    pages = "".join(
-        f'<a href="/security-bulletin?item_per_page=10&amp;page={index}">{index}</a>'
-        for index in range(1, 4)
-    )
-    return f"<html><body>{cards}{pages}</body></html>"
 
 
 def hkcert_detail_html(code: str) -> str:

@@ -8,23 +8,39 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_parse_security_bulletin_list_extracts_identity_and_metadata() -> None:
-    html = (FIXTURES / "list.html").read_text(encoding="utf-8")
+    xml = (FIXTURES / "list.xml").read_text(encoding="utf-8")
 
     page = parse_security_bulletin_list(
-        html,
+        xml,
         page=1,
         provider="hkcert",
         source_url="https://www.hkcert.org/security-bulletin",
     )
 
-    assert page.total_pages == 2
-    assert len(page.entries) == 1
+    assert page.total_pages == 1
+    assert page.total_records == len(page.entries) == 1
     entry = page.entries[0]
     assert entry.identity.type == "HKCERT"
-    assert entry.identity.code == "android-multiple-vulnerabilities_20250601"
+    assert entry.identity.code == "android-multiple-vulnerabilities_20260601"
     assert entry.title == "Android Multiple Vulnerabilities"
-    assert entry.status == "NEW"
-    assert entry.disclosure_date == "1 Jun 2026"
+    assert entry.status is None
+    assert entry.disclosure_date == "2026-06-01"
+    assert entry.embedded_detail["_list_summary"] is True
+
+
+def test_feed_skips_duplicate_slugs_and_links_outside_english_bulletins() -> None:
+    page = parse_security_bulletin_list("""
+        <rss xmlns="urn:test:rss"><channel>
+          <item><title>Example bulletin</title><guid>/security-bulletin/example-bulletin</guid></item>
+          <item><title>Duplicate</title><link>https://www.hkcert.org/security-bulletin/example-bulletin?x=1</link></item>
+          <item><title>Other site</title><link>https://example.test/security-bulletin/other</link></item>
+          <item><title>Other language</title><link>/tc/security-bulletin/other</link></item>
+          <item><title>Blog</title><link>/blog/other</link></item>
+        </channel></rss>
+    """, page=1)
+
+    assert [entry.key for entry in page.entries] == ["hkcert:example-bulletin"]
+    assert page.entries[0].disclosure_date is None
 
 
 def test_parse_detail_page_extracts_required_hkcert_sections() -> None:
