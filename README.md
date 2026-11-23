@@ -36,7 +36,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `cve` | `cve` | CVEProject cvelistV5 |
 | `fortiguard` | `fortiguard` | PSIRT RSS feed + full advisory pages; optional CSAF enrichment |
 | `github_advisory` | `github_advisory` | Optional `GITHUB_TOKEN` |
-| `govcert` | `govcert` | GOVCERT.HK English alerts + full alert pages; HTTP only |
+| `govcert` | `govcert` | GOVCERT.HK English RSS + full alert pages |
 | `hkcert` | `hkcert` | HTML |
 | `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
 | `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
@@ -79,12 +79,13 @@ date. Records no longer present in the feed are retained.
 Content comparison accounts for MongoDB's UTC timestamp representation and
 millisecond precision so unchanged records are not rewritten on each run.
 
-The GOVCERT scraper follows the paginated [GOVCERT.HK security alerts](https://www.govcert.gov.hk/en/alerts.php)
-and opens each alert page. It stores the full text in `details.content`, plus
-affected systems, impact, recommendations, CVE IDs, tags, references, and tables.
-Both standard and high-threat alerts are included in `run` and `catch-up`.
-Severity is `Critical` when the title contains "High Threat" (case-insensitive),
-and `Medium` otherwise.
+The GOVCERT scraper discovers English alerts through the [GOVCERT.HK security alerts RSS feed](https://www.govcert.gov.hk/en/rss_security_alerts.xml).
+It opens linked pages for the full text, affected systems, impact,
+recommendations, CVE IDs, tags, references, and tables. The page's
+`Last update on` date lets `run` and `catch-up` include revisions within
+the `--days` window even when the RSS publication date is older. Discovery
+covers the current feed. High-threat alerts are `Critical` and standard
+alerts are `Medium`.
 
 The Wiz scraper reads the [Cloud Threat Landscape RSS feed](https://www.wiz.io/api/feed/cloud-threat-landscape/rss.xml)
 and fetches each linked incident page for its full text, actors, techniques,

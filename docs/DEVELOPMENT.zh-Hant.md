@@ -1068,7 +1068,7 @@ print(output["result_count"], output["stop_reason"])
 | `cve` | JSON | 0.2 | 3 | False | Delta 單頁列表、CVE v5 詳情 |
 | `fortiguard` | RSS／HTML | 1.0 | 3 | True | PSIRT RSS 最新 50 筆、全文、可選 CSAF |
 | `github_advisory` | JSON | 1.0 | 3 | True | Reviewed 公告，列表內嵌詳情 |
-| `govcert` | HTML | 1.0 | 3 | True | 香港保安警報分頁與全文 |
+| `govcert` | RSS／HTML | 1.0 | 3 | True | 香港保安警報 RSS 與全文 |
 | `hkcert` | HTML | 1.0 | 3 | False | Security Bulletin、每頁 10 筆 |
 | `hpe` | RSS／HTML | 1.0 | 3 | True | 最多讀取前 50 個 RSS item，再取文件 API |
 | `huawei_sa` | JSON | 1.2 | 3 | True | POST 列表 API，列表內嵌資料 |
@@ -1151,8 +1151,8 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.7 GOVCERT.HK：`govcert`
 
-- 列表：`https://www.govcert.gov.hk/en/alerts.php?page=N`。
-- 詳情：`/en/alerts_detail.php?id=<數字>`。
+- 列表：`https://www.govcert.gov.hk/en/rss_security_alerts.xml`，涵蓋目前 RSS 提供的英文警報。
+- 詳情：`/en/alerts_detail.php?id=<數字>`。以頁面的 `Published on` 和 `Last update on` 判斷是否在日期視窗內。
 - 同時包含標準警報與高威脅警報。
 - 程式規則：標題包含 `High Threat`（不分大小寫）時設為 Critical，其餘設為 Medium。
 - 保存完整 `content`、受影響系統、影響、建議、更多資訊、references、tags、表格及 CVE。

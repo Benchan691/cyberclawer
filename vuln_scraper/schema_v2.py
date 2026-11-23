@@ -111,6 +111,7 @@ def _builtin_provider_schemas() -> dict[str, ProviderSchema]:
             cve_fields=("cve_ids",),
             severity_fields=("severity",),
             published_fields=("published_date",),
+            updated_fields=("updated_date",),
         ),
         "hikvision": ProviderSchema(
             identity_fields=("advisory_id",),

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import re
+from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qs, urljoin, urlparse
-
-from bs4 import BeautifulSoup, Tag
+from xml.etree import ElementTree
 
 from vuln_scraper.models import ListEntry, ListPage, VulnerabilityId
-from vuln_scraper.scrapers.govcert.config import BASE_URL, LIST_URL
+from vuln_scraper.scrapers.govcert.config import BASE_URL, DETAIL_URL, SOURCE_URL
 from vuln_scraper.scrapers.govcert.parsers.common import (
     clean_text,
-    normalize_date,
     parse_alert_title,
     severity_from_title,
     soup,
@@ -21,86 +19,76 @@ EN_BASE_URL = f"{BASE_URL}/en/"
 
 
 def parse_alerts_list(
-    html: str,
+    xml: str,
     *,
     page: int,
     provider: str = "govcert",
-    source_url: str | None = None,
+    source_url: str | None = SOURCE_URL,
 ) -> ListPage:
-    parsed = soup(html)
+    root = ElementTree.fromstring(xml)
+    channel = root.find("{*}channel") if root.tag.rsplit("}", 1)[-1] == "rss" else None
+    if channel is None:
+        raise ValueError("GovCERT feed must contain an RSS channel")
+
     entries: list[ListEntry] = []
     seen: set[str] = set()
+    items = channel.findall("{*}item")
+    for item in items:
+        code = _identity_code(item.findtext("{*}link", "")) or _identity_code(item.findtext("{*}guid", ""))
+        alert_code, alert_type, title = parse_alert_title(item.findtext("{*}title", ""))
+        if code is None or code in seen or not title:
+            continue
+        seen.add(code)
 
-    for row in parsed.select(".view-row"):
-        entry = _entry_from_row(row, provider=provider, source_url=source_url)
-        if entry is not None and entry.key not in seen:
-            seen.add(entry.key)
-            entries.append(entry)
+        published_date = _publication_date(item.findtext("{*}pubDate", "").strip())
+        description = clean_text(soup(item.findtext("{*}description", "").strip()))
+        entries.append(
+            ListEntry(
+                identity=VulnerabilityId(type="GOVCERT", code=code),
+                title=title,
+                vuln_type=alert_code,
+                disclosure_date=published_date,
+                status=alert_type,
+                provider=provider,
+                source_url=source_url,
+                embedded_detail={
+                    "_list_summary": True,
+                    "alert_code": alert_code,
+                    "alert_type": alert_type,
+                    "severity": severity_from_title(title),
+                    "published_date": published_date,
+                    "description": description or None,
+                    "detail_url": f"{DETAIL_URL}?id={code}",
+                },
+            )
+        )
 
+    if items and not entries:
+        raise ValueError("GovCERT feed did not contain valid English alert entries")
     return ListPage(
         page=page,
         entries=entries,
-        total_pages=_parse_total_pages(parsed),
-        total_records=None,
-    )
-
-
-def _entry_from_row(row: Tag, *, provider: str, source_url: str | None) -> ListEntry | None:
-    link = row.select_one('a[href*="alerts_detail.php"]')
-    if link is None:
-        return None
-
-    code = _identity_code(str(link["href"]))
-    if code is None:
-        return None
-
-    title = clean_text(link)
-    if not title:
-        return None
-
-    alert_code, alert_type, title = parse_alert_title(title)
-    published_date = normalize_date(clean_text(row.select_one(".label.label-primary")) or None)
-    detail = {
-        "_list_summary": True,
-        "alert_code": alert_code,
-        "alert_type": alert_type,
-        "severity": severity_from_title(title),
-        "published_date": published_date,
-        "detail_url": urljoin(EN_BASE_URL, str(link["href"])),
-    }
-
-    return ListEntry(
-        identity=VulnerabilityId(type="GOVCERT", code=code),
-        title=title,
-        vuln_type=alert_code,
-        disclosure_date=published_date,
-        status=alert_type,
-        provider=provider,
-        source_url=source_url,
-        embedded_detail=detail,
+        total_pages=1,
+        total_records=len(entries),
+        exhausted=not items,
     )
 
 
 def _identity_code(href: str) -> str | None:
-    parsed = urlparse(urljoin(EN_BASE_URL, href))
-    if parsed.netloc != urlparse(BASE_URL).netloc or parsed.path != DETAIL_PATH:
+    try:
+        parsed = urlparse(urljoin(EN_BASE_URL, href.strip()))
+    except ValueError:
         return None
-    identity = parse_qs(parsed.query).get("id", [None])[0]
-    if identity and identity.isdigit():
-        return identity
+    if parsed.scheme != "https" or parsed.netloc.lower() != urlparse(BASE_URL).netloc or parsed.path != DETAIL_PATH:
+        return None
+    identities = parse_qs(parsed.query).get("id", [])
+    if len(identities) == 1 and identities[0].isascii() and identities[0].isdigit():
+        return identities[0]
     return None
 
 
-def _parse_total_pages(parsed: BeautifulSoup) -> int | None:
-    pages: list[int] = []
-    total = clean_text(parsed.select_one(".total_page"))
-    if total.isdigit():
-        pages.append(int(total))
-
-    for link in parsed.find_all("a", href=True):
-        url = urlparse(urljoin(LIST_URL, str(link["href"])))
-        if url.netloc == urlparse(BASE_URL).netloc and url.path == "/en/alerts.php":
-            pages.extend(int(value) for value in parse_qs(url.query).get("page", []) if value.isdigit())
-        for value in re.findall(r"chPage\((\d+)\)", str(link.get("href", ""))):
-            pages.append(int(value))
-    return max(pages) if pages else None
+def _publication_date(value: str) -> str | None:
+    try:
+        return parsedate_to_datetime(value).date().isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return None

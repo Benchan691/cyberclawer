@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>GovCERT.HK - Security Alerts</title>
+    <description>GovCERT.HK - Security Alerts</description>
+    <language>en</language>
+    <item>
+      <title>High Threat Security Alert (A26-06-01): Vulnerability in Linux Kernel</title>
+      <guid>https://www.govcert.gov.hk/en/alerts_detail.php?id=1894</guid>
+      <link>https://www.govcert.gov.hk/en/alerts_detail.php?id=1894</link>
+      <pubDate>Mon, 01 Jun 2026 12:00:00 +0800</pubDate>
+      <description><![CDATA[<p class="text-content">Review security updates for the Linux kernel.</p>]]></description>
+    </item>
+    <item>
+      <title>Security Alert (A26-05-48): Multiple Vulnerabilities in Microsoft Edge</title>
+      <guid>https://www.govcert.gov.hk/en/alerts_detail.php?id=1893</guid>
+      <link>https://www.govcert.gov.hk/en/alerts_detail.php?id=1893</link>
+      <pubDate>Fri, 29 May 2026 12:00:00 +0800</pubDate>
+      <description><![CDATA[<p class="text-content">Review available updates for Microsoft Edge.</p>]]></description>
+    </item>
+  </channel>
+</rss>

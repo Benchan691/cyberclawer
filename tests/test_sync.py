@@ -19,6 +19,7 @@ from vuln_scraper.scrapers.cve.provider import CVEProvider
 from vuln_scraper.scrapers.fortiguard.provider import FortiguardProvider
 from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
+from vuln_scraper.scrapers.hkcert.provider import HKCERTProvider
 from vuln_scraper.scrapers.msrc.provider import MSRCProvider
 from vuln_scraper.scrapers.nvd.provider import NvdProvider
 from vuln_scraper.scrapers.zimbra.provider import ZimbraProvider
@@ -172,11 +173,11 @@ def test_mongo_error_is_retried_and_blocks_success_position(tmp_path):
 
 
 def test_recent_listing_stops_before_missing_history_without_fetching_old_details(tmp_path):
-    h = Harness(tmp_path, GovCERTProvider())
-    h.pages = lambda context, page: ListPage(page, [entry(page, "govcert", old=page > 1)], total_pages=3)
+    h = Harness(tmp_path, HKCERTProvider())
+    h.pages = lambda context, page: ListPage(page, [entry(page, "hkcert", old=page > 1)], total_pages=3)
     first = h.run(limit=10)
     assert len(h.calls) == 2
-    assert set(h.news.documents) == {"govcert:1"}
+    assert set(h.news.documents) == {"hkcert:1"}
     assert first["sync"]["outside_window"] == 1
     assert first["sync"]["history_status"] == "disabled"
     assert first["sync"]["archive_cursor"] is None
@@ -184,7 +185,7 @@ def test_recent_listing_stops_before_missing_history_without_fetching_old_detail
     h.calls.clear()
     h.run(limit=10, now=NOW + timedelta(hours=1))
     assert [page for _, page in h.calls] == [1, 2]
-    assert set(h.news.documents) == {"govcert:1"}
+    assert set(h.news.documents) == {"hkcert:1"}
 
 
 def test_listing_revision_cannot_bypass_the_news_date_cutoff(tmp_path):
@@ -357,8 +358,8 @@ def test_retries_survive_missing_cached_payloads(tmp_path):
 
 
 def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_path):
-    h = Harness(tmp_path, GovCERTProvider())
-    advisory = entry(1, "govcert", old=False)
+    h = Harness(tmp_path, HKCERTProvider())
+    advisory = entry(1, "hkcert", old=False)
     advisory.embedded_detail["_list_summary"] = True
     h.pages = lambda context, page: ListPage(page, [advisory], total_pages=1)
     attempts = []
@@ -369,7 +370,7 @@ def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_pat
             if len(attempts) == 2:
                 runner._record_failure(value, "https://example.test/detail", "HTTP 503", phase="detail")
                 return
-            complete = entry(1, "govcert")
+            complete = entry(1, "hkcert")
             complete.embedded_detail["content"] = "Revised body" if len(attempts) > 2 else "Original body"
             runner.records_by_id[value.key] = complete.to_record()
         runner._scrape_detail = detail
@@ -380,7 +381,7 @@ def test_unchanged_listing_metadata_does_not_clear_a_failed_detail_retry(tmp_pat
     assert second["sync"]["pending_retries"] == 1
     third = h.run(now=NOW + timedelta(hours=2), configure=configure)
     assert third["sync"]["pending_retries"] == 0
-    assert h.news.documents["govcert:1"]["details"]["content"] == "Revised body"
+    assert h.news.documents["hkcert:1"]["details"]["content"] == "Revised body"
     assert len(attempts) == 3
 
 

@@ -7,18 +7,18 @@ from vuln_scraper.scrapers.govcert.parsers.list import parse_alerts_list
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def test_parse_alerts_list_extracts_identity_dates_and_pagination() -> None:
-    html = (FIXTURES / "list.html").read_text(encoding="utf-8")
+def test_parse_alerts_list_extracts_identity_and_dates_from_rss() -> None:
+    xml = (FIXTURES / "list.xml").read_text(encoding="utf-8")
 
     page = parse_alerts_list(
-        html,
+        xml,
         page=1,
         provider="govcert",
         source_url="https://www.govcert.gov.hk/en/alerts.php",
     )
 
-    assert page.total_pages == 125
-    assert len(page.entries) == 2
+    assert page.total_pages == 1
+    assert page.total_records == len(page.entries) == 2
     entry = page.entries[0]
     assert entry.identity.type == "GOVCERT"
     assert entry.identity.code == "1894"
@@ -32,6 +32,7 @@ def test_parse_alerts_list_extracts_identity_dates_and_pagination() -> None:
         "alert_type": "High Threat Security Alert",
         "severity": "Critical",
         "published_date": "2026-06-01",
+        "description": "Review security updates for the Linux kernel.",
         "detail_url": "https://www.govcert.gov.hk/en/alerts_detail.php?id=1894",
     }
 
@@ -52,6 +53,7 @@ def test_parse_high_threat_detail_extracts_sections_tags_and_links() -> None:
     assert detail["alert_type"] == "High Threat Security Alert"
     assert detail["severity"] == "Critical"
     assert detail["published_date"] == "2026-06-01"
+    assert detail["updated_date"] is None
     assert "CIFSwitch" in detail["description"]
     assert detail["affected_systems"] == [
         "Linux kernel version with the CIFS client capability and the cifs-utils package version 6.14 or high"
@@ -109,20 +111,21 @@ def test_parse_detail_page_accepts_current_h2_section_headings() -> None:
     assert detail["recommendation"] == "Install the update."
 
 
-def test_list_handles_current_pagination_and_rejects_duplicate_or_invalid_links() -> None:
+def test_feed_accepts_guid_fallback_and_skips_duplicate_or_invalid_alerts() -> None:
     page = parse_alerts_list("""
-        <a href="?page=2">Next</a><a href="?page=140">Last</a>
-        <div class="view-row"><span class="label label-primary">21-October-2026</span>
-          <a href="alerts_detail.php?id=2125">High Threat Security Alert (A26-10-36): PHP</a></div>
-        <div class="view-row"><a href="/en/alerts_detail.php?id=2125">Duplicate</a></div>
-        <div class="view-row"><a href="https://other.test/en/alerts_detail.php?id=9999">Other site</a></div>
-        <div class="view-row"><a href="/tc/alerts_detail.php?id=9998">Other language</a></div>
-        <div class="view-row"><a href="alerts_detail.php?id=bad">Invalid ID</a></div>
-        <div class="view-row"><a href="alerts_detail.php">Missing ID</a></div>
-        <div class="view-row"><a href="alerts_detail.php?id=9997"> </a></div>
+        <rss xmlns="urn:test:rss"><channel>
+          <item><title>High Threat Security Alert (A26-10-36): PHP</title>
+            <guid>https://www.govcert.gov.hk/en/alerts_detail.php?id=2125</guid>
+            <pubDate>Wed, 21 Oct 2026 12:00:00 +0800</pubDate></item>
+          <item><title>Duplicate</title><link>alerts_detail.php?id=2125</link></item>
+          <item><title>Other site</title><link>https://other.test/en/alerts_detail.php?id=9999</link></item>
+          <item><title>Other language</title><link>/tc/alerts_detail.php?id=9998</link></item>
+          <item><title>Invalid ID</title><link>alerts_detail.php?id=bad</link></item>
+          <item><title>Missing ID</title><link>alerts_detail.php</link></item>
+          <item><title> </title><link>alerts_detail.php?id=9997</link></item>
+        </channel></rss>
     """, page=1)
 
-    assert page.total_pages == 140
     assert [entry.identity.code for entry in page.entries] == ["2125"]
     assert page.entries[0].disclosure_date == "2026-10-21"
 

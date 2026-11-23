@@ -36,6 +36,7 @@ class GovCERTDetailRecord:
     alert_type: str | None = None
     severity: str | None = None
     published_date: str | None = None
+    updated_date: str | None = None
     content: str | None = None
     description: str | None = None
     affected_systems: list[str] = field(default_factory=list)
@@ -59,7 +60,7 @@ def parse_detail_page(html: str) -> GovCERTDetailRecord:
     container = parsed.select_one(".noneditable")
     content = clean_multiline(container)
     sections = _sections(container)
-    published_date = _published_date(parsed)
+    published_date, updated_date = _alert_dates(parsed)
     more_information = sections.get("more_information", "")
     full_text = "\n".join((title, published_date or "", content))
 
@@ -68,6 +69,7 @@ def parse_detail_page(html: str) -> GovCERTDetailRecord:
         alert_type=alert_type,
         severity=severity_from_title(title),
         published_date=published_date,
+        updated_date=updated_date,
         content=content or None,
         description=sections.get("description") or None,
         affected_systems=_lines(sections.get("affected_systems")),
@@ -82,12 +84,19 @@ def parse_detail_page(html: str) -> GovCERTDetailRecord:
     )
 
 
-def _published_date(parsed) -> str | None:
+def _alert_dates(parsed: Tag) -> tuple[str | None, str | None]:
+    published_date = None
+    updated_date = None
     for paragraph in parsed.select("p.text-content"):
-        text = clean_text(paragraph)
-        if text.casefold().startswith("published on:"):
-            return normalize_date(text.split(":", 1)[1].strip())
-    return None
+        label, separator, value = clean_text(paragraph).partition(":")
+        if not separator:
+            continue
+        label = label.strip().casefold()
+        if label == "published on":
+            published_date = normalize_date(value.strip())
+        elif label in {"last update on", "last updated on"}:
+            updated_date = normalize_date(value.strip())
+    return published_date, updated_date
 
 
 def _sections(container: Tag | None) -> dict[str, str]:
