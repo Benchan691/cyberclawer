@@ -129,6 +129,7 @@ published or revised today in Hong Kong time. General news does not receive an
 invented severity or CVE. Stable IDs use the article's year, month, and permalink
 slug, ignoring tracking parameters. Records remain in `news` after leaving the feed.
 See [The Hacker News schema and operations](docs/THE_HACKER_NEWS.md).
+For a later server update, use [The Hacker News deployment guide](docs/THE_HACKER_NEWS_DEPLOYMENT.md).
 
 ## MongoDB layout
 
