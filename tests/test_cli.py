@@ -96,6 +96,7 @@ def test_main_run_dispatches_single_provider(monkeypatch, capsys, tmp_path) -> N
                     "skipped": 0,
                     "conflicts": 0,
                 },
+                "sync": {"incremental_status": "up_to_date", "outside_window": 2, "pending_retries": 0},
             }
 
     monkeypatch.setattr("vuln_scraper.runner.ScraperRunner", FakeScraper)
@@ -105,7 +106,9 @@ def test_main_run_dispatches_single_provider(monkeypatch, capsys, tmp_path) -> N
     assert captured["provider"].key == "cnvd"
     assert captured["settings"].limit == 1
     assert captured["sync_context"].overlap_days == 1
-    assert "cnvd: fetched 1 records" in capsys.readouterr().out
+    stdout = capsys.readouterr().out
+    assert "cnvd: fetched 1 records" in stdout
+    assert "incremental=up_to_date outside_window=2 pending_retries=0" in stdout
 
 
 def test_manual_run_respects_the_scheduled_crawler_lock(monkeypatch, tmp_path, caplog):

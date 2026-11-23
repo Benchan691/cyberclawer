@@ -226,9 +226,17 @@ def _sync_one(
         result.unchanged += 1
         return
 
-    result.conflicts += 1
     existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
     document_source = document.get("source") if isinstance(document.get("source"), dict) else {}
+    if document_source.get("provider") == "the_hacker_news" and document["details"].get("content_source") == "rss":
+        existing_detail = existing.get("details")
+        if isinstance(existing_detail, dict) and (
+            existing_detail.get("content") or (existing_detail.get("summary") and not document["details"].get("summary"))
+        ):
+            result.skipped += 1
+            return
+
+    result.conflicts += 1
     repairs_provider = existing_source.get("provider") != document_source.get("provider")
     if repairs_provider or _should_overwrite(document, existing, settings):
         if document["_id"].startswith("cve:") and isinstance(existing.get("classification"), dict):

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from vuln_scraper.client import FetchError, ScraperClient, WAFChallengeError
 from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.the_hacker_news.config import DEFAULT_COLLECTION, LIST_URL, SOURCE_URL
 from vuln_scraper.scrapers.the_hacker_news.parsers.detail import TheHackerNewsDetailRecord, parse_detail_page
 from vuln_scraper.scrapers.the_hacker_news.parsers.list import parse_rss_list
 
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_SCHEMA = {
     "identity_fields": ("feed_guid",),
@@ -20,7 +24,7 @@ PROVIDER_SCHEMA = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class TheHackerNewsProvider:
     key: str = "the_hacker_news"
     source_url: str = SOURCE_URL
@@ -29,6 +33,7 @@ class TheHackerNewsProvider:
     default_request_delay: float = 1.0
     stop_on_first_known: bool = False
     catch_up_full_feed: bool = True
+    _blocked_client: ScraperClient | None = field(default=None, init=False, repr=False, compare=False)
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_URL
@@ -46,6 +51,19 @@ class TheHackerNewsProvider:
 
     def parse_detail(self, html: str) -> TheHackerNewsDetailRecord:
         return parse_detail_page(html)
+
+    async def fetch_html_detail(self, client: ScraperClient, url: str) -> tuple[str, dict[str, Any]]:
+        if client is not self._blocked_client:
+            try:
+                result = await client.get_html(url)
+            except FetchError as exc:
+                if exc.status_code != 403 and not isinstance(exc, WAFChallengeError):
+                    raise
+                self._blocked_client = client
+                logger.info("The Hacker News denied article access; using RSS for this run")
+            else:
+                return result.html, self.parse_detail(result.html).to_dict()
+        return "", {"content_source": "rss"}
 
     def finalize_detail(self, detail: dict[str, Any], *, entry: ListEntry, detail_url: str) -> dict[str, Any]:
         merged = dict(detail)

@@ -118,7 +118,7 @@ class FakeClient:
     def __init__(self):
         self.feed = (FIXTURES / "list.xml").read_text()
         self.detail = (FIXTURES / "detail.html").read_text()
-        self.fail_details = False
+        self.detail_status = 200
         self.old_updated_today = False
         self.urls = []
 
@@ -127,8 +127,8 @@ class FakeClient:
         if url == LIST_URL:
             return FetchResult(html=self.feed, status_code=200, url=url)
         assert url in {FIRST_URL, SECOND_URL}
-        if self.fail_details:
-            raise FetchError("HTTP 503", status_code=503)
+        if self.detail_status != 200:
+            raise FetchError(f"HTTP {self.detail_status}", status_code=self.detail_status)
         html = self.detail
         if url == SECOND_URL:
             html = html.replace("new-parser-research", "security-research-without-cves")
@@ -187,13 +187,45 @@ def test_limit_resumes_unfinished_feed(tmp_path):
 def test_failed_detail_keeps_full_record_and_recovers(tmp_path):
     collection, client = FakeMongoCollection(), FakeClient()
     run_sync(tmp_path, collection, client)
-    client.fail_details = True
+    client.detail_status = 503
     failed = run_sync(tmp_path, collection, client, hour=1)
     assert failed["sync"]["pending_retries"] >= 1
     assert all("complete second paragraph" in d["details"]["content"] for d in collection.documents.values())
-    client.fail_details = False
+    client.detail_status = 200
     recovered = run_sync(tmp_path, collection, client, hour=2)
     assert recovered["sync"]["pending_retries"] == 0
+
+
+def test_denied_article_access_uses_feed_excerpts_for_current_news(tmp_path):
+    collection, client = FakeMongoCollection(), FakeClient()
+    client.detail_status = 403
+    result = run_sync(tmp_path, collection, client)
+    assert client.urls == [LIST_URL, FIRST_URL]
+    assert result["sync"]["outside_window"] == 1
+    assert result["sync"]["pending_retries"] == 0
+    assert result["sync"]["incremental_status"] == "up_to_date"
+    assert result["mongo_sync"]["inserted"] == 1
+    entry = collection.documents["the_hacker_news:2026-11-new-parser-research"]
+    assert entry["source"]["detail_url"] == FIRST_URL
+    assert entry["published_at"] == datetime(2026, 11, 23, 13, 22, 20, tzinfo=UTC)
+    assert entry["cve_ids"] == ["CVE-2026-12345"]
+    assert entry["details"]["content_source"] == "rss"
+    assert entry["details"]["summary"] == "A truncated CVE-2026-12345 summary..."
+    assert "content" not in entry["details"]
+    validate_v2_document(entry, "news")
+
+    client.detail_status = 200
+    recovered = run_sync(tmp_path, collection, client, hour=1)
+    assert recovered["mongo_sync"]["overwritten"] == 1
+    entry = collection.documents[entry["_id"]]
+    assert "complete second paragraph" in entry["details"]["content"]
+    assert "content_source" not in entry["details"]
+
+    client.detail_status = 403
+    denied = run_sync(tmp_path, collection, client, hour=2)
+    assert denied["mongo_sync"]["overwritten"] == 0
+    assert denied["sync"]["pending_retries"] == 0
+    assert collection.documents[entry["_id"]] == entry
 
 
 def test_malformed_feed_does_not_fall_back_or_advance_sync(tmp_path):

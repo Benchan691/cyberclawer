@@ -929,6 +929,8 @@ class ScraperRunner:
             if getattr(self.provider, "content_type", "html") == "json":
                 result, detail = await self._fetch_json_detail(client, entry, url)
                 raw_detail_content = result.data
+            elif (fetch_html_detail := getattr(self.provider, "fetch_html_detail", None)) is not None:
+                raw_detail_content, detail = await fetch_html_detail(client, url)
             else:
                 result = await self._fetch_provider_html(client, url)
                 raw_detail_content = result.html

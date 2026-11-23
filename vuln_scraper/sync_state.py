@@ -65,10 +65,10 @@ def retry_entry_data(entry: ListEntry) -> dict[str, Any]:
 
     payload = entry_data(entry)
     detail = entry.embedded_detail or {}
-    if entry.provider == "bleepingcomputer" and detail.get("published_at") and not detail.get("_list_summary"):
+    if entry.provider in {"bleepingcomputer", "the_hacker_news"} and detail.get("published_at"):
         # Retain the RSS excerpt for retries after the article leaves the feed.
         payload["embedded_detail"] = {key: detail[key] for key in (
-            "published_at", "summary", "author", "categories", "cve_ids",
+            "_list_summary", "published_at", "summary", "author", "categories", "cve_ids", "feed_guid",
         ) if key in detail}
         return payload
 

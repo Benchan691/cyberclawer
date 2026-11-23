@@ -239,6 +239,7 @@ def main(argv: list[str] | None = None) -> None:
             and isinstance(item["details"].get(provider.key), dict)
         )
         mongo = output.get("mongo_sync") or {}
+        sync = output.get("sync") or {}
         print(
             f"{provider.key}: fetched {len(vulnerabilities)} records "
             f"({completed} with details); "
@@ -248,6 +249,12 @@ def main(argv: list[str] | None = None) -> None:
             f"skipped={mongo.get('skipped', 0)} "
             f"conflicts={mongo.get('conflicts', 0)}"
         )
+        if sync:
+            print(
+                f"{provider.key}: incremental={sync.get('incremental_status', 'unknown')} "
+                f"outside_window={sync.get('outside_window', 0)} "
+                f"pending_retries={sync.get('pending_retries', 0)}"
+            )
         return
 
     if args.command == "catch-up":

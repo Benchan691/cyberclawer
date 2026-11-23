@@ -80,6 +80,15 @@ def test_run_filters_by_hong_kong_date_and_saves_feed_metadata(tmp_path, monkeyp
     assert "bleepingcomputer:hardware/example-older-post" in news.documents
 
 
+def test_feed_without_current_articles_completes_after_midnight(tmp_path, monkeypatch):
+    news = FakeMongoCollection()
+    output = _run(tmp_path, monkeypatch, news, feed=FEED.read_bytes(), now=NOW + timedelta(days=1))
+    assert output["sync"]["incremental_status"] == "up_to_date"
+    assert output["sync"]["outside_window"] == 3
+    assert output["sync"]["pending_retries"] == 0
+    assert not news.documents
+
+
 def test_retry_uses_saved_excerpt_after_feed_and_local_cache_change(tmp_path, monkeypatch):
     news = FakeMongoCollection(fail_insert_once_for=ARTICLE_ID)
     first = _run(tmp_path, monkeypatch, news, feed=FEED.read_bytes())

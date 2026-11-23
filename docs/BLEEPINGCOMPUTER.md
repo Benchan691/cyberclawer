@@ -73,10 +73,12 @@ Catch-up saves progress in the shared sync state collection, normally `news_sync
 
 ## Run and verify
 
-Run BleepingComputer for today and yesterday, or run the configured catch-up sources for today.
+Run BleepingComputer or the configured catch-up sources for today. A valid feed
+can return zero records after Hong Kong midnight. `outside_window` counts feed
+items excluded by the date filter.
 
 ```bash
-vuln-scrape run bleepingcomputer --days 2
+vuln-scrape run bleepingcomputer --days 1
 vuln-scrape catch-up --days 1
 ```
 

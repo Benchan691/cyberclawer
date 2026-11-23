@@ -46,7 +46,7 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `paloalto` | `paloalto` | HTML |
 | `qianxin` | `qianxin` | JSON API |
 | `splunk` | `splunk` | RSS feed + full advisory pages with grouped CVEs |
-| `the_hacker_news` | `the_hacker_news` | The Hacker News RSS + full articles; source publication/revision dates |
+| `the_hacker_news` | `the_hacker_news` | Full articles when available, with RSS summaries when article access is denied |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
 | `zimbra` | `zimbra` | Zimbra Wiki release patches |
 
@@ -121,8 +121,8 @@ Schema and implementation handoff for other applications: [Wiz schema](docs/WIZ_
 
 The Hacker News scraper uses [its RSS feed](https://feeds.feedburner.com/TheHackersNews)
 for discovery, then opens the linked articles for full text, author, categories,
-references, CVEs when present, and publication/revision dates. It does not use a
-website index or historical fallback. `providers = ["all"]` includes
+references, CVEs when present, and publication/revision dates. If article access is
+denied, the rest of that run uses RSS dates and summaries. `providers = ["all"]` includes
 `the_hacker_news` automatically; explicitly selected providers must include that key.
 The current `--days` news-date window applies, so `--days 1` collects only articles
 published or revised today in Hong Kong time. General news does not receive an

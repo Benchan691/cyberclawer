@@ -24,7 +24,8 @@ because other maintenance may have continued independently.
 - Provider key: `the_hacker_news`.
 - Discovery: <https://feeds.feedburner.com/TheHackersNews>, with no index or archive fallback.
 - Full article pages supply article text, author, topics, publication/revision dates,
-  references, and CVEs when present. RSS excerpts are not accepted as full articles.
+  references, and CVEs when present. Denied article access switches the run to RSS
+  summaries. These records have `details.content_source = "rss"`.
 - The existing `--days 1` setting means **today in Hong Kong**, using an article's
   publication or revision date. Feed rebuild and collection times do not qualify
   old stories. No historical recovery is added.
@@ -162,7 +163,8 @@ directory; do not start a second production instance.
    { "source.provider": "the_hacker_news" }
    ```
 
-   Check `_id`, `source.detail_url`, source dates, and full `details.content`.
+   Check `_id`, `source.detail_url`, source dates, and full `details.content` or
+   the RSS summary and `details.content_source` marker.
    Confirm that `observed_at` has not turned an old story into current news.
 5. In Reviews, apply the source filter and a keyword from the full article body.
    Open a newsletter preview. Check author, topics, paragraphs, references, and
