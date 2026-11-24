@@ -15,7 +15,7 @@ DATE_RE = re.compile(
     r"Release Date\s*:\s*(\w+\s+\d{1,2},\s+\d{4}|\d{4}-\d{1,2}-\d{1,2})",
     re.IGNORECASE,
 )
-VERSION_RE = re.compile(r"v?(\d+(?:\.\d+){2}(?:/P\d+)?)", re.IGNORECASE)
+VERSION_RE = re.compile(r"v?(\d+(?:\.\d+){2})(?:(?:/P|\s+Patch[\s-]+)(\d+)\b)?", re.IGNORECASE)
 PACKAGE_RE = re.compile(r"^\s*(\S+)\s*[-=]>\s*(\S+)\s*$")
 
 
@@ -54,6 +54,9 @@ def parse_detail_page(html: str) -> ZimbraDetailRecord:
 
     release_date = _iso_date(_first_match(DATE_RE, root.get_text(" ", strip=True)))
     version_match = VERSION_RE.search(title or "")
+    version = version_match[1] if version_match else None
+    if version_match and version_match[2]:
+        version = f"{version}/P{version_match[2]}"
     modified = soup.select_one("#footer-info-lastmod")
     edited = re.search(r"last edited on (\d{1,2} \w+ \d{4}), at (\d{2}:\d{2})",
                        modified.get_text(" ", strip=True) if modified else "", re.IGNORECASE)
@@ -83,7 +86,7 @@ def parse_detail_page(html: str) -> ZimbraDetailRecord:
 
     return ZimbraDetailRecord(
         title=title,
-        version=version_match.group(1) if version_match else None,
+        version=version,
         release_date=release_date,
         updated_at=updated_at,
         security_fixes=security_fixes,

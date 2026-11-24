@@ -53,7 +53,7 @@ stored; changing the scrape window does not delete historical data.
 | FortiGuard, GOVCERT, HKCERT, HPE, Splunk, Wiz | Read the current RSS feed and verify article publication and edit dates. Articles with a recent publication or edit are eligible, including edits that leave the feed entry unchanged. |
 | Palo Alto, Huawei SA | Reconcile the current official RSS feed and fetch full advisory pages. Huawei's feed may be stale; report that limitation without an API-list fallback. |
 | MSRC | RSS identifies individual new/revised CVEs. Resolve their monthly CVRF documents through CVE-specific lookups and save only the matching CVEs. Reuse monthly responses within a run. |
-| Zimbra | Official blog RSS identifies linked Wiki releases. Fetch full release notes, retaining release-version IDs and actual release/edit dates. Marketing references to old releases do not republish them. |
+| Zimbra | The Wiki's RSS feed identifies changes to linked patch release pages. Fetch their full release notes and keep each release ID, original release date, and latest edit date. |
 | AVD, CNVD, Qianxin | Refresh recent listings and stop after a whole page older than the window. Known old publication/edit dates skip detail requests. No rotating archive scan. |
 
 An older publication updated today is eligible. A changed title or summary with

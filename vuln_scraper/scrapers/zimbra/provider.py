@@ -8,6 +8,7 @@ from vuln_scraper.models import ListEntry, ListPage
 from vuln_scraper.scrapers.zimbra.config import BASE_URL, DEFAULT_COLLECTION, LIST_URL, SOURCE_URL
 from vuln_scraper.scrapers.zimbra.parsers.detail import ZimbraDetailRecord, parse_detail_page
 from vuln_scraper.scrapers.zimbra.parsers.rss import parse_rss_list
+from vuln_scraper.timestamps import parse_timestamp
 
 
 PROVIDER_SCHEMA = {
@@ -26,7 +27,7 @@ class ZimbraProvider:
     default_request_delay: float = 1.0
     stop_on_first_known: bool = False
     catch_up_full_feed: bool = True
-    sync_discovery_version: str = "rss-v1"
+    sync_discovery_version: str = "wiki-rss-v2"
 
     def list_url(self, page: int, *, checkpoint: object | None = None) -> str:
         return LIST_URL
@@ -49,10 +50,12 @@ class ZimbraProvider:
     def finalize_detail(self, detail: dict[str, Any], *, entry: ListEntry, detail_url: str) -> dict[str, Any]:
         merged = dict(detail)
         list_detail = entry.embedded_detail if isinstance(entry.embedded_detail, dict) else {}
-        if list_detail.get("version") and merged.get("version") != list_detail["version"]:
-            raise ValueError("Zimbra release page does not match its RSS version")
-        if list_detail.get("version"):
-            merged["version"] = list_detail["version"]
+        if merged.get("version") != entry.identity.code:
+            raise ValueError("Zimbra release page does not match its requested version")
+        revision_at = parse_timestamp(list_detail.get("updated_at"))
+        detail_updated_at = parse_timestamp(merged.get("updated_at"))
+        if revision_at is not None and (detail_updated_at is None or revision_at > detail_updated_at):
+            merged["updated_at"] = revision_at.isoformat()
         for key in ("product_release", "codename", "third_party_patch_level", "general_availability"):
             if merged.get(key) in (None, "", []):
                 merged[key] = list_detail.get(key)

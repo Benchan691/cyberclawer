@@ -1079,7 +1079,7 @@ print(output["result_count"], output["stop_reason"])
 | `qianxin` | JSON | 1.0 | 3 | True | POST 列表、GET 詳情 API |
 | `splunk` | RSS／HTML | 1.0 | 3 | True | RSS 發現公告，逐篇讀取 SVD 文章 |
 | `wiz` | RSS／HTML | 1.0 | 3 | False | Cloud Threat Landscape RSS、永久 GUID、完整事件頁 |
-| `zimbra` | RSS／HTML | 1.0 | 3 | False | 官方 Blog RSS 的 Release 連結及 Wiki 詳情 |
+| `zimbra` | RSS／HTML | 1.0 | 3 | False | Wiki 的 Release 變更 RSS 及完整版本說明 |
 
 ### 14.2 AVD：`avd`
 
@@ -1251,10 +1251,10 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.16 Zimbra：`zimbra`
 
-- RSS：`https://blog.zimbra.com/feed/`，從文章內容取得 Wiki Release 連結；不使用 Release 索引回退。
+- RSS：Wiki 的 `api.php?action=feedrecentchanges&feedformat=rss&target=Zimbra_Releases`，從變更項目取得 Release 連結。
 - 選取 Patch 連結，支援 `10.x.x` 及 `9.x.x/Pn` 等路徑形態。
 - 來源 code 為版本／Patch 路徑，詳情到對應 Wiki 頁。
-- RSS 摘要標記 `_list_summary`；完整發布日期取自 Release 頁，Wiki 明確的編輯日期可以使舊版本修訂符合日期視窗。行銷文章提及舊版本不會重新發布該版本。原本只在索引出現的 metadata 可能不再提供。
+- RSS 摘要標記 `_list_summary`；發布日期取自 Release 頁，最新 Wiki 修訂時間用於更新日期。同一版本的多個修訂只取最新一筆。
 - 主要內容包括安全修正、一般修正、套件、安裝說明、原始碼倉庫及參考連結。
 - 公告以 Patch Release 為單位；它不等同逐個漏洞的完整 CVE 目錄。
 

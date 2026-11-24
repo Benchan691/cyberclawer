@@ -65,25 +65,30 @@ def test_msrc_deduplicates_cves_using_latest_revision_and_retains_stable_ids():
     ("paloalto", "https://security.paloaltonetworks.com.evil.example/CVE-2026-12345"),
     ("msrc", "https://evil.example/update-guide/vulnerability/CVE-2026-12345"),
     ("huawei_sa", "https://evil.example/en/psirt/security-advisories/2026/huawei-sa-example"),
-    ("zimbra", "https://evil.example/blog/release"),
+    ("zimbra", "https://evil.example/index.php?title=Zimbra_Releases/10.1.21&diff=71512"),
 ])
 def test_rss_cannot_redirect_discovery_to_an_untrusted_host(key, url):
     with pytest.raises(ValueError):
         get_provider(key).parse_list(rss([item("CVE-2026-12345", url)]), page=1)
 
 
-def test_zimbra_uses_release_links_and_ignores_marketing_and_external_links():
+def test_zimbra_uses_the_latest_wiki_revision_for_each_patch():
     provider = get_provider("zimbra")
+    release = "https://wiki.zimbra.com/index.php?title=Zimbra_Releases/10.1.20"
+    other_edit = item("General Wiki edit", "https://wiki.zimbra.com/index.php?title=Help&diff=71513")
     xml = rss([
-        item("General news", "https://blog.zimbra.com/news", body="No release link"),
-        item("Patch Release 10.1.20", "https://blog.zimbra.com/release", body=(
-            '<a href="https://wiki.zimbra.com/wiki/Zimbra_Releases/10.1.20">Release</a>'
-            '<a href="https://wiki.zimbra.com/wiki/Zimbra_Releases/8.8.15/P47">Legacy</a>'
-            '<a href="https://evil.example/wiki/Zimbra_Releases/99.0.0">Bad</a>'
-            '<a href="https://wiki.zimbra.com/wiki/Zimbra_Releases/10.1.0/patch_installation">Install</a>')),
+        other_edit,
+        item("Zimbra Releases/10.1.20", release + "&diff=71490", date="Mon, 23 Nov 2026 01:00:00 GMT"),
+        item("Zimbra Releases/10.1.20", release + "&diff=71512&oldid=71490"),
+        item("Legacy patch", "https://wiki.zimbra.com/index.php?title=Zimbra_Releases%2F8.8.15%2FP47&diff=71511"),
+        item("Install guide", "https://wiki.zimbra.com/index.php?title=Zimbra_Releases/10.1.0/patch_installation"),
+        item("Untrusted link", "https://evil.example/wiki/Zimbra_Releases/99.0.0"),
     ])
-    assert [e.key for e in provider.parse_list(xml, page=1).entries] == ["zimbra:10.1.20", "zimbra:8.8.15/P47"]
-    assert provider.parse_list(rss([item("General news", "https://blog.zimbra.com/news")]), page=1).exhausted
+    entries = provider.parse_list(xml, page=1).entries
+    assert [entry.key for entry in entries] == ["zimbra:10.1.20", "zimbra:8.8.15/P47"]
+    assert entries[0].embedded_detail["updated_at"] == "2026-11-24T01:00:00+00:00"
+    assert entries[0].disclosure_date is None
+    assert provider.parse_list(rss([other_edit]), page=1).exhausted
 
 
 def test_huawei_reports_stale_feed_and_retains_full_article_dates(caplog):
@@ -196,21 +201,17 @@ def test_feed_failure_never_falls_back_to_old_listings(tmp_path, key):
     assert not collection.documents
 
 
-@pytest.mark.parametrize("key", ["paloalto", "huawei_sa", "zimbra"])
+@pytest.mark.parametrize("key", ["paloalto", "huawei_sa"])
 def test_current_feed_timestamp_cannot_republish_an_old_article(tmp_path, key):
     provider = get_provider(key)
     if key == "paloalto":
         url = 'https://security.paloaltonetworks.com/CVE-2026-0265'
         feed = rss([item('CVE-2026-0265 Advisory', url)])
         detail = paloalto_detail_html('CVE-2026-0265')
-    elif key == "huawei_sa":
+    else:
         url = 'https://www.huawei.com/en/psirt/security-advisories/2026/huawei-sa-example-en'
         feed = rss([item('Huawei advisory', url)])
         detail = (HUAWEI / 'detail.html').read_text()
-    else:
-        url = 'https://wiki.zimbra.com/wiki/Zimbra_Releases/10.1.20'
-        feed = rss([item('Patch 10.1.20', 'https://blog.zimbra.com/patch', body=f'<a href="{url}">Release</a>')])
-        detail = ZIMBRA_DETAIL.replace('July 20, 2026', 'Sept 24, 2026')
     class Client:
         async def get_html(self, requested):
             assert requested in {provider.list_url(1), url}
@@ -220,6 +221,45 @@ def test_current_feed_timestamp_cannot_republish_an_old_article(tmp_path, key):
     assert output["sync"]["outside_window"] == 1
     assert output["mongo_sync"]["inserted"] == 0
     assert not collection.documents
+
+
+def test_zimbra_scrapes_current_rss_revisions_with_original_release_dates(tmp_path):
+    provider = get_provider("zimbra")
+    release_url = "https://wiki.zimbra.com/wiki/Zimbra_Releases/10.1.20"
+    revision_url = "https://wiki.zimbra.com/index.php?title=Zimbra_Releases/10.1.20&diff=71512"
+
+    class Client:
+        def __init__(self):
+            self.date = "Mon, 23 Nov 2026 01:00:00 GMT"
+            self.urls = []
+
+        async def get_html(self, url):
+            self.urls.append(url)
+            if url == provider.list_url(1):
+                html = rss([item("Zimbra Releases/10.1.20", revision_url, date=self.date)])
+            else:
+                assert url == release_url
+                html = ZIMBRA_DETAIL
+            return FetchResult(html=html, status_code=200, url=url)
+
+    collection, client = FakeMongoCollection(), Client()
+    old = sync(tmp_path, provider, client, collection)
+    assert old["sync"]["outside_window"] == 1
+    assert not collection.documents
+    assert client.urls == [provider.list_url(1)]
+
+    client.date = "Tue, 24 Nov 2026 01:00:00 GMT"
+    current = sync(tmp_path, provider, client, collection, minute=1)
+    assert current["mongo_sync"]["inserted"] == 1
+    document = collection.documents["zimbra:10.1.20"]
+    assert document["published_at"] == datetime(2026, 7, 19, 16, tzinfo=UTC)
+    assert document["updated_at"] == datetime(2026, 11, 24, 1, tzinfo=UTC)
+    assert document["source"]["detail_url"] == release_url
+    assert document["details"]["security_fixes"] == ["Fixed command injection.", "Fixed stored XSS."]
+
+    unchanged = sync(tmp_path, provider, client, collection, minute=2)
+    assert unchanged["mongo_sync"]["unchanged"] == 1
+    assert unchanged["mongo_sync"]["overwritten"] == 0
 
 
 def test_zimbra_retains_old_release_publication_but_qualifies_a_real_wiki_edit():

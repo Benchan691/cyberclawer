@@ -48,13 +48,13 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `splunk` | `splunk` | RSS feed + full advisory pages with grouped CVEs |
 | `the_hacker_news` | `the_hacker_news` | Full articles when available, with RSS summaries when article access is denied |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
-| `zimbra` | `zimbra` | Official blog RSS discovers linked Wiki release patches |
+| `zimbra` | `zimbra` | Zimbra Wiki RSS discovers changes to linked patch release pages |
 
 Palo Alto, MSRC, Huawei SA, and Zimbra discover records through official RSS
 feeds. Full advisory/release details are still fetched separately. MSRC's API
 calls resolve only CVEs already identified in RSS, with monthly documents reused
-within a run. Zimbra uses its blog RSS because the security-advisory RSS reports
-wiki revisions rather than release identifiers. Huawei's current PSIRT feed
+within a run. Zimbra uses the Wiki's RSS feed filtered to pages linked from
+the Zimbra Releases index. Huawei's current PSIRT feed
 appears stale; the scraper logs this coverage limitation and does not fall back
 to its former API listing. The same Hong Kong publication/update window applies
 to all four sources, and existing stored records are retained.

@@ -49,3 +49,11 @@ def test_parse_detail_extracts_release_contents() -> None:
     }
     assert detail["patch_installation_url"].endswith("patch_installation")
     assert detail["open_source_repo_url"] == "https://github.com/Zimbra/zm-build"
+
+
+def test_legacy_release_title_keeps_the_patch_number() -> None:
+    html = DETAIL_HTML.replace(
+        "Zimbra Daffodil (v10.1.20) Patch Release",
+        "Zimbra Collaboration Joule 8.8.15 Patch 47 GA Release",
+    )
+    assert parse_detail_page(html).version == "8.8.15/P47"

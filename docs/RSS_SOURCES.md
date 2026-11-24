@@ -9,7 +9,7 @@ There is no HTML-index or broad API-list fallback when a feed fails.
 | `paloalto` | <https://security.paloaltonetworks.com/rss.xml> | Open each linked advisory; keep CVSS, severity, dates, product status, solutions, workarounds, grouped CVEs, and references. |
 | `msrc` | <https://api.msrc.microsoft.com/update-guide/rss> | Look up the specific RSS CVE in `/cvrf/v3.0/Updates/CVE-…`, fetch its referenced CVRF document, and select only that CVE. |
 | `huawei_sa` | <https://www.huawei.com/en/rss-feeds/psirt/rss> | Open the linked PSIRT advisory; collect full content, source dates, CVEs, fixes, references, and source CVSS scoring. |
-| `zimbra` | <https://blog.zimbra.com/feed/> | Extract release-note links from RSS article content, then fetch the corresponding Wiki release notes. |
+| `zimbra` | [Zimbra Wiki release changes RSS](https://wiki.zimbra.com/api.php?action=feedrecentchanges&feedformat=rss&namespace=0&target=Zimbra_Releases&days=30&limit=50) | Resolve each changed patch page and fetch its full release notes. |
 
 ## Coverage and dates
 
@@ -49,21 +49,18 @@ field. When scores exist, their maximum maps to Critical (9+), High (7+), Medium
 (4+), or Low. No score means no inferred severity. Full section content and source
 scores remain available in the document.
 
-Zimbra's separate `security-advisory-feed.php` reports revisions to the advisories
-wiki page and supplies no release-version identifiers. The official blog RSS
-instead links to the release notes our existing records represent. Generic blog
-posts are ignored unless they link a supported release-note path. Installation
-guides, external hosts, and duplicate release links are ignored. Where several
-posts reference the same release, an announcement naming that version takes
-priority over marketing references. A valid feed with no release links completes
-with zero candidates.
+Zimbra's blog RSS returned HTTP 403 from HKCTTSECADV. Zimbra now uses the Wiki's
+recent changes RSS, filtered to pages linked from the Zimbra Releases index.
+The feed covers up to 50 changes from the past 30 days. When several changes
+refer to the same patch, the scraper uses the newest one. A valid feed with
+zero patch revisions completes with zero candidates.
+[MediaWiki feed documentation](https://www.mediawiki.org/wiki/API:Feedrecentchanges)
 
 Zimbra IDs remain versions such as `zimbra:10.1.21` and `zimbra:8.8.15/P47`.
-Release dates come from the release notes; explicit Wiki last-edit metadata can
-qualify a revision. A new marketing post linking an old release does not make that
-release current. Full security fixes, other fixes, packages, installation and
-repository links are kept. Fields previously available only in the release index
-may be absent from newly collected records.
+Release dates come from the release notes. The latest Wiki revision supplies
+the update date. The date window applies to publication and revision dates.
+Full security fixes, other fixes, packages, installation and repository links
+come from the release notes.
 
 ## Limits, progress, and recovery
 
@@ -78,8 +75,8 @@ additional CVE-specific and monthly detail requests. Cached unfinished work resu
 under the same date guard, and MongoDB round trips do not cause unchanged records
 to be rewritten. The existing process lock still prevents overlapping runs.
 
-The first run after this change records discovery version `rss-v1` and retires
-pending HTML/API listing snapshots belonging to the old discovery protocol.
+The first run with a new discovery version retires pending listing snapshots
+from the previous source. Zimbra's version is now `wiki-rss-v2`.
 Existing article retries retain their provenance, and stored historical records
 remain untouched. No manual database migration or progress reset is required.
 
