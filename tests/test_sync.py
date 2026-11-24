@@ -19,6 +19,7 @@ from vuln_scraper.scrapers.cve.provider import CVEProvider
 from vuln_scraper.scrapers.fortiguard.provider import FortiguardProvider
 from vuln_scraper.scrapers.github_advisory.provider import GitHubAdvisoryProvider
 from vuln_scraper.scrapers.govcert.provider import GovCERTProvider
+from vuln_scraper.scrapers.cnvd.provider import CNVDProvider
 from vuln_scraper.scrapers.msrc.provider import MSRCProvider
 from vuln_scraper.scrapers.nvd.provider import NvdProvider
 from vuln_scraper.scrapers.paloalto.provider import PaloAltoProvider
@@ -173,11 +174,11 @@ def test_mongo_error_is_retried_and_blocks_success_position(tmp_path):
 
 
 def test_recent_listing_stops_before_missing_history_without_fetching_old_details(tmp_path):
-    h = Harness(tmp_path, PaloAltoProvider())
-    h.pages = lambda context, page: ListPage(page, [entry(page, "paloalto", old=page > 1)], total_pages=3)
+    h = Harness(tmp_path, CNVDProvider())
+    h.pages = lambda context, page: ListPage(page, [entry(page, "cnvd", old=page > 1)], total_pages=3)
     first = h.run(limit=10)
     assert len(h.calls) == 2
-    assert set(h.news.documents) == {"paloalto:1"}
+    assert set(h.news.documents) == {"cnvd:1"}
     assert first["sync"]["outside_window"] == 1
     assert first["sync"]["history_status"] == "disabled"
     assert first["sync"]["archive_cursor"] is None
@@ -185,7 +186,7 @@ def test_recent_listing_stops_before_missing_history_without_fetching_old_detail
     h.calls.clear()
     h.run(limit=10, now=NOW + timedelta(hours=1))
     assert [page for _, page in h.calls] == [1, 2]
-    assert set(h.news.documents) == {"paloalto:1"}
+    assert set(h.news.documents) == {"cnvd:1"}
 
 
 def test_listing_revision_cannot_bypass_the_news_date_cutoff(tmp_path):
@@ -204,14 +205,14 @@ def test_listing_revision_cannot_bypass_the_news_date_cutoff(tmp_path):
 
 
 def test_listing_modification_time_keeps_an_old_publication_in_the_recent_pass(tmp_path):
-    h = Harness(tmp_path, PaloAltoProvider())
-    revised = entry(1, "paloalto", old=True)
+    h = Harness(tmp_path, CNVDProvider())
+    revised = entry(1, "cnvd", old=True)
     revised.embedded_detail["updated_date"] = NOW.isoformat()
     h.pages = lambda context, page: ListPage(page,
-        [revised] if page == 1 else [entry(2, "paloalto", old=True)], total_pages=3)
+        [revised] if page == 1 else [entry(2, "cnvd", old=True)], total_pages=3)
     output = h.run()
     assert [page for _, page in h.calls] == [1, 2]
-    assert set(h.news.documents) == {"paloalto:1"}
+    assert set(h.news.documents) == {"cnvd:1"}
     assert output["sync"]["incremental_status"] == "up_to_date"
 
 

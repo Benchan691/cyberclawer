@@ -803,7 +803,8 @@ class ScraperRunner:
         attempt = 0
         while True:
             try:
-                if getattr(self.provider, "content_type", "html") == "json":
+                list_type = getattr(self.provider, "list_content_type", getattr(self.provider, "content_type", "html"))
+                if list_type == "json":
                     request_factory = getattr(self.provider, "list_json_request", None)
                     if request_factory is not None:
                         request = request_factory(page, checkpoint=self.checkpoint)
@@ -951,7 +952,7 @@ class ScraperRunner:
                     if not record_type or not code:
                         continue
                     record_id = f"{record_type}:{code}"
-                    if record_id not in self.records_by_id:
+                    if record_id == entry.key or record_id not in self.records_by_id:
                         self.records_by_id[record_id] = record
                     if record_id not in self.list_order:
                         self.list_order.append(record_id)

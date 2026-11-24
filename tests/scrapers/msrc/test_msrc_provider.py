@@ -1,4 +1,4 @@
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from vuln_scraper.models import ListEntry, VulnerabilityId
 from vuln_scraper.scrapers import MSRCProvider, get_provider, provider_keys
@@ -20,7 +20,9 @@ def test_msrc_provider_urls_and_headers() -> None:
 
     parsed = urlparse(provider.list_url(1))
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == LIST_URL
-    assert unquote(parsed.query) == "$orderby=currentReleaseDate desc"
+    assert parsed.query == ""
+    assert provider.list_content_type == "html"
+    assert provider.detail_url("MSRC-2026-41108").endswith("/Updates/CVE-2026-41108")
     assert provider.detail_url("MSRC-2026-Jun") == f"{DETAIL_URL}/2026-Jun"
     assert provider.request_headers() == {"Accept": "application/json"}
 

@@ -40,15 +40,26 @@ adding a scraper means dropping in a directory, removing one means deleting it.
 | `govcert` | `govcert` | GOVCERT.HK English RSS + full alert pages |
 | `hkcert` | `hkcert` | Security bulletin RSS + full bulletin pages |
 | `hpe` | `hpe` | RSS + document API; HTTP-only; latest 50 Critical alerts |
-| `huawei_sa` | `huawei_sa` | May need `HUAWEI_SA_X_CK` / `HUAWEI_SA_CSRF_TOKEN` |
-| `msrc` | `msrc` | Microsoft CVRF API |
+| `huawei_sa` | `huawei_sa` | Official PSIRT RSS + full advisory pages; feed coverage may be stale |
+| `msrc` | `msrc` | Security Update Guide RSS + CVE-specific CVRF enrichment |
 | `nvd` | `nvd` | NVD CVE API 2.0 (`services.nvd.nist.gov`); optional `NVD_API_KEY`; details embedded in list response |
-| `paloalto` | `paloalto` | HTML |
+| `paloalto` | `paloalto` | Security advisory RSS + full advisory pages |
 | `qianxin` | `qianxin` | JSON API |
 | `splunk` | `splunk` | RSS feed + full advisory pages with grouped CVEs |
 | `the_hacker_news` | `the_hacker_news` | Full articles when available, with RSS summaries when article access is denied |
 | `wiz` | `wiz` | Cloud Threat Landscape RSS + full incident pages; permanent feed GUID identities |
-| `zimbra` | `zimbra` | Zimbra Wiki release patches |
+| `zimbra` | `zimbra` | Official blog RSS discovers linked Wiki release patches |
+
+Palo Alto, MSRC, Huawei SA, and Zimbra discover records through official RSS
+feeds. Full advisory/release details are still fetched separately. MSRC's API
+calls resolve only CVEs already identified in RSS, with monthly documents reused
+within a run. Zimbra uses its blog RSS because the security-advisory RSS reports
+wiki revisions rather than release identifiers. Huawei's current PSIRT feed
+appears stale; the scraper logs this coverage limitation and does not fall back
+to its former API listing. The same Hong Kong publication/update window applies
+to all four sources, and existing stored records are retained.
+
+See [RSS source behavior, tests, and manual rollout](docs/RSS_SOURCES.md).
 
 The BleepingComputer scraper imports all categories from the [main news RSS
 feed](https://www.bleepingcomputer.com/feed/). Each record stores the feed

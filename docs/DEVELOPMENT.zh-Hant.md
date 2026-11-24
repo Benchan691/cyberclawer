@@ -428,8 +428,8 @@ providers = ["hkcert", "cve", "cnvd"]
 | `GITHUB_TOKEN` | GitHub Advisory 的 Bearer 認證 |
 | `NVD_API_KEY` | NVD 請求的 `apiKey` Header |
 | `AVD_COOKIE`、`AVD_COOKIES`、`ALIYUN_AVD_COOKIE` | 依此順序選用 AVD Cookie |
-| `HUAWEI_SA_X_CK` | Huawei SA 的 `x-ck` Header |
-| `HUAWEI_SA_CSRF_TOKEN` | Huawei SA 的 `x-csrf-token` Header |
+| `HUAWEI_SA_X_CK` | 舊版 Huawei API 設定；目前 RSS 模式不使用 |
+| `HUAWEI_SA_CSRF_TOKEN` | 舊版 Huawei API 設定；目前 RSS 模式不使用 |
 | `SMTP_HOST`、`SMTP_PORT` | SMTP 主機及埠 |
 | `SMTP_FROM`、`SMTP_USERNAME`、`SMTP_PASSWORD` | 寄件及可選認證 |
 | `SMTP_USE_TLS`、`SMTP_USE_SSL` | STARTTLS／直接 SSL 模式 |
@@ -865,7 +865,7 @@ Runner 會從集合讀取該來源的既有身份。衝突模式為 `overwrite`�
 
 目前 `enrich_detail` 按非同步方法呼叫；`finalize_detail` 與 `expand_detail_records` 為同步。新增 Hook 必須符合實際呼叫方式。
 
-MSRC 會走展開路徑，把一份月報轉成多筆 CVE 記錄。若展開成功，該路徑提早完成，不再走一般的 `raw_tables` 處理。
+MSRC 會走展開路徑，從月報選出 RSS 指定的 CVE 記錄；同月其他 CVE 不會自動寫入。若展開成功，該路徑提早完成，不再走一般的 `raw_tables` 處理。
 
 ### 10.6 詳情成功與列表摘要
 
@@ -1072,14 +1072,14 @@ print(output["result_count"], output["stop_reason"])
 | `govcert` | RSS／HTML | 1.0 | 3 | True | 香港保安警報 RSS 與全文 |
 | `hkcert` | RSS／HTML | 1.0 | 3 | False | Security Bulletin RSS、逐篇讀取公告 |
 | `hpe` | RSS／HTML | 1.0 | 3 | True | 最多讀取前 50 個 RSS item，再取文件 API |
-| `huawei_sa` | JSON | 1.2 | 3 | True | POST 列表 API，列表內嵌資料 |
-| `msrc` | JSON | 0.5 | 3 | False | CVRF 月報展開成多筆 CVE |
+| `huawei_sa` | RSS／HTML | 1.2 | 3 | False | 官方 PSIRT RSS 與完整公告；Feed 可能過舊 |
+| `msrc` | RSS／JSON | 0.5 | 3 | False | RSS 指定 CVE，再取得對應 CVRF 完整資料 |
 | `nvd` | JSON | 6.5 | 1 | False | 修改日期查詢、列表內嵌詳情 |
-| `paloalto` | HTML | 1.0 | 3 | True | 安全公告列表與詳情 |
+| `paloalto` | RSS／HTML | 1.0 | 3 | False | 官方 RSS 與完整安全公告 |
 | `qianxin` | JSON | 1.0 | 3 | True | POST 列表、GET 詳情 API |
 | `splunk` | RSS／HTML | 1.0 | 3 | True | RSS 發現公告，逐篇讀取 SVD 文章 |
 | `wiz` | RSS／HTML | 1.0 | 3 | False | Cloud Threat Landscape RSS、永久 GUID、完整事件頁 |
-| `zimbra` | HTML | 1.0 | 3 | True | Release Patch 索引及 Wiki 詳情 |
+| `zimbra` | RSS／HTML | 1.0 | 3 | False | 官方 Blog RSS 的 Release 連結及 Wiki 詳情 |
 
 ### 14.2 AVD：`avd`
 
@@ -1186,25 +1186,23 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.10 Huawei SA：`huawei_sa`
 
-- 列表 API：`securitybulletin.huawei.com/vdmsapi/services/vdmsapi/rest/v1/enterprise/advisories`。
-- 使用 POST，URL 中帶 `pageIndex`、`pageSize=20`，Body 為 `config.py` 的查詢條件。
-- Header 帶語言、Referer 及可選 `x-ck`／CSRF Token。
-- 以 `sasnNo` 為來源身份，列表公告本身作為 embedded detail，並提取 `vul` 中的 CVE。
-- 當列表內容已被視為完整詳情時，Runner 會採用該內容；存在 `detail_url()` 不代表每次都會另外下載詳情。
-- Detail Record 的 `to_dict()` 直接回傳所包住的字典，不是保留一個名叫 `raw` 的包裝層。
-- 本次儲存庫沒有 `tests/scrapers/huawei_sa/` 專屬測試目錄，新增欄位或修改 API 時宜補來源測試。
+- RSS：`https://www.huawei.com/en/rss-feeds/psirt/rss`；不再使用 POST 列表 API 或 x-ck／CSRF Header。
+- 開啟 RSS 連結的完整 PSIRT 公告，保存摘要、全文、來源日期、CVE、版本／修補資訊及參考連結。
+- Feed 看來過舊時會記錄警告，不會回退至舊列表；來源頁實際日期優先，不能把 Feed 重建當作新公告。
+- HTML 的最高 CVSS Base Score 映射為 Critical／High／Medium／Low；沒有分數時不推算嚴重程度。
+- 新的舊版 PSIRT 連結使用 permalink slug；RSS 若提供原 Enterprise 連結則保留原 ID。既有記錄不會被刪除或重新編號。
+
+主要測試：`tests/test_rss_source_switch.py`、`tests/scrapers/huawei_sa/fixtures/`。
 
 ### 14.11 Microsoft MSRC：`msrc`
 
-- 列表 API：`api.msrc.microsoft.com/cvrf/v3.0/Updates`，依 `currentReleaseDate` 降序。
-- 詳情使用列表內 `cvrf_url` 或 `/cvrf/<月報 ID>`。
-- 一份月報可含大量漏洞，`expand_cvrf_document()` 對每個有效 CVE 產出一筆 `msrc:<CVE code>`。
-- 將 ProductTree 的 ProductID 轉為產品名稱。
-- 保存描述、CWE、產品狀態、Threat、Remediation、CVSS、致謝、notes 及修訂紀錄。
-- `--limit` 最終限制展開後輸出的漏洞數，而非月報份數；下載一份月報本身仍可能處理大量資料。
-- 同一 CVE 在不同月報出現時使用相同來源身份，由寫入衝突策略決定更新。
+- RSS：`https://api.msrc.microsoft.com/update-guide/rss`，依 CVE 去重並使用最新修訂時間。
+- 只對 RSS 中的 CVE 呼叫 `/cvrf/v3.0/Updates/CVE-…` 找到對應月報；這是詳情查詢，不是替代列表。
+- 同一次執行共用已下載月報；只儲存 RSS 指定的 CVE，不額外匯入月報中其他公告。
+- 身份仍是 `msrc:<CVE code>`，保留描述、CWE、產品狀態、Threat、Remediation、CVSS、致謝及修訂紀錄。
+- RSS 的修訂日期保存為 `updated_at`，與 CVRF 發布日期分開；找不到指定 CVE 或下載失敗時保留重試，不使用 RSS 摘要代替完整詳情。
 
-主要測試：`tests/scrapers/msrc/`。
+主要測試：`tests/scrapers/msrc/`、`tests/test_rss_source_switch.py`。
 
 ### 14.12 NVD：`nvd`
 
@@ -1221,7 +1219,7 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.13 Palo Alto Networks：`paloalto`
 
-- 列表：`https://security.paloaltonetworks.com/?page=N&limit=100`。
+- RSS：`https://security.paloaltonetworks.com/rss.xml`，沒有 HTML 列表回退。
 - 詳情使用公告 code 作為路徑，支援單一 CVE 及包含多 CVE 的公告。
 - 主要內容包括嚴重程度、緊急程度、CVSS、日期、產品及產品狀態、必要設定、利用狀態、影響、解決方案、workaround、時間線與參考連結。
 - 共用清理會移除 `raw_sections`；重要章節應從具名欄位讀取。
@@ -1253,10 +1251,10 @@ print(output["result_count"], output["stop_reason"])
 
 ### 14.16 Zimbra：`zimbra`
 
-- 索引：`https://wiki.zimbra.com/wiki/Zimbra_Releases`。
+- RSS：`https://blog.zimbra.com/feed/`，從文章內容取得 Wiki Release 連結；不使用 Release 索引回退。
 - 選取 Patch 連結，支援 `10.x.x` 及 `9.x.x/Pn` 等路徑形態。
 - 來源 code 為版本／Patch 路徑，詳情到對應 Wiki 頁。
-- 列表摘要有 `_list_summary`，詳情後補上版本、產品 release、codename 等列表資訊。
+- RSS 摘要標記 `_list_summary`；完整發布日期取自 Release 頁，Wiki 明確的編輯日期可以使舊版本修訂符合日期視窗。行銷文章提及舊版本不會重新發布該版本。原本只在索引出現的 metadata 可能不再提供。
 - 主要內容包括安全修正、一般修正、套件、安裝說明、原始碼倉庫及參考連結。
 - 公告以 Patch Release 為單位；它不等同逐個漏洞的完整 CVE 目錄。
 

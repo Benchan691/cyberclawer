@@ -1,5 +1,6 @@
 BASE_URL = "https://api.msrc.microsoft.com/cvrf/v3.0"
 SOURCE_URL = "https://msrc.microsoft.com/update-guide/vulnerability"
-LIST_URL = f"{BASE_URL}/Updates"
+UPDATES_URL = f"{BASE_URL}/Updates"
+LIST_URL = "https://api.msrc.microsoft.com/update-guide/rss"
 DETAIL_URL = f"{BASE_URL}/cvrf"
 DEFAULT_COLLECTION = "msrc"

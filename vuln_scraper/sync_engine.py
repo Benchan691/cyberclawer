@@ -16,8 +16,9 @@ from .sync_state import SnapshotCache, SyncStateStore, entry_data, restore_entry
 from .timestamps import modification_time, parse_timestamp, source_news_time, window_start
 
 logger = logging.getLogger(__name__)
-FEEDS = {"bleepingcomputer", "fortiguard", "govcert", "hkcert", "hpe", "splunk", "the_hacker_news", "wiz"}
-INDEXES = {"zimbra", "msrc"}
+FEEDS = {"bleepingcomputer", "fortiguard", "govcert", "hkcert", "hpe", "huawei_sa", "msrc",
+         "paloalto", "splunk", "the_hacker_news", "wiz", "zimbra"}
+INDEXES: set[str] = set()
 WINDOWS = {"nvd", "github_advisory", "cve"}
 HISTORY_TASKS = {"archive", "baseline", "index_audit"}
 
@@ -55,6 +56,14 @@ class SyncEngine:
 
     def schedule(self) -> None:
         self.discard_history_work()
+        discovery_version = getattr(self.provider, "sync_discovery_version", None)
+        if discovery_version and self.state.get("discovery_version") != discovery_version:
+            # A saved HTML/API page belongs to the previous discovery protocol.
+            # Existing article retries carry their own provenance and remain retryable.
+            for task in self.state["tasks"]:
+                self.runner.checkpoint.failed.pop(f"{self.provider.key}:LIST-{task['id']}", None)
+            self.state["tasks"] = []
+            self.state["discovery_version"] = discovery_version
         if not self.state.get("legacy_failures_imported"):
             self.import_failures()
             self.state["legacy_failures_imported"] = True

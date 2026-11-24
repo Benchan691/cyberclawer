@@ -1,0 +1,8 @@
+<rss><channel><title>MSRC Security Update Guide</title>
+<item Revision="1.1"><guid>CVE-2026-41108</guid><title>CVE-2026-41108 Windows issue</title>
+<link>https://msrc.microsoft.com/update-guide/vulnerability/CVE-2026-41108</link>
+<description>Updated acknowledgement</description><pubDate>Wed, 17 Jun 2026 07:00:00 GMT</pubDate></item>
+<item Revision="1.0"><guid>CVE-2026-50001</guid><title>CVE-2026-50001 Second issue</title>
+<link>https://msrc.microsoft.com/update-guide/vulnerability/CVE-2026-50001</link>
+<pubDate>Wed, 17 Jun 2026 06:00:00 GMT</pubDate></item>
+</channel></rss>

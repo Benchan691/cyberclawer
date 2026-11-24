@@ -6,7 +6,9 @@ def test_zimbra_provider_is_registered() -> None:
 
     assert "zimbra" in provider_keys()
     assert get_provider("zimbra").key == "zimbra"
-    assert provider.list_url(1) == "https://wiki.zimbra.com/wiki/Zimbra_Releases"
+    assert provider.list_url(1) == "https://blog.zimbra.com/feed/"
+    assert provider.catch_up_full_feed
+    assert not provider.stop_on_first_known
     assert provider.detail_url("ZIMBRA-10.1.20") == (
         "https://wiki.zimbra.com/wiki/Zimbra_Releases/10.1.20"
     )

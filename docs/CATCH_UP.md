@@ -51,8 +51,10 @@ stored; changing the scrape window does not delete historical data.
 | CVE | Delta arrival discovers candidates; publication/update dates determine eligibility. Old arrivals are not saved just because they appear in a new batch. |
 | BleepingComputer | Import current RSS entries by article publication time. The feed supplies the article summary and metadata in one request. |
 | FortiGuard, GOVCERT, HKCERT, HPE, Splunk, Wiz | Read the current RSS feed and verify article publication and edit dates. Articles with a recent publication or edit are eligible, including edits that leave the feed entry unchanged. |
-| Zimbra, MSRC | Read the index and check eligible candidates. MSRC's expanded child records and saved child snapshots pass the same date guard. |
-| AVD, CNVD, Huawei SA, Palo Alto, Qianxin | Refresh recent listings and stop after a whole page older than the window. Known old publication/edit dates skip detail requests. No rotating archive scan. |
+| Palo Alto, Huawei SA | Reconcile the current official RSS feed and fetch full advisory pages. Huawei's feed may be stale; report that limitation without an API-list fallback. |
+| MSRC | RSS identifies individual new/revised CVEs. Resolve their monthly CVRF documents through CVE-specific lookups and save only the matching CVEs. Reuse monthly responses within a run. |
+| Zimbra | Official blog RSS identifies linked Wiki releases. Fetch full release notes, retaining release-version IDs and actual release/edit dates. Marketing references to old releases do not republish them. |
+| AVD, CNVD, Qianxin | Refresh recent listings and stop after a whole page older than the window. Known old publication/edit dates skip detail requests. No rotating archive scan. |
 
 An older publication updated today is eligible. A changed title or summary with
 old source dates is not. When listing metadata cannot establish an edit date,
@@ -64,7 +66,7 @@ listing pages are not guaranteed to be discovered.
 ## Limits and retries
 
 * `--limit` defaults to 1,000 advisory checks per provider per invocation,
-  including unchanged records and expanded MSRC children.
+  including unchanged records. MSRC checks the individual CVEs named by RSS.
 * Date checks that require fetching an article count toward `--limit`, even when
   the final record is outside the window. Known old listings skipped without
   fetching details do not consume the allowance.

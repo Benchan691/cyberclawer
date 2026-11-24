@@ -1,4 +1,5 @@
 BASE_URL = "https://securitybulletin.huawei.com"
+LIST_URL = "https://www.huawei.com/en/rss-feeds/psirt/rss"
 SOURCE_URL = f"{BASE_URL}/enterprise/en/security-advisory"
 API_URL = f"{BASE_URL}/vdmsapi/services/vdmsapi/rest/v1/enterprise/advisories"
 DETAIL_URL = f"{BASE_URL}/enterprise/en/sa/detail"

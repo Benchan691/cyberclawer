@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urljoin
 
@@ -24,6 +24,7 @@ class ZimbraDetailRecord:
     title: str | None = None
     version: str | None = None
     release_date: str | None = None
+    updated_at: str | None = None
     security_fixes: list[str] = field(default_factory=list)
     fixed_issues: dict[str, list[str]] = field(default_factory=dict)
     packages: dict[str, str] = field(default_factory=dict)
@@ -53,6 +54,15 @@ def parse_detail_page(html: str) -> ZimbraDetailRecord:
 
     release_date = _iso_date(_first_match(DATE_RE, root.get_text(" ", strip=True)))
     version_match = VERSION_RE.search(title or "")
+    modified = soup.select_one("#footer-info-lastmod")
+    edited = re.search(r"last edited on (\d{1,2} \w+ \d{4}), at (\d{2}:\d{2})",
+                       modified.get_text(" ", strip=True) if modified else "", re.IGNORECASE)
+    updated_at = None
+    if edited:
+        try:
+            updated_at = datetime.strptime(f"{edited[1]} {edited[2]}", "%d %B %Y %H:%M").replace(tzinfo=UTC).isoformat()
+        except ValueError:
+            pass
 
     security_heading = _find_heading(headings, "security fixes")
     security_fixes = _table_cells_between(security_heading) if security_heading else []
@@ -75,6 +85,7 @@ def parse_detail_page(html: str) -> ZimbraDetailRecord:
         title=title,
         version=version_match.group(1) if version_match else None,
         release_date=release_date,
+        updated_at=updated_at,
         security_fixes=security_fixes,
         fixed_issues=fixed_issues,
         packages=packages,
@@ -192,9 +203,10 @@ def _first_match(pattern: re.Pattern[str], text: str) -> str | None:
 def _iso_date(value: str | None) -> str | None:
     if not value:
         return None
+    value = re.sub(r"\bSept\b", "Sep", value, flags=re.IGNORECASE)
     for format_string in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
         try:
             return datetime.strptime(value.strip(), format_string).date().isoformat()
         except ValueError:
             pass
-    return value.strip()
+    return None

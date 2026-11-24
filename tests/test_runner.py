@@ -529,7 +529,7 @@ def test_non_mongo_scrape_still_writes_json(tmp_path) -> None:
     assert "raw_tables" not in output["vulnerabilities"][0]["details"]["avd"]
 
 
-def test_msrc_monthly_detail_expands_to_cve_records(tmp_path) -> None:
+def test_msrc_rss_fetches_matching_cves_and_reuses_monthly_details(tmp_path) -> None:
     client = FakeMSRCClient()
     settings = ScraperSettings(
         data_dir=tmp_path,
@@ -545,7 +545,7 @@ def test_msrc_monthly_detail_expands_to_cve_records(tmp_path) -> None:
 
     assert identities(output["vulnerabilities"]) == ["msrc:2026-41108", "msrc:2026-50001"]
     assert output["result_count"] == 2
-    assert output["vulnerabilities"][0]["source"]["detail_url"].endswith("/2026-Jun")
+    assert output["vulnerabilities"][0]["source"]["detail_url"].endswith("/CVE-2026-41108")
     assert output["vulnerabilities"][0]["details"]["msrc"]["document_id"] == "2026-Jun"
     assert client.headers_seen == [
         {"Accept": "application/json"},
@@ -735,7 +735,7 @@ def test_checkpoint_loads_zero_byte_file_and_rejects_malformed_json(tmp_path) ->
     checkpoint_file.write_text("{broken", encoding="utf-8")
     with pytest.raises(json.JSONDecodeError):
         Checkpoint.load(checkpoint_file)
-def test_huawei_sa_json_provider_converts_api_records_and_skips_empty_cves(tmp_path) -> None:
+def test_huawei_sa_rss_fetches_full_details_and_keeps_stable_identifiers(tmp_path) -> None:
     client = FakeHuaweiSAClient()
     settings = ScraperSettings(
         data_dir=tmp_path,
@@ -754,8 +754,8 @@ def test_huawei_sa_json_provider_converts_api_records_and_skips_empty_cves(tmp_p
         "huawei_sa:huawei-sa-LKEiSHPVtLPEDF-60937345",
         "huawei_sa:huawei-sa-DViSHDCP-42041136",
     ]
-    assert client.post_pages_seen == [1]
-    assert client.detail_urls_seen == []
+    assert len(client.feed_urls_seen) == 1
+    assert len(client.detail_urls_seen) == 2
 
     with_cve, without_cve = output["vulnerabilities"]
     assert with_cve["type"] == "huawei_sa"
@@ -769,7 +769,7 @@ def test_huawei_sa_json_provider_converts_api_records_and_skips_empty_cves(tmp_p
 
     assert without_cve["cve_code"] is None
     assert without_cve["details"]["huawei_sa"]["cve_ids"] == []
-def test_paloalto_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
+def test_paloalto_rss_mongo_sync_continues_after_known_records(tmp_path) -> None:
     client = FakePaloAltoClient()
     collection = FakeMongoCollection(
         {
@@ -800,15 +800,16 @@ def test_paloalto_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
         )._run_with_client(client)
     )
 
-    assert identities(output["vulnerabilities"]) == ["paloalto:CVE-2026-0265", "paloalto:PAN-SA-2026-0007"]
+    assert identities(output["vulnerabilities"]) == ["paloalto:CVE-2026-0265", "paloalto:PAN-SA-2026-0007", "paloalto:CVE-2026-0262"]
     assert output["vulnerabilities"][0]["cve_code"] == "2026-0265"
-    assert output["mongo_sync"]["inserted"] == 2
+    assert output["mongo_sync"]["inserted"] == 3
     assert set(collection.documents) == {
         "paloalto:CVE-2026-0265",
         "paloalto:PAN-SA-2026-0007",
         "paloalto:CVE-2026-0263",
+        "paloalto:CVE-2026-0262",
     }
-    assert client.detail_ids_seen == ["CVE-2026-0265", "PAN-SA-2026-0007"]
+    assert client.detail_ids_seen == ["CVE-2026-0265", "PAN-SA-2026-0007", "CVE-2026-0262"]
 def test_splunk_mongo_sync_stops_at_first_known_record(tmp_path) -> None:
     client = FakeSplunkClient()
     collection = FakeMongoCollection(
@@ -1027,65 +1028,23 @@ def test_qianxin_json_provider_preserves_nested_html_tables(tmp_path) -> None:
     assert "vulnerability_information" in detail["description"]
 class FakeHuaweiSAClient:
     def __init__(self) -> None:
-        self.post_pages_seen: list[int] = []
-        self.detail_urls_seen: list[str] = []
+        self.feed_urls_seen = []
+        self.detail_urls_seen = []
 
-    async def post_json(self, url: str, *, json=None, headers=None):
-        parsed = urlparse(url)
-        self.post_pages_seen.append(int(parse_qs(parsed.query)["pageIndex"][0]))
-        return FakeJSONResult(
-            {
-                "status": "200",
-                "page": {"totalPages": 1, "total": 2},
-                "data": [
-                    {
-                        "allPath": None,
-                        "vul": [
-                            {
-                                "hwPsirtId": "HWPSIRT-2026-27380",
-                                "cveId": "CVE-2026-43284",
-                            }
-                        ],
-                        "isAllPermission": None,
-                        "lang": "en",
-                        "permission": False,
-                        "publishDate": "2026-06-01",
-                        "sasnId": None,
-                        "sasnNo": "huawei-sa-LKEiSHPVtLPEDF-60937345",
-                        "sasnVersion": "1.9",
-                        "severity": "High",
-                        "summary": "Kernel issue",
-                        "title": "Linux Kernel ESP Vulnerability",
-                        "type": None,
-                    },
-                    {
-                        "allPath": None,
-                        "vul": [
-                            {
-                                "hwPsirtId": "HWPSIRT-2026-29427",
-                                "cveId": "",
-                            }
-                        ],
-                        "isAllPermission": None,
-                        "lang": "en",
-                        "permission": False,
-                        "publishDate": "2026-05-28",
-                        "sasnId": None,
-                        "sasnNo": "huawei-sa-DViSHDCP-42041136",
-                        "sasnVersion": "1.3",
-                        "severity": "High",
-                        "summary": "DoS issue",
-                        "title": "DoS Vulnerability in Some Huawei Data Communication Products",
-                        "type": None,
-                    },
-                ],
-            },
-            url,
-        )
-
-    async def get_json(self, url: str, *, headers=None):
+    async def get_html(self, url):
+        from vuln_scraper.scrapers.huawei_sa.config import LIST_URL
+        folder = Path(__file__).parent / "scrapers" / "huawei_sa" / "fixtures"
+        if url == LIST_URL:
+            self.feed_urls_seen.append(url)
+            return FetchResult(html=(folder / "list.xml").read_text(), status_code=200, url=url)
         self.detail_urls_seen.append(url)
-        return FakeJSONResult({}, url)
+        html = (folder / "detail.html").read_text()
+        if "DViSHDCP" in url:
+            html = html.replace("CVE-2026-43284", "a separate denial of service issue")
+            html = html.replace("2026-06-01", "2026-05-28")
+        return FetchResult(html=html, status_code=200, url=url)
+
+
 class FakeHKCERTClient:
     def __init__(self) -> None:
         self.list_urls_seen: list[str] = []
@@ -1162,15 +1121,22 @@ class FakeCVEClient:
 class FakeMSRCClient:
     def __init__(self) -> None:
         self.headers_seen: list[dict] = []
+        self.urls_seen = []
+
+    async def get_html(self, url):
+        from vuln_scraper.scrapers.msrc.config import LIST_URL
+        assert url == LIST_URL
+        self.urls_seen.append(url)
+        html = (Path(__file__).parent / "scrapers" / "msrc" / "fixtures" / "list.xml").read_text()
+        return FetchResult(html=html, status_code=200, url=url)
 
     async def get_json(self, url: str, *, headers=None):
+        self.urls_seen.append(url)
         self.headers_seen.append(dict(headers or {}))
-        fixture = "list.json" if "/Updates" in url else "detail.json"
-        payload = json.loads(
-            (Path(__file__).parent / "scrapers" / "msrc" / "fixtures" / fixture).read_text(
-                encoding="utf-8"
-            )
-        )
+        fixture = "list.json" if "/Updates/" in url else "detail.json"
+        payload = json.loads((Path(__file__).parent / "scrapers" / "msrc" / "fixtures" / fixture).read_text())
+        if fixture == "list.json":
+            payload["value"] = payload["value"][:1]
         return FakeJSONResult(payload, url)
 
 
@@ -1190,8 +1156,12 @@ class FakePaloAltoClient:
 
     async def get_html(self, url: str) -> FetchResult:
         parsed = urlparse(url)
-        if parsed.path == "/":
-            return FetchResult(html=paloalto_list_html(), status_code=200, url=url)
+        if parsed.path == "/rss.xml":
+            from vuln_scraper.scrapers.paloalto.parsers.list import parse_advisory_list
+            from xml.sax.saxutils import escape
+            entries = parse_advisory_list(paloalto_list_html(), page=1).entries
+            items = "".join(f"<item><title>{escape(e.title)}</title><link>https://security.paloaltonetworks.com/{e.identity.code}</link><pubDate>Wed, 13 May 2026 16:00:00 GMT</pubDate></item>" for e in entries)
+            return FetchResult(html=f"<rss><channel>{items}</channel></rss>", status_code=200, url=url)
 
         code = parsed.path.strip("/")
         self.detail_ids_seen.append(code)
